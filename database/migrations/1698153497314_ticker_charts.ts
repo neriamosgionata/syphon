@@ -33,11 +33,10 @@ export default class extends BaseSchema {
         "3mo"
       ]).defaultTo("1d");
 
-      table.timestamp("created_at", { useTz: true });
-      table.timestamp("updated_at", { useTz: true });
+      table.timestamp("created_at", {useTz: true});
+      table.timestamp("updated_at", {useTz: true});
 
-      table.index(["date"], "date_idx");
-      table.index(["ticker"], "ticker_idx");
+      table.index(["ticker", "date"], "ticker_date_idx");
     });
   }
 

@@ -23,6 +23,7 @@
   ],
   "providers": [
     "./providers/AppProvider",
+    "./providers/ProfilerProvider",
     "./providers/ChartsProvider",
     "./providers/JobProvider",
     "./providers/LoggerProvider",

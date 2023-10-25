@@ -1,0 +1,10 @@
+export enum ProfileQuoteTypeEnum {
+  CRYPTOCURRENCY = "CRYPTOCURRENCY",
+  CURRENCY = "CURRENCY",
+  ETF = "ETF",
+  EQUITY = "EQUITY",
+  FUTURE = "FUTURE",
+  INDEX = "INDEX",
+  OPTION = "OPTION",
+  MUTUALFUND = "MUTUALFUND",
+}

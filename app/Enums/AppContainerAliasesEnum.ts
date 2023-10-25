@@ -4,4 +4,5 @@ export enum AppContainerAliasesEnum {
   Mongo = "Providers/MongoDB",
   Jobs = "Providers/Jobs",
   Charts = "Providers/Charts",
+  Profiler = "Providers/Profiler",
 }
