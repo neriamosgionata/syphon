@@ -1,0 +1,68 @@
+{
+  "typescript": true,
+  "commands": [
+    "./commands",
+    "@adonisjs/core/build/commands/index.js",
+    "@adonisjs/repl/build/commands",
+    "@adonisjs/lucid/build/commands",
+    "@adonisjs/mail/build/commands",
+    "@adonisjs/bouncer/build/commands"
+  ],
+  "exceptionHandlerNamespace": "App/Exceptions/Handler",
+  "aliases": {
+    "App": "app",
+    "Config": "config",
+    "Database": "database",
+    "Contracts": "contracts"
+  },
+  "preloads": [
+    "./start/routes",
+    "./start/kernel",
+    "./start/bouncer",
+    "./start/limiter"
+  ],
+  "providers": [
+    "./providers/AppProvider",
+    "./providers/ChartsProvider",
+    "./providers/JobProvider",
+    "./providers/LoggerProvider",
+    "./providers/FinanceProvider",
+    "./providers/MongoProvider",
+    "@adonisjs/core",
+    "@adonisjs/lucid",
+    "@adonisjs/auth",
+    "@adonisjs/session",
+    "@adonisjs/mail",
+    "@adonisjs/view",
+    "@adonisjs/redis",
+    "@adonisjs/shield",
+    "@adonisjs/bouncer",
+    "@adonisjs/i18n",
+    "@adonisjs/limiter",
+    "@adonisjs/route-model-binding/build/providers/RmbProvider"
+  ],
+  "aceProviders": [
+    "@adonisjs/repl"
+  ],
+  "tests": {
+    "suites": [
+      {
+        "name": "functional",
+        "files": [
+          "tests/functional/**/*.spec(.ts|.js)"
+        ],
+        "timeout": 60000
+      }
+    ]
+  },
+  "testProviders": [
+    "@japa/preset-adonis/TestsProvider"
+  ],
+  "metaFiles": [
+    {
+      "pattern": "resources/views/**/*.edge",
+      "reloadServer": false
+    },
+    "resources/lang/**/*.(json|yaml)"
+  ]
+}
