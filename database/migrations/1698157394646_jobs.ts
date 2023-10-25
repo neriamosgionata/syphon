@@ -18,11 +18,14 @@ export default class extends BaseSchema {
       table.text("error").nullable();
       table.text("error_stack").nullable();
 
+      table.dateTime("started_at").nullable();
+      table.dateTime("finished_at").nullable();
+
       /**
        * Uses timestamptz for PostgreSQL and DATETIME2 for MSSQL
        */
-      table.timestamp("created_at", { useTz: true });
-      table.timestamp("updated_at", { useTz: true });
+      table.timestamp("created_at", {useTz: true});
+      table.timestamp("updated_at", {useTz: true});
 
     });
   }

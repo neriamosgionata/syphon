@@ -1,9 +1,9 @@
-import { DateTime } from "luxon";
-import { BaseModel, column } from "@ioc:Adonis/Lucid/Orm";
-import { JobStatusEnum } from "App/Enums/JobStatusEnum";
+import {DateTime} from "luxon";
+import {BaseModel, column} from "@ioc:Adonis/Lucid/Orm";
+import {JobStatusEnum} from "App/Enums/JobStatusEnum";
 
 export default class Job extends BaseModel {
-  @column({ isPrimary: true })
+  @column({isPrimary: true})
   public id: string;
 
   @column()
@@ -24,9 +24,15 @@ export default class Job extends BaseModel {
   @column()
   public errorStack: string | null;
 
-  @column.dateTime({ autoCreate: true })
+  @column.dateTime()
+  public startedAt: DateTime | null;
+
+  @column.dateTime()
+  public finishedAt: DateTime | null;
+
+  @column.dateTime({autoCreate: true})
   public createdAt: DateTime;
 
-  @column.dateTime({ autoCreate: true, autoUpdate: true })
+  @column.dateTime({autoCreate: true, autoUpdate: true})
   public updatedAt: DateTime;
 }

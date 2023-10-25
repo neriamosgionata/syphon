@@ -1,10 +1,12 @@
-import { JobStatusEnum } from "App/Enums/JobStatusEnum";
+import {JobStatusEnum} from "App/Enums/JobStatusEnum";
 import fs from "fs";
 import Job from "App/Models/Job";
 import Application from "@ioc:Adonis/Core/Application";
 import Logger from "@ioc:Providers/Logger";
-import { Worker } from "worker_threads";
+import {Worker} from "worker_threads";
 import path from "path";
+import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
+import Config from "@ioc:Adonis/Core/Config";
 
 export interface JobContract {
   dispatch<T extends JobParameters>(
@@ -40,6 +42,19 @@ export default class Jobs implements JobContract {
       await Logger.info("Job completed", message.id, message.tags);
     }
 
+    let isStarted = false;
+    let isFinished = false;
+
+    if (message.status === JobStatusEnum.RUNNING) {
+      isStarted = true;
+    }
+
+    if (message.status === JobStatusEnum.COMPLETED || message.status === JobStatusEnum.FAILED) {
+      isFinished = true;
+    }
+
+    const defaultAppDateTimeFormat = Config.get("app.dateFormats.default");
+
     return Job
       .query()
       .where("id", message.id)
@@ -47,7 +62,9 @@ export default class Jobs implements JobContract {
       .update({
         status: message.status,
         error: message.error?.message,
-        errorStack: message.error?.stack
+        errorStack: message.error?.stack,
+        startedAt: isStarted ? toLuxon(new Date(), defaultAppDateTimeFormat) : null,
+        finishedAt: isFinished ? toLuxon(new Date(), defaultAppDateTimeFormat) : null,
       })
       .exec();
   }
@@ -57,7 +74,7 @@ export default class Jobs implements JobContract {
   }
 
   private defaultErrorCallback(error: Error, id: string, tags: string[] = []) {
-    return this.updateJobStatus({ status: JobStatusEnum.FAILED, id, tags, error });
+    return this.updateJobStatus({status: JobStatusEnum.FAILED, id, tags, error});
   }
 
   private getJobPath(jobName: string) {
