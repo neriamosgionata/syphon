@@ -27,6 +27,26 @@
       "aliases": [],
       "flags": []
     },
+    "import:profile_data": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/ImportProfileData",
+      "commandName": "import:profile_data",
+      "description": "",
+      "args": [
+        {
+          "type": "string",
+          "propertyName": "ticker",
+          "name": "ticker",
+          "required": true,
+          "description": "Ticker"
+        }
+      ],
+      "aliases": [],
+      "flags": []
+    },
     "test:ticker_chart": {
       "settings": {
         "loadApp": true,
