@@ -49,7 +49,7 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
     }
 
     let totalElement = 266688348;
-    let perChunk = 1000 * 8;
+    let perChunk = 10000 * 8;
 
     let totalBatches = Math.ceil(totalElement / perChunk);
 
@@ -72,6 +72,14 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
       5: [],
       6: [],
       7: [],
+      8: [],
+      9: [],
+      10: [],
+      11: [],
+      12: [],
+      13: [],
+      14: [],
+      15: [],
     };
 
     const stream = fs.createReadStream(filePath)
@@ -84,15 +92,20 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
       }
     );
 
+    let currentIndex = 0;
+
     csvStream
       .on("data", (row: Row) => {
-        let jobIndex = Object
-          .entries(currentRows)
-          .filter((rows) => rows[1].length < perChunk)
-          .shift();
+        if (currentIndex === 15) {
+          currentIndex = 0;
+        }
 
-        if (jobIndex !== undefined) {
-          currentRows[jobIndex[0]].push(row);
+        let jobIndex = currentIndex;
+
+        currentIndex++;
+
+        if (currentRows[15].length !== perChunk) {
+          currentRows[jobIndex].push(row);
           return;
         }
 
@@ -102,14 +115,14 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
 
         const promisesToWaitFor: (() => Promise<void>)[] = [];
 
-        for (let entry of Object.entries(currentRows)) {
+        for (const rowsArray of Object.values(currentRows)) {
           promisesToWaitFor.push(
             () => new Promise((resP) => {
                 Jobs
                   .runWithoutDispatch<AnalyzeDomainsCsvJobParameters>(
                     "AnalyzeDomainsCsv",
                     {
-                      rows: entry[1]
+                      rows: rowsArray
                     }
                   )
                   .finally(() => {

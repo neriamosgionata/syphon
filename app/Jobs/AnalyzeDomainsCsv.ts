@@ -76,18 +76,23 @@ const appendCsvLines = (rows: Row[]) => {
   });
 }
 
-const analyzeCsvRows = async (rows: Row[]) => {
+const analyzeCsvRows = (rows: Row[]) => {
   let toAppend: Row[] = [];
 
   for (let row of rows) {
+    const row1Lower = row['1'].toLowerCase();
+    const row2LowerSplit1 = row1Lower.split(" ").join("");
+    const row2LowerSplit2 = row1Lower.split(" ").join("_");
+    const row2LowerSplit3 = row1Lower.split(" ").join("-");
 
     for (const society of SOCIETIES) {
+      const societyLower = society.toLowerCase();
       const excludes: string[] = EXCLUDE[society];
 
       if (excludes.length > 0) {
         let found = false;
         for (const exclude of excludes) {
-          if (fuzz.token_set_ratio(row['1'], exclude.toLowerCase()) > 90) {
+          if (fuzz.token_set_ratio(row1Lower, exclude.toLowerCase()) > 85) {
             found = true;
             break;
           }
@@ -99,12 +104,22 @@ const analyzeCsvRows = async (rows: Row[]) => {
       }
 
       if (
-        fuzz.token_set_ratio(row['1'], society.toLowerCase()) > 85 ||
-        fuzz.token_set_ratio(row['1'].split(" ").join(""), society.toLowerCase()) > 85 ||
-        fuzz.token_set_ratio(row['1'].split(" ").join("_"), society.toLowerCase()) > 85 ||
-        fuzz.token_set_ratio(row['1'].split(" ").join("-"), society.toLowerCase()) > 85
+        fuzz.token_set_ratio(row1Lower, societyLower) > 85 ||
+        fuzz.token_set_ratio(row2LowerSplit1, societyLower) > 85 ||
+        fuzz.token_set_ratio(row2LowerSplit2, societyLower) > 85 ||
+        fuzz.token_set_ratio(row2LowerSplit3, societyLower) > 85
       ) {
-        toAppend.push({...row, '9': society});
+        toAppend.push({
+          '1': row['1'] || "",
+          '2': row['2'] || "",
+          '3': row['3'] || "",
+          '4': row['4'] || "",
+          '5': row['5'] || "",
+          '6': row['6'] || "",
+          '7': row['7'] || "",
+          '8': row['8'] || "",
+          '9': society
+        });
         break;
       }
     }
@@ -113,9 +128,9 @@ const analyzeCsvRows = async (rows: Row[]) => {
   appendCsvLines(toAppend);
 }
 
-const handler = async () => {
+const handler = () => {
   const {rows} = loadData<AnalyzeDomainsCsvJobParameters>(["rows"]);
-  await analyzeCsvRows(rows);
+  analyzeCsvRows(rows);
 };
 
 export interface AnalyzeDomainsCsvJobParameters {
