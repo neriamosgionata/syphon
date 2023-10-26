@@ -52,6 +52,7 @@
     "uuid": "^9.0.1",
     "yahoo-finance2": "^2.8.1",
     "youch": "^3.3.2",
-    "youch-terminal": "^2.2.3"
+    "youch-terminal": "^2.2.3",
+    "glob-parent": "^6.0.2"
   }
 }
