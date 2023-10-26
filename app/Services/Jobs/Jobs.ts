@@ -84,7 +84,7 @@ export default class Jobs implements JobContract {
   private jobIsRegistered(jobName: string): boolean {
     try {
       const jobPath = this.getJobPath(jobName);
-      return fs.existsSync(jobPath + ".js") || !fs.existsSync(jobPath + ".ts");
+      return fs.existsSync(jobPath + ".js") || fs.existsSync(jobPath + ".ts");
     } catch (e) {
       return false;
     }
