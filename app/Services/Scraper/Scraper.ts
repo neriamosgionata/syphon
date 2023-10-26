@@ -285,7 +285,7 @@ export default class Scraper implements ScraperContract {
   async registerError(error: Error | any, key: string): Promise<void> {
     this.errors.push(error);
 
-    await Logger.channel(this.logChannel).error(
+    Logger.channel(this.logChannel).error(
       "Key: " + key + ", Error occurred: " + error.message,
       error?.stack?.split('\n')?.shift() || "Error stack is empty",
       error?.response?.data || error?.data || "Empty data",
@@ -301,7 +301,7 @@ export default class Scraper implements ScraperContract {
   }
 
   async writeTableLog(table: any[]): Promise<void> {
-    await Logger.channel(this.logChannel).table(table);
+    Logger.channel(this.logChannel).table(table);
 
     if (this.writeOnConsole) {
       console.table(table);
@@ -309,7 +309,7 @@ export default class Scraper implements ScraperContract {
   }
 
   async writeLog(level: string, message: string, ...values: unknown[]): Promise<void> {
-    await Logger.channel(this.logChannel)[level.trim()](message, ...values);
+    Logger.channel(this.logChannel)[level.trim()](message, ...values);
 
     if (this.writeOnConsole) {
       console[level](message, ...values);

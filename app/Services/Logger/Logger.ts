@@ -13,17 +13,17 @@ export interface LoggerContract {
 
   getCurrentChannelName(): string;
 
-  debug(message: string, ...values: unknown[]): Promise<true | Error>;
+  debug(message: string, ...values: unknown[]): true | Error;
 
-  info(message: string, ...values: unknown[]): Promise<true | Error>;
+  info(message: string, ...values: unknown[]): true | Error;
 
-  warn(message: string, ...values: unknown[]): Promise<true | Error>;
+  warn(message: string, ...values: unknown[]): true | Error;
 
-  error(message: string, ...values: unknown[]): Promise<true | Error>;
+  error(message: string, ...values: unknown[]): true | Error;
 
-  fatal(message: string, ...values: unknown[]): Promise<true | Error>;
+  fatal(message: string, ...values: unknown[]): true | Error;
 
-  table(table: any[]): Promise<true | Error>;
+  table(table: any[]): true | Error;
 }
 
 export default class Logger implements LoggerContract {
@@ -77,8 +77,7 @@ export default class Logger implements LoggerContract {
     if (!this.config) {
       this.config = Config.get("app.logger.log_channels.default");
       this.channelName = "default";
-      this.warn("Log channel used doesn't exist, reverting back to default").then(() => {
-      });
+      this.warn("Log channel used doesn't exist, reverting back to default");
     }
 
     return this;
@@ -88,34 +87,34 @@ export default class Logger implements LoggerContract {
     return this.channelName;
   }
 
-  async debug(message: string, ...values: unknown[]): Promise<true | Error> {
+  debug(message: string, ...values: unknown[]): true | Error {
     const logLine = this.attachParametersToMessage(message, values);
-    return await this.writeLine(LogLevelEnum.DEBUG, logLine);
+    return this.writeLine(LogLevelEnum.DEBUG, logLine);
   }
 
-  async info(message: string, ...values: unknown[]): Promise<true | Error> {
+  info(message: string, ...values: unknown[]): true | Error {
     const logLine = this.attachParametersToMessage(message, values);
-    return await this.writeLine(LogLevelEnum.INFO, logLine);
+    return this.writeLine(LogLevelEnum.INFO, logLine);
   }
 
-  async warn(message: string, ...values: unknown[]): Promise<true | Error> {
+  warn(message: string, ...values: unknown[]): true | Error {
     const logLine = this.attachParametersToMessage(message, values);
-    return await this.writeLine(LogLevelEnum.WARN, logLine);
+    return this.writeLine(LogLevelEnum.WARN, logLine);
   }
 
-  async error(message: string, ...values: unknown[]): Promise<true | Error> {
+  error(message: string, ...values: unknown[]): true | Error {
     const logLine = this.attachParametersToMessage(message, values);
-    return await this.writeLine(LogLevelEnum.ERROR, logLine);
+    return this.writeLine(LogLevelEnum.ERROR, logLine);
   }
 
-  async fatal(message: string, ...values: unknown[]): Promise<true | Error> {
+  fatal(message: string, ...values: unknown[]): true | Error {
     const logLine = this.attachParametersToMessage(message, values);
-    return await this.writeLine(LogLevelEnum.FATAL, logLine);
+    return this.writeLine(LogLevelEnum.FATAL, logLine);
   }
 
-  async table(table: any[]): Promise<true | Error> {
+  table(table: any[]): true | Error {
     const logLine = this.createTableLog(table);
-    return await this.writeLine(LogLevelEnum.INFO, logLine);
+    return this.writeLine(LogLevelEnum.INFO, logLine);
   }
 
   private getLogLineAnnotation(): string {
@@ -124,7 +123,7 @@ export default class Logger implements LoggerContract {
   }
 
   private getLogLine(level: string, logLine: string): string {
-    return this.getLogLineAnnotation() + "[" + level.toUpperCase() + "] " + logLine + "\t\r";
+    return this.getLogLineAnnotation() + "[" + level.toUpperCase() + "] " + logLine + "\t\n";
   }
 
   private getLogFileName(logFileLevel: LogLevelEnum) {
@@ -145,11 +144,9 @@ export default class Logger implements LoggerContract {
     return this.logFolder + "/" + logFileName + "-" + this.LOG_LEVEL_TO_FILE[logFileLevel] + ".log";
   }
 
-  private async saveLog(logFileName: string, logLine: string): Promise<true | Error> {
+  private saveLog(logFileName: string, logLine: string): true | Error {
     try {
-      const logStream = fs.createWriteStream(logFileName, {flags: "a"});
-      logStream.write(logLine);
-      logStream.end();
+      fs.appendFileSync(logFileName, logLine);
       return true;
     } catch (e) {
       return e;
@@ -164,13 +161,13 @@ export default class Logger implements LoggerContract {
     return moment().format("DD/MM/YYYY HH:mm:ss");
   }
 
-  private async writeLine(level: LogLevelEnum, logLine: string): Promise<true | Error> {
+  private writeLine(level: LogLevelEnum, logLine: string): true | Error {
     const logFileName = this.getLogFileName(level);
     const logLineWithAnnotation = this.getLogLine(level, logLine);
     if (this.printToConsole) {
       console.log(logLineWithAnnotation);
     }
-    return await this.saveLog(logFileName, logLineWithAnnotation);
+    return this.saveLog(logFileName, logLineWithAnnotation);
   }
 
   private attachParametersToMessage(message: string, values: unknown[]): string {

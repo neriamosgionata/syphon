@@ -44,16 +44,17 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
     }
 
     if (!fs.existsSync(filePath)) {
-      await Logger.error("File not found");
+      Logger.error("File not found");
       return 1;
     }
 
     let totalElement = 266688348;
-    let perChunk = 10000 * 8;
+    let singleRows = 50000;
+    let perChunk = singleRows * 16;
 
     let totalBatches = Math.ceil(totalElement / perChunk);
 
-    await Logger.info(`Total batches: ${totalBatches}`);
+    Logger.info(`Total batches: ${totalBatches}`);
 
     ProgressBar.addBar(totalBatches, "Analyzing CSV, batches", "cyan");
 
@@ -63,24 +64,24 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
       resolveCsvCommand = res;
     });
 
-    let currentRows: { [p: number]: Row[] } = {
-      0: [],
-      1: [],
-      2: [],
-      3: [],
-      4: [],
-      5: [],
-      6: [],
-      7: [],
-      8: [],
-      9: [],
-      10: [],
-      11: [],
-      12: [],
-      13: [],
-      14: [],
-      15: [],
-    };
+    let currentRows: Row[][] = [
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+    ]
 
     const stream = fs.createReadStream(filePath)
 
@@ -93,10 +94,11 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
     );
 
     let currentIndex = 0;
+    let added = 0;
 
     csvStream
       .on("data", (row: Row) => {
-        if (currentIndex === 15) {
+        if (currentIndex === 16) {
           currentIndex = 0;
         }
 
@@ -104,18 +106,21 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
 
         currentIndex++;
 
-        if (currentRows[15].length !== perChunk) {
+        if (added < perChunk) {
           currentRows[jobIndex].push(row);
+          added++;
           return;
         }
 
-        Logger.info("Executing batch, pausing stream");
+        Logger.info("Executing batch, pausing stream, added " + added + " rows");
+
+        added = 0;
 
         csvStream.pause();
 
         const promisesToWaitFor: (() => Promise<void>)[] = [];
 
-        for (const rowsArray of Object.values(currentRows)) {
+        for (const rowsArray of currentRows) {
           promisesToWaitFor.push(
             () => new Promise((resP) => {
                 Jobs
@@ -136,26 +141,26 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
         Promise
           .all(promisesToWaitFor.map((fn) => fn()))
           .finally(async () => {
-            currentRows = {
-              0: [],
-              1: [],
-              2: [],
-              3: [],
-              4: [],
-              5: [],
-              6: [],
-              7: [],
-              8: [],
-              9: [],
-              10: [],
-              11: [],
-              12: [],
-              13: [],
-              14: [],
-              15: [],
-            }
+            currentRows = [
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+            ];
 
-            await Logger.info("Batch finished analysing, resuming stream");
+            Logger.info("Batch finished analysing, resuming stream");
 
             ProgressBar.next();
 
@@ -165,22 +170,21 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
       .on("end", async () => {
 
         if (
-          Object
-            .values(currentRows)
+          currentRows
             .filter((rows) => rows.length > 0)
             .length === 0
         ) {
           const promisesToWaitFor: (() => Promise<void>)[] = [];
 
           let i = 0;
-          for (let entry of Object.entries(currentRows).filter((rows) => rows[1].length > 0)) {
+          for (let entry of currentRows.filter((rows) => rows.length > 0)) {
             promisesToWaitFor.push(
               () => new Promise((resP) => {
                   Jobs
                     .runWithoutDispatch<AnalyzeDomainsCsvJobParameters>(
                       "AnalyzeDomainsCsv",
                       {
-                        rows: entry[1]
+                        rows: entry
                       },
                       [],
                       undefined,
@@ -196,7 +200,7 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
             i++;
           }
 
-          await Logger.info("Executing last batch");
+          Logger.info("Executing last batch");
 
           await Promise.all(promisesToWaitFor.map((fn) => fn()));
 

@@ -38,33 +38,42 @@ export interface JobMessage {
   id: string;
   tags: string[];
   error?: Error;
+  log?: string;
+  logLevel?: string;
 }
 
 export default class Jobs implements JobContract {
 
-  private async updateJobStatus(message: JobMessage) {
-    if (message.status === JobStatusEnum.FAILED) {
-      await Logger.error("Job failed", message.id, message.tags, message.error?.name, message.error?.message);
-    }
-
-    if (message.status === JobStatusEnum.COMPLETED) {
-      await Logger.info("Job completed", message.id, message.tags);
+  private async catchJobMessage(message: JobMessage) {
+    if (message.status === JobStatusEnum.LOGGING) {
+      if (message.logLevel === "error" || message.error) {
+        Logger.error("Error occurred in Job Id", message.id, message.tags, message.error?.name, message.error?.message, message.error?.stack);
+      } else {
+        Logger[message.logLevel || "info"](message.log);
+      }
+      return;
     }
 
     let isStarted = false;
     let isFinished = false;
 
+    if (message.status === JobStatusEnum.FAILED) {
+      isFinished = true;
+      Logger.error("Job failed", message.id, message.tags, message.error?.name, message.error?.message);
+    }
+
+    if (message.status === JobStatusEnum.COMPLETED) {
+      isFinished = true;
+      Logger.info("Job completed", message.id, message.tags);
+    }
+
     if (message.status === JobStatusEnum.RUNNING) {
       isStarted = true;
     }
 
-    if (message.status === JobStatusEnum.COMPLETED || message.status === JobStatusEnum.FAILED) {
-      isFinished = true;
-    }
-
     const defaultAppDateTimeFormat = Config.get("app.date_formats.default");
 
-    return Job
+    await Job
       .query()
       .where("id", message.id)
       .where("tags", message.tags.join(","))
@@ -79,11 +88,11 @@ export default class Jobs implements JobContract {
   }
 
   private defaultCallback(message: JobMessage) {
-    return this.updateJobStatus(message);
+    return this.catchJobMessage(message);
   }
 
   private defaultErrorCallback(error: Error, id: string, tags: string[] = []) {
-    return this.updateJobStatus({status: JobStatusEnum.FAILED, id, tags, error});
+    return this.catchJobMessage({status: JobStatusEnum.FAILED, id, tags, error});
   }
 
   private getJobPath(jobName: string) {
@@ -95,7 +104,7 @@ export default class Jobs implements JobContract {
       const jobPath = this.getJobPath(jobName);
       return fs.existsSync(jobPath + ".js") || fs.existsSync(jobPath + ".ts");
     } catch (e) {
-      await Logger.error(e.message);
+      Logger.error(e.message, e.stack);
       return false;
     }
   }
@@ -112,7 +121,7 @@ export default class Jobs implements JobContract {
       throw new Error("Job not registered");
     }
 
-    await Logger.info("Dispatching job on queue", jobName, tags);
+    Logger.info("Dispatching job on queue", jobName, tags);
 
     const id: string = require("uuid").v4();
 
@@ -190,7 +199,7 @@ export default class Jobs implements JobContract {
   }
 
   async waitUntilDone(obj: { id: string, tags: string[] }): Promise<JobStatusEnum> {
-    await Logger.info("Waiting for job to finish", obj.id);
+    Logger.info("Waiting for job to finish", obj.id);
 
     let foundStatus = 0;
 
@@ -210,7 +219,7 @@ export default class Jobs implements JobContract {
       }
     }
 
-    await Logger.info("Job finished", obj.id);
+    Logger.info("Job finished", obj.id);
 
     return foundStatus;
   }
@@ -228,7 +237,7 @@ export default class Jobs implements JobContract {
       throw new Error("Job not registered");
     }
 
-    await Logger.info("Running job", jobName, tags);
+    Logger.info("Running job", jobName, tags, id);
 
     let resolver: (value: unknown) => void;
 
@@ -274,7 +283,7 @@ export default class Jobs implements JobContract {
 
     await promise;
 
-    await Logger.info("Job finished", actualId, tags);
+    Logger.info("Job finished", actualId, tags);
 
     return {
       id: actualId,

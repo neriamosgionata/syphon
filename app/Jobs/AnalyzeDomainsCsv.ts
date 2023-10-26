@@ -1,9 +1,8 @@
-import {loadData, runJob} from "App/Services/Jobs/JobHelpers";
+import {loadData, logMessage, runJob} from "App/Services/Jobs/JobHelpers";
 import fs from "fs";
 import fuzz from "fuzzball";
 import Config from "@ioc:Adonis/Core/Config";
 import path from "path";
-import Logger from "@ioc:Providers/Logger";
 
 const EXCLUDE = {
   "Campari": [],
@@ -71,9 +70,10 @@ const appendCsvLines = (rows: Row[]) => {
   const stream = fs.createWriteStream(filePath, {flags: 'a'})
   stream.write(rowsToString(rows), (err) => {
     if (err) {
-      Logger.error(err.message, err.stack);
+      logMessage(err.message, "error", err);
     }
   });
+  stream.end();
 }
 
 const analyzeCsvRows = (rows: Row[]) => {
