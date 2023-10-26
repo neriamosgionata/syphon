@@ -51,17 +51,39 @@ const createProfile = async (ticker: string, profile: Quote) => {
 }
 
 const importQuoteFromFinance = async (ticker: string) => {
-  const quote = await Finance.getQuoteViaTicker(ticker)
+  const quote = await Finance.getQuoteViaTicker(ticker);
+
+  const lastIndex = await Profile
+    .query()
+    .where("ticker", ticker)
+    .orderBy("indexDate", "desc")
+    .first();
+
+  const now = new Date();
+  const lastIndexDate = lastIndex ? lastIndex.indexDate.toJSDate() : now;
+  const nowMinus15Days = new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000);
+
+  if (lastIndexDate > nowMinus15Days) {
+    return;
+  }
+
   await createProfile(ticker, quote);
 }
 
 const handler = async () => {
   const parameters = loadData(["ticker"]) as ImportProfileDataJobParameters;
-  await importQuoteFromFinance(parameters.ticker);
+
+  if (!Array.isArray(parameters.ticker)) {
+    parameters.ticker = [parameters.ticker];
+  }
+
+  for (const ticker of parameters.ticker) {
+    await importQuoteFromFinance(ticker);
+  }
 };
 
 export interface ImportProfileDataJobParameters {
-  ticker: string;
+  ticker: string | string[];
 }
 
 export default runJob(handler);

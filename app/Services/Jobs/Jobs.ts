@@ -22,7 +22,7 @@ export interface JobContract {
   retryFailed(job: Job): Promise<{ id: string, tags: string[] }>;
 }
 
-export type JobParameters = { [p: string]: any };
+export type JobParameters = { [p: string | number]: any };
 
 export interface JobMessage {
   status: JobStatusEnum;

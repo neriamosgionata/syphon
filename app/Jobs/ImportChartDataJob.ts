@@ -1,10 +1,10 @@
 import Finance from "@ioc:Providers/Finance";
 import Config from "@ioc:Adonis/Core/Config";
 import TickerChart from "App/Models/TickerChart";
-import { ChartResultArray, ChartResultArrayQuote } from "yahoo-finance2/dist/esm/src/modules/chart";
-import { loadData, runJob } from "App/Services/Jobs/JobHelpers";
-import { ChartInterval } from "App/Services/Finance/Finance";
-import { toLuxon } from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
+import {ChartResultArray, ChartResultArrayQuote} from "yahoo-finance2/dist/esm/src/modules/chart";
+import {loadData, runJob} from "App/Services/Jobs/JobHelpers";
+import {ChartInterval} from "App/Services/Finance/Finance";
+import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
 import Database from "@ioc:Adonis/Lucid/Database";
 
 const createChartEntry = async (
@@ -71,15 +71,21 @@ const importElementsFromFinance = async (ticker: string, chart: ChartResultArray
 const handler = async () => {
   const parameters = loadData(["ticker", "fromDate", "interval"]) as ImportChartDataJobParameters;
 
-  await importElementsFromFinance(
-    parameters.ticker,
-    await Finance.getChartViaTicker(parameters.ticker, parameters.fromDate),
-    parameters.interval
-  );
+  if (!Array.isArray(parameters.ticker)) {
+    parameters.ticker = [parameters.ticker];
+  }
+
+  for (const ticker of parameters.ticker) {
+    await importElementsFromFinance(
+      ticker,
+      await Finance.getChartViaTicker(ticker, parameters.fromDate),
+      parameters.interval
+    );
+  }
 };
 
 export interface ImportChartDataJobParameters {
-  ticker: string;
+  ticker: string | string[];
   fromDate: string | number;
   interval: ChartInterval;
 }

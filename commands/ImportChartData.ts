@@ -1,8 +1,8 @@
-import { args, BaseCommand } from "@adonisjs/core/build/standalone";
-import { now } from "moment";
-import { AppContainerAliasesEnum } from "App/Enums/AppContainerAliasesEnum";
-import { ImportChartDataJobParameters } from "App/Jobs/ImportChartDataJob";
-import { JobContract } from "App/Services/Jobs/Jobs";
+import {args, BaseCommand} from "@adonisjs/core/build/standalone";
+import {now} from "moment";
+import {AppContainerAliasesEnum} from "App/Enums/AppContainerAliasesEnum";
+import {ImportChartDataJobParameters} from "App/Jobs/ImportChartDataJob";
+import {JobContract} from "App/Services/Jobs/Jobs";
 
 export default class ImportChartData extends BaseCommand {
   /**
@@ -31,10 +31,10 @@ export default class ImportChartData extends BaseCommand {
     stayAlive: false
   };
 
-  @args.string({ description: "Ticker", required: true })
+  @args.string({description: "Ticker", required: true})
   public ticker: string;
 
-  @args.string({ description: "From date", required: false })
+  @args.string({description: "From date", required: false})
   public fromDate: string;
 
   public async run() {
@@ -44,7 +44,7 @@ export default class ImportChartData extends BaseCommand {
       await Jobs.dispatch<ImportChartDataJobParameters>(
         "ImportChartDataJob",
         {
-          ticker: this.ticker,
+          ticker: this.ticker.split(","),
           fromDate: this.fromDate || now(),
           interval: "1d"
         }

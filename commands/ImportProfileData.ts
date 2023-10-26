@@ -40,7 +40,7 @@ export default class ImportProfileData extends BaseCommand {
       await Jobs.dispatch<ImportProfileDataJobParameters>(
         "ImportProfileDataJob",
         {
-          ticker: this.ticker,
+          ticker: this.ticker.split(","),
         }
       )
     );
