@@ -1,15 +1,15 @@
 import Config from "@ioc:Adonis/Core/Config";
 import fs from "fs";
 import moment from "moment";
-import { LogChannelEnum } from "App/Enums/LogChannelEnum";
-import { LogLevelEnum } from "App/Enums/LogLevelEnum";
+import {LogChannelEnum} from "App/Enums/LogChannelEnum";
+import {LogLevelEnum} from "App/Enums/LogLevelEnum";
 
 export interface LoggerContract {
   removeOneTimeLog(): void;
 
   channel(channelName: string): LoggerContract;
 
-  setPrintToConsole(): LoggerContract;
+  setPrintToConsole(status: boolean): LoggerContract;
 
   getCurrentChannelName(): string;
 
@@ -32,9 +32,9 @@ export default class Logger implements LoggerContract {
     lifeTime: number, //not implemented yet
     permissions: number,
     type: LogChannelEnum,
-  } = Config.get("app.logger.logChannels.default");
+  } = Config.get("app.logger.log_channels.default");
 
-  private logFolder: string = Config.get("app.logger.logFolder");
+  private logFolder: string = Config.get("app.logger.log_folder");
   private channelName = "default";
 
   private LOG_LEVEL_TO_FILE = {
@@ -45,10 +45,7 @@ export default class Logger implements LoggerContract {
     [LogLevelEnum.FATAL]: "error"
   };
 
-  private printToConsole: boolean = true;
-
-  constructor() {
-  }
+  private printToConsole: boolean = false;
 
   removeOneTimeLog(): void {
     if (this.config.type === LogChannelEnum.ONETIME) {
@@ -69,7 +66,7 @@ export default class Logger implements LoggerContract {
   //This methods changes the singleton configuration
   // @ts-ignore
   channel(channelName: string = "default"): this {
-    this.config = Config.get("app.logger.logChannels." + channelName);
+    this.config = Config.get("app.logger.log_channels." + channelName);
 
     if (channelName !== this.channelName) {
       this.removeOneTimeLog();
@@ -78,7 +75,7 @@ export default class Logger implements LoggerContract {
     this.channelName = channelName;
 
     if (!this.config) {
-      this.config = Config.get("app.logger.logChannels.default");
+      this.config = Config.get("app.logger.log_channels.default");
       this.channelName = "default";
       this.warn("Log channel used doesn't exist, reverting back to default").then(() => {
       });
@@ -150,7 +147,7 @@ export default class Logger implements LoggerContract {
 
   private async saveLog(logFileName: string, logLine: string): Promise<true | Error> {
     try {
-      const logStream = fs.createWriteStream(logFileName, { flags: "a" });
+      const logStream = fs.createWriteStream(logFileName, {flags: "a"});
       logStream.write(logLine);
       logStream.end();
       return true;
@@ -259,10 +256,8 @@ export default class Logger implements LoggerContract {
     return logLine;
   }
 
-  // @ts-ignore
   setPrintToConsole(status: boolean): LoggerContract {
     this.printToConsole = status;
-    // @ts-ignore
     return this;
   }
 }

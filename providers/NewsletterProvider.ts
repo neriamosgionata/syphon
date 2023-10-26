@@ -1,12 +1,12 @@
 import {AppContainerAliasesEnum} from "App/Enums/AppContainerAliasesEnum";
 import {ApplicationContract} from "@ioc:Adonis/Core/Application";
 
-export default class LogServiceProvider {
+export default class NewsletterProvider {
   constructor(protected app: ApplicationContract) {
   }
 
   public register() {
-    this.app.container.singleton(AppContainerAliasesEnum.Finance, () => new (require("App/Services/Finance/Finance").default)());
+    this.app.container.singleton(AppContainerAliasesEnum.News, () => new (require("App/Services/Newsletter/Newsletter").default)());
   }
 
   public async boot() {

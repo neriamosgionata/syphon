@@ -12,7 +12,7 @@ const createChartEntry = async (
   entry: ChartResultArrayQuote,
   interval: ChartInterval
 ) => {
-  const defaultAppDateTimeFormat = Config.get("app.dateFormats.default");
+  const defaultAppDateTimeFormat = Config.get("app.date_formats.default");
 
   await TickerChart
     .create({
@@ -69,7 +69,7 @@ const importElementsFromFinance = async (ticker: string, chart: ChartResultArray
 };
 
 const handler = async () => {
-  const parameters = loadData(["ticker", "fromDate", "interval"]) as ImportChartDataJobParameters;
+  const parameters = loadData<ImportChartDataJobParameters>(["ticker", "fromDate", "interval"]);
 
   if (!Array.isArray(parameters.ticker)) {
     parameters.ticker = [parameters.ticker];

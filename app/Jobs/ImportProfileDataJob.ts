@@ -9,7 +9,7 @@ import {ProfileMarketStateEnum} from "App/Enums/ProfileMarketStateEnum";
 
 const createProfile = async (ticker: string, profile: Quote) => {
   const currentDate = new Date();
-  const defaultAppDateTimeFormat = Config.get("app.dateFormats.default");
+  const defaultAppDateTimeFormat = Config.get("app.date_formats.default");
 
   await Profile.create({
     ticker: ticker,
@@ -71,7 +71,7 @@ const importQuoteFromFinance = async (ticker: string) => {
 }
 
 const handler = async () => {
-  const parameters = loadData(["ticker"]) as ImportProfileDataJobParameters;
+  const parameters = loadData<ImportProfileDataJobParameters>(["ticker"]);
 
   if (!Array.isArray(parameters.ticker)) {
     parameters.ticker = [parameters.ticker];

@@ -5,4 +5,6 @@ export enum AppContainerAliasesEnum {
   Jobs = "Providers/Jobs",
   Charts = "Providers/Charts",
   Profiler = "Providers/Profiler",
+  News = "Providers/News",
+  ProgressBar = "Providers/ProgressBar",
 }

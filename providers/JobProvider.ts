@@ -1,5 +1,5 @@
-import { AppContainerAliasesEnum } from "App/Enums/AppContainerAliasesEnum";
-import { ApplicationContract } from "@ioc:Adonis/Core/Application";
+import {AppContainerAliasesEnum} from "App/Enums/AppContainerAliasesEnum";
+import {ApplicationContract} from "@ioc:Adonis/Core/Application";
 
 export default class JobProvider {
   constructor(protected app: ApplicationContract) {

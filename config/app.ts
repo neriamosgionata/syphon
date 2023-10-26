@@ -7,11 +7,11 @@
 
 import proxyAddr from "proxy-addr";
 import Env from "@ioc:Adonis/Core/Env";
-import type { ServerConfig } from "@ioc:Adonis/Core/Server";
-import type { LoggerConfig } from "@ioc:Adonis/Core/Logger";
-import type { ProfilerConfig } from "@ioc:Adonis/Core/Profiler";
-import type { ValidatorConfig } from "@ioc:Adonis/Core/Validator";
-import { LogChannelEnum } from "App/Enums/LogChannelEnum";
+import type {ServerConfig} from "@ioc:Adonis/Core/Server";
+import type {LoggerConfig} from "@ioc:Adonis/Core/Logger";
+import type {ProfilerConfig} from "@ioc:Adonis/Core/Profiler";
+import type {ValidatorConfig} from "@ioc:Adonis/Core/Validator";
+import {LogChannelEnum} from "App/Enums/LogChannelEnum";
 
 /*
 |--------------------------------------------------------------------------
@@ -183,9 +183,9 @@ export const logger: LoggerConfig = {
   */
   prettyPrint: Env.get("NODE_ENV") === "development",
 
-  logFolder: Env.get("LOG_FOLDER", "storage/logs"),
+  log_folder: Env.get("LOG_FOLDER", "storage/logs"),
 
-  logChannels: {
+  log_channels: {
     default: {
       baseName: "adonis-stack",
       lifeTime: 7, //days
@@ -251,6 +251,10 @@ export const profiler: ProfilerConfig = {
 */
 export const validator: ValidatorConfig = {};
 
-export const dateFormats = {
+export const date_formats = {
   default: "YYYY-MM-DDTHH:mm:ss.sssZ"
 };
+
+export const storage = {
+  data_folder: Env.get("DATA_FOLDER", "storage/data"),
+}

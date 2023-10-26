@@ -17,6 +17,15 @@ export interface JobContract {
     errorCallback?: (error: Error, id: string, tags: string[]) => void
   ): Promise<{ id: string, tags: string[] }>;
 
+  runWithoutDispatch<T extends JobParameters>(
+    jobName: string,
+    parameters: T,
+    tags?: string[],
+    callback?: (message: JobMessage) => void,
+    errorCallback?: (error: Error, id: string, tags: string[]) => void,
+    id?: string
+  ): Promise<{ id: string, tags: string[] }>;
+
   waitUntilDone(obj: { id: string, tags: string[] }): Promise<JobStatusEnum>;
 
   retryFailed(job: Job): Promise<{ id: string, tags: string[] }>;
@@ -53,7 +62,7 @@ export default class Jobs implements JobContract {
       isFinished = true;
     }
 
-    const defaultAppDateTimeFormat = Config.get("app.dateFormats.default");
+    const defaultAppDateTimeFormat = Config.get("app.date_formats.default");
 
     return Job
       .query()
@@ -81,11 +90,12 @@ export default class Jobs implements JobContract {
     return path.resolve(Application.appRoot, "app", "Jobs", jobName);
   }
 
-  private jobIsRegistered(jobName: string): boolean {
+  private async jobIsRegistered(jobName: string): Promise<boolean> {
     try {
       const jobPath = this.getJobPath(jobName);
       return fs.existsSync(jobPath + ".js") || fs.existsSync(jobPath + ".ts");
     } catch (e) {
+      await Logger.error(e.message);
       return false;
     }
   }
@@ -98,11 +108,11 @@ export default class Jobs implements JobContract {
     errorCallback?: (error: Error, id: string, tags: string[]) => void
   ): Promise<{ id: string, tags: string[] }> {
 
-    if (!this.jobIsRegistered(jobName)) {
+    if (!await this.jobIsRegistered(jobName)) {
       throw new Error("Job not registered");
     }
 
-    Logger.info("Dispatching job", jobName, tags);
+    await Logger.info("Dispatching job on queue", jobName, tags);
 
     const id: string = require("uuid").v4();
 
@@ -180,7 +190,7 @@ export default class Jobs implements JobContract {
   }
 
   async waitUntilDone(obj: { id: string, tags: string[] }): Promise<JobStatusEnum> {
-    Logger.info("Waiting for job to finish", obj.id);
+    await Logger.info("Waiting for job to finish", obj.id);
 
     let foundStatus = 0;
 
@@ -200,8 +210,75 @@ export default class Jobs implements JobContract {
       }
     }
 
-    Logger.info("Job finished", obj.id);
+    await Logger.info("Job finished", obj.id);
 
     return foundStatus;
+  }
+
+  async runWithoutDispatch<T extends JobParameters>(
+    jobName: string,
+    parameters: T,
+    tags: string[] = [],
+    callback?: (message: JobMessage) => void,
+    errorCallback?: (error: Error, id: string, tags: string[]) => void,
+    id?: string
+  ): Promise<{ id: string, tags: string[] }> {
+
+    if (!await this.jobIsRegistered(jobName)) {
+      throw new Error("Job not registered");
+    }
+
+    await Logger.info("Running job", jobName, tags);
+
+    let resolver: (value: unknown) => void;
+
+    const promise = new Promise((res) => {
+      resolver = res;
+    });
+
+    let actualId = id || require("uuid").v4();
+
+    const worker = new Worker(
+      path.join(Application.appRoot, "jobRunner.js"),
+      {
+        workerData: {
+          jobName,
+          id: actualId,
+          tags,
+          jobPath: this.getJobPath(jobName),
+          ...parameters
+        }
+      }
+    );
+
+    worker.on("message", (message: JobMessage) => {
+      if (message.status === JobStatusEnum.COMPLETED || message.status === JobStatusEnum.FAILED) {
+        resolver(null);
+      }
+      if (callback) {
+        callback(message);
+        return;
+      }
+
+      this.defaultCallback(message);
+    });
+
+    worker.on("error", (err: Error) => {
+      if (errorCallback) {
+        errorCallback(err, actualId, tags);
+        return;
+      }
+
+      this.defaultErrorCallback(err, actualId, tags);
+    });
+
+    await promise;
+
+    await Logger.info("Job finished", actualId, tags);
+
+    return {
+      id: actualId,
+      tags
+    };
   }
 }

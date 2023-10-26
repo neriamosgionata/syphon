@@ -1,7 +1,7 @@
 require("reflect-metadata");
 const sourceMapSupport = require("source-map-support");
 const {Ignitor} = require("@adonisjs/core/build/standalone");
-const {workerData} = require("worker_threads");
+const {workerData, parentPort} = require("worker_threads");
 const fs = require("fs");
 
 sourceMapSupport.install({handleUncaughtExceptions: false});
@@ -30,4 +30,10 @@ const run = async () => {
 };
 
 run()
-  .finally(() => kernel.hasBooted && kernel.application.isReady && kernel.close());
+  .finally(async () => {
+    if (kernel.hasBooted && kernel.application.isReady) {
+      await kernel.close()
+    }
+
+    parentPort.emit("exit", 0);
+  });

@@ -1,5 +1,17 @@
 {
   "commands": {
+    "analyze:domains_csv": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/AnalyzeDomainsCsv",
+      "commandName": "analyze:domains_csv",
+      "description": "",
+      "args": [],
+      "aliases": [],
+      "flags": []
+    },
     "import:chart_data": {
       "settings": {
         "loadApp": true,
