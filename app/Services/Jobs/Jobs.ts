@@ -33,8 +33,8 @@ export interface JobContract {
 
 export type JobParameters = { [p: string | number]: any };
 
-export type Callback = (message: JobMessage) => void;
-export type ErrorCallback = (error: Error, id: string, tags: string[]) => void;
+export type Callback = (message: JobMessage) => Promise<void> | void;
+export type ErrorCallback = (error: Error, id: string, tags: string[]) => Promise<void> | void;
 
 export interface JobMessage {
   status: JobStatusEnum;
@@ -95,16 +95,16 @@ export default class Jobs implements JobContract {
       .exec();
   }
 
-  private defaultCallback(message: JobMessage, callback?: Callback) {
+  private async defaultCallback(message: JobMessage, callback?: Callback) {
     if (callback) {
-      callback(message);
+      await callback(message);
     }
     return this.catchJobMessage(message);
   }
 
-  private defaultErrorCallback(error: Error, id: string, tags: string[] = [], errorCallBack?: ErrorCallback) {
+  private async defaultErrorCallback(error: Error, id: string, tags: string[] = [], errorCallBack?: ErrorCallback) {
     if (errorCallBack) {
-      errorCallBack(error, id, tags);
+      await errorCallBack(error, id, tags);
     }
     return this.catchJobMessage({status: JobStatusEnum.FAILED, id, tags, error});
   }
