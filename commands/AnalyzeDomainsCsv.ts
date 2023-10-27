@@ -118,48 +118,49 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
 
         csvStream.pause();
 
-        const promisesToWaitFor: (() => Promise<void>)[] = [];
-
-        for (const rowsArray of currentRows) {
-          promisesToWaitFor.push(
-            () => new Promise((resP) => {
+        const promisesToWaitFor = currentRows
+          .map((rows, i) => {
+            return () => new Promise<void>((resP) => {
                 Jobs
                   .runWithoutDispatch<AnalyzeDomainsCsvJobParameters>(
                     "AnalyzeDomainsCsv",
                     {
-                      rows: rowsArray
-                    }
+                      rows: [...rows]
+                    },
+                    ["domains-detailed-found.csv"],
+                    undefined,
+                    undefined,
+                    i.toString(),
                   )
                   .finally(() => {
                     resP();
                   })
               }
-            )
-          );
-        }
+            );
+          });
+
+        currentRows = [
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+          [],
+        ];
 
         Promise
           .all(promisesToWaitFor.map((fn) => fn()))
           .finally(async () => {
-            currentRows = [
-              [],
-              [],
-              [],
-              [],
-              [],
-              [],
-              [],
-              [],
-              [],
-              [],
-              [],
-              [],
-              [],
-              [],
-              [],
-              [],
-            ];
-
             Logger.info("Batch finished analysing, resuming stream");
 
             ProgressBar.next();
@@ -174,31 +175,27 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
             .filter((rows) => rows.length > 0)
             .length === 0
         ) {
-          const promisesToWaitFor: (() => Promise<void>)[] = [];
-
-          let i = 0;
-          for (let entry of currentRows.filter((rows) => rows.length > 0)) {
-            promisesToWaitFor.push(
-              () => new Promise((resP) => {
+          const promisesToWaitFor = currentRows
+            .filter((rows) => rows.length > 0)
+            .map((rows, i) => {
+              return () => new Promise<void>((resP) => {
                   Jobs
                     .runWithoutDispatch<AnalyzeDomainsCsvJobParameters>(
                       "AnalyzeDomainsCsv",
                       {
-                        rows: entry
+                        rows: [...rows]
                       },
-                      [],
+                      ["domains-detailed-found.csv"],
                       undefined,
                       undefined,
-                      i.toString()
+                      i.toString(),
                     )
                     .finally(() => {
                       resP();
                     })
                 }
-              )
-            );
-            i++;
-          }
+              );
+            });
 
           Logger.info("Executing last batch");
 
