@@ -24,7 +24,7 @@ export interface JobContract {
     callback?: (message: JobMessage) => void,
     errorCallback?: (error: Error, id: string, tags: string[]) => void,
     id?: string
-  ): Promise<{ id: string, tags: string[] }>;
+  ): Promise<{ id: string, tags: string[], error?: Error }>;
 
   waitUntilDone(obj: { id: string, tags: string[] }): Promise<JobStatusEnum>;
 
