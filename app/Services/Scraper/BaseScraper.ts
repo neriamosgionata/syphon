@@ -38,9 +38,9 @@ export interface BaseScraperContract {
 
   registerError(error: Error | any, key: string): Promise<void>;
 
-  writeTableLog(table: any[]): Promise<void>;
+  writeTableLog(table: any[]): void;
 
-  writeLog(level: string, message: string, ...values: unknown[]): Promise<void>;
+  writeLog(level: string, message: string, ...values: unknown[]): void;
 }
 
 export default class BaseScraper implements BaseScraperContract {
@@ -151,7 +151,7 @@ export default class BaseScraper implements BaseScraperContract {
     }
   }
 
-  async writeTableLog(table: any[]): Promise<void> {
+  writeTableLog(table: any[]): void {
     this.logger.table(table);
 
     if (this.writeOnConsole) {
@@ -159,7 +159,7 @@ export default class BaseScraper implements BaseScraperContract {
     }
   }
 
-  async writeLog(level: string, message: string, ...values: unknown[]): Promise<void> {
+  writeLog(level: string, message: string, ...values: unknown[]): void {
     this.logger[level.trim()](message, ...values);
 
     if (this.writeOnConsole) {
@@ -176,7 +176,7 @@ export default class BaseScraper implements BaseScraperContract {
   async run<T extends HandlerReturn<any>>(): Promise<RunReturn<T>> {
     await this.start();
 
-    await this.writeLog('info', "-> testing task service functionalities");
+    this.writeLog('info', "-> testing task service functionalities");
 
     if (!(await this.test())) {
       await this.registerError(new Error('Initial test was not successful, skipping task'), "Tests");
@@ -185,14 +185,14 @@ export default class BaseScraper implements BaseScraperContract {
 
     let result: any = {};
     try {
-      result = await this.handle();
+      result = await this.handle<T>();
     } catch (err) {
       await this.registerError(err, "Generic");
     }
 
     await this.end();
 
-    return {results: result as T, errors: this.errors};
+    return {results: result, errors: this.errors};
   }
 
   protected async start() {
@@ -280,26 +280,29 @@ export default class BaseScraper implements BaseScraperContract {
     }
 
     if (this.errors.length) {
-      await this.writeLog('error', '\n\r');
-      await this.writeLog('error', 'Errors count: ' + this.errors.length);
-      await this.writeLog('error', 'List:');
-      await this.writeTableLog(['ERRORS', ...this.errors.map((e) => e.message)]);
+      this.writeLog('error', '\n\r');
+      this.writeLog('error', 'Errors count: ' + this.errors.length);
+      this.writeLog('error', 'List:');
+      this.writeTableLog(['ERRORS', ...this.errors.map((e) => e.message)]);
     }
 
     this.registeredHandlers = [];
     this.registeredTests = [];
   }
 
-  protected async handle(): Promise<{}> {
-    const result: any = {};
+  protected async handle<T extends HandlerReturn<any>>(): Promise<T> {
+    let result: T = {} as T;
 
-    await this.writeLog('info', "-> handling function to puppeteer");
+    this.writeLog('info', "-> handling function to puppeteer");
 
     for (const funcIndex in this.registeredHandlers) {
       try {
         const res = await this.registeredHandlers[funcIndex](this.browser, this.page);
         if (res !== undefined && res !== null) {
-          Object.assign(result, res);
+          this.writeLog('info', 'Handler returned, func index: ' + funcIndex);
+          result = {...res};
+        } else {
+          this.writeLog('info', 'Handler returned empty, func index: ' + funcIndex);
         }
       } catch (err) {
         await this.registerError(new Error('Handler failed, func index: ' + funcIndex), "Handler_failed_" + funcIndex);
@@ -311,7 +314,7 @@ export default class BaseScraper implements BaseScraperContract {
   }
 
   protected async test(): Promise<boolean> {
-    await this.writeLog('info', "-> testing function to puppeteer");
+    this.writeLog('info', "-> testing function to puppeteer");
 
     for (const funcIndex in this.registeredTests) {
       try {

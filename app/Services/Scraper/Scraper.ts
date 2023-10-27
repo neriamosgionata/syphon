@@ -1,4 +1,4 @@
-import {Page} from "puppeteer";
+import {Browser, Page} from "puppeteer";
 import BaseScraper, {
   BaseScraperContract,
   HandlerFunction,
@@ -6,6 +6,8 @@ import BaseScraper, {
   RunReturn,
   TestFunction
 } from "App/Services/Scraper/BaseScraper";
+import Config from "@ioc:Adonis/Core/Config";
+import fs from "fs";
 
 export interface ScraperContract extends BaseScraperContract {
   run<T extends HandlerReturn<any>>(): Promise<RunReturn<T>>;
@@ -26,163 +28,202 @@ export interface ScraperContract extends BaseScraperContract {
 
   setScraperStatusName(name: string): ScraperContract;
 
-  resetScraperStatus(): Promise<void>;
-
-  updateScraperStatus(status: object | any): Promise<void>;
-
-  registerError(error: Error | any, key: string): Promise<void>;
-
-  writeTableLog(table: any[]): Promise<void>;
-
-  writeLog(level: string, message: string, ...values: unknown[]): Promise<void>;
-
   //HELPERS
 
-  goto(href: string, timeoutMs: number): Promise<void>;
+  goto(href: string, timeoutMs: number): HandlerFunction<void>;
 
-  checkForCaptcha(page: Page): Promise<boolean>;
+  checkForCaptcha(page: Page): HandlerFunction<boolean>;
 
-  waitRandom(): Promise<void>;
+  waitRandom(): HandlerFunction<void>;
 
-  removeCookiesHref(page: Page): Promise<void>;
+  removeCookiesHref(page: Page): HandlerFunction<void>;
 
-  typeIn(selector: string, text: string, options?: { delay: number }): Promise<void>;
+  typeIn(selector: string, text: string, options?: { delay: number }): HandlerFunction<void>;
 
-  keyEnter(selector: string, options?: { delay: number }): Promise<void>;
+  keyEnter(selector: string, options?: { delay: number }): HandlerFunction<void>;
 
-  click(selector: string): Promise<void>;
+  click(selector: string): HandlerFunction<void>;
 
-  focus(selector: string): Promise<void>;
+  focus(selector: string): HandlerFunction<void>;
 
-  searchAndEnter(inputSelector: string, searchQuery: string): Promise<void>;
+  searchAndEnter(inputSelector: string, searchQuery: string): HandlerFunction<void>[];
 
-  evaluate<T>(fn: (...args: any[]) => T): Promise<T>;
+  evaluate<T>(fn: (...args: any[]) => T): HandlerFunction<T>;
+
+  takeScreenshot(): HandlerFunction<void>;
+
+  removeGoogleGPDR(): HandlerFunction<void>;
 }
 
 export default class Scraper extends BaseScraper implements ScraperContract {
   constructor(
-    protected headlessChrome: boolean = true,
+    protected headlessChrome: boolean | string = true,
     protected writeOnConsole: boolean = false,
-    protected scraperStatusName: string = "",
+    protected logChannel: string = "default",
   ) {
-    super(headlessChrome, writeOnConsole, scraperStatusName);
+    super(headlessChrome, writeOnConsole, logChannel);
   }
 
   //HELPERS
 
-  async goto(href: string, timeoutMs: number = 10000): Promise<void> {
-    if (this.page) {
-      try {
+  goto(href: string, timeoutMs: number = 10000): HandlerFunction<void> {
+    return async (_browser: Browser, _page: Page) => {
+      if (_page) {
         await Promise.all([
-          this.page.waitForNavigation({timeout: timeoutMs}),
-          this.page.goto(href, {
+          _page.waitForNavigation({timeout: timeoutMs}),
+          _page.goto(href, {
             waitUntil: ['networkidle2', 'domcontentloaded'],
           })
         ]);
-      } catch (e) {
-        await this.registerError(e, "goto");
+        return;
       }
-      return;
+      throw new Error("Page is not ready");
     }
-    throw new Error("Page is not ready");
   }
 
-  checkForCaptcha(page: Page): Promise<boolean> {
-    return page.evaluate(() => {
-      const selectors = [...document.querySelectorAll('iframe')] as HTMLIFrameElement[];
-      return selectors.filter((selector) => selector?.src?.includes('captcha')).length > 0;
-    });
+  checkForCaptcha(): HandlerFunction<boolean> {
+    return async (_browser: Browser, _page: Page) => {
+      return _page.evaluate(() => {
+        const selectors = [...document.querySelectorAll('iframe')] as HTMLIFrameElement[];
+        return selectors.filter((selector) => selector?.src?.includes('captcha')).length > 0;
+      });
+    }
   }
 
-  async waitRandom(): Promise<void> {
-    await new Promise((res) => setTimeout(res, 87 + Math.random() * 5000));
+  waitRandom(): HandlerFunction<void> {
+    return async (_browser: Browser, _page: Page) => {
+      await new Promise((res) => setTimeout(res, 87 + Math.random() * 5000));
+    }
   }
 
-  async removeCookiesHref(page: Page): Promise<void> {
-    const client = await page.target().createCDPSession();
-    const cookies = (await client.send('Network.getAllCookies')).cookies;
-    await page.deleteCookie(...cookies);
+  removeCookiesHref(page: Page): HandlerFunction<void> {
+    return async (_browser: Browser, _page: Page) => {
+      const client = await page.target().createCDPSession();
+      const cookies = (await client.send('Network.getAllCookies')).cookies;
+      await page.deleteCookie(...cookies);
+    }
   }
 
-  async typeIn(selector: string, text: string, options: { delay: number } = {delay: 0}): Promise<void> {
-    if (this.page) {
-      try {
-        await this.page.evaluate((selector) => {
+  typeIn(selector: string, text: string, options: { delay: number } = {delay: 0}): HandlerFunction<void> {
+    return async (_browser: Browser, _page: Page) => {
+      if (_page) {
+        await _page.evaluate((selector) => {
           const element = (document.querySelector(selector) as HTMLInputElement);
           element.focus();
           element.value = "";
         }, selector);
 
         for (const item of [...text]) {
-          await this.page.type(selector, item, options);
+          await _page.type(selector, item, options);
           await new Promise((resolve) => setTimeout(resolve, 32 + (Math.random() * 137)));
         }
-      } catch (e) {
-        await this.registerError(e, "typeIn");
+        return;
       }
-      return;
+      throw new Error("Page is not ready");
     }
-    throw new Error("Page is not ready");
   }
 
-  async keyEnter(selector: string, options: { delay: number } = {delay: 0}): Promise<void> {
-    if (this.page) {
-      try {
-        await this.page.evaluate((selector) => {
+  keyEnter(selector: string, options: { delay: number } = {delay: 0}): HandlerFunction<void> {
+    return async (_browser: Browser, _page: Page) => {
+      if (_page) {
+        await _page.evaluate((selector) => {
           const element = (document.querySelector(selector) as HTMLInputElement);
           element.focus();
         }, selector);
 
         await new Promise((resolve) => setTimeout(resolve, options.delay ?? (32 + (Math.random() * 137))));
 
-        await this.page.keyboard.press("Enter");
-      } catch (e) {
-        await this.registerError(e, "keyEnter");
+        await _page.keyboard.press("Enter");
+        return;
       }
-      return;
+      throw new Error("Page is not ready");
     }
-    throw new Error("Page is not ready");
   }
 
-  async evaluate<T>(fn: (...args: any[]) => T): Promise<T> {
-    if (this.page) {
-      try {
-        return await this.page.evaluate(fn);
-      } catch (e) {
-        await this.registerError(e, "evaluate");
+  evaluate<T>(fn: (...args: any[]) => T): HandlerFunction<T> {
+    return async (_browser: Browser, _page: Page) => {
+      if (_page) {
+        return await _page.evaluate(fn);
       }
-      return true as T;
+      throw new Error("Page is not ready");
     }
-    throw new Error("Page is not ready");
   }
 
-  async click(selector: string): Promise<void> {
-    if (this.page) {
-      try {
-        await this.page.click(selector);
-      } catch (e) {
-        await this.registerError(e, "click");
+  click(selector: string): HandlerFunction<void> {
+    return async (_browser: Browser, _page: Page) => {
+      if (_page) {
+        await _page.click(selector);
       }
-      return;
+      throw new Error("Page is not ready");
     }
-    throw new Error("Page is not ready");
   }
 
-  async focus(selector: string): Promise<void> {
-    if (this.page) {
-      try {
-        await this.page.focus(selector);
-      } catch (e) {
-        await this.registerError(e, "focus");
+  focus(selector: string): HandlerFunction<void> {
+    return async (_browser: Browser, _page: Page) => {
+      if (_page) {
+        await _page.focus(selector);
+        return;
       }
-      return;
+      throw new Error("Page is not ready");
     }
-    throw new Error("Page is not ready");
   }
 
-  async searchAndEnter(inputSelector: string, searchQuery: string): Promise<void> {
-    await this.typeIn(inputSelector, searchQuery, {delay: 33})
-    await this.keyEnter(inputSelector, {delay: 37});
-    await this.waitRandom();
+  searchAndEnter(inputSelector: string, searchQuery: string): HandlerFunction<void>[] {
+    return [
+      this.typeIn(inputSelector, searchQuery, {delay: 33}),
+      this.keyEnter(inputSelector, {delay: 37}),
+      this.waitRandom(),
+    ];
   }
+
+  takeScreenshot(): HandlerFunction<void> {
+    return async (_browser: Browser, _page: Page) => {
+      if (_page) {
+        const path = Config.get("app.storage.data_folder") + "/screenshots";
+
+        if (!fs.existsSync(path)) {
+          fs.mkdirSync(path, {recursive: true});
+        }
+
+        const fullPath = path + "/screenshot-" + Date.now() + ".png";
+        await _page.screenshot({path: fullPath});
+        return;
+      }
+      throw new Error("Page is not ready");
+    }
+  }
+
+  removeGoogleGPDR(): HandlerFunction<void> {
+    return async (_browser: Browser, _page: Page) => {
+
+      for (const context of _page.frames()) {
+        await context.evaluate(() => {
+          const acceptTexts = [
+            'accetta', 'accetta tutto', 'accetto', 'accept', 'accept all', 'agree', 'i agree', 'consent', 'ich stimme zu', 'acepto', 'j"accepte',
+            'alle akzeptieren', 'akzeptieren', 'verstanden', 'zustimmen', 'okay', 'ok', 'acconsento'
+          ];
+
+          const acceptREString = (
+            '^([^a-zA-Z0-9]+)?'
+            + acceptTexts.join('([^a-zA-Z0-9]+)?$|^([^a-zA-Z0-9]+)?')
+            + '([^a-zA-Z0-9]+)?$'
+          );
+
+          const buttons = [...document.querySelectorAll('button'), ...document.querySelectorAll('input[type="button"]')] as HTMLButtonElement[];
+
+          for (let button of buttons) {
+            if (button.innerText.toLowerCase().match(new RegExp(acceptREString, 'i'))) {
+              button.click();
+              return;
+            }
+          }
+        });
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 32 + Math.random() * 250));
+
+      await _page.waitForNavigation({timeout: 10000});
+    }
+  }
+
 }

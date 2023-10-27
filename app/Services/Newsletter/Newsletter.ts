@@ -9,17 +9,17 @@ export interface NewsletterContract {
 
 export default class Newsletter implements NewsletterContract {
   private goToGoogleNews(): HandlerFunction<void> {
-    return () => Scraper.goto("https://news.google.com/", 10000);
+    return Scraper.goto("https://news.google.com/", 10000);
   }
 
   private getArticlesUrls(): HandlerFunction<{ articlesUrl: string[] }> {
-    return () => Scraper.evaluate(() => {
+    return Scraper.evaluate(() => {
       const articles = document.querySelectorAll("article");
       const articlesUrl: string[] = [];
       for (const article of articles) {
         const url = article.querySelector("a")?.getAttribute("href");
         if (url) {
-          articlesUrl.push(url);
+          articlesUrl.push("https://news.google.com/" + url.replace("./", ""));
         }
       }
       return {articlesUrl};
@@ -27,19 +27,19 @@ export default class Newsletter implements NewsletterContract {
   }
 
   private goToArticleUrl(articleUrl: string): HandlerFunction<void> {
-    return () => Scraper.goto(articleUrl, 10000);
+    return Scraper.goto(articleUrl, 10000);
   }
 
   private getArticleContent(): HandlerFunction<{ title?: string, content?: string }> {
-    return () => Scraper.evaluate(() => {
+    return Scraper.evaluate(() => {
       const title = (document.querySelector("h1") || document.querySelector("h2"))?.innerText;
       const content = document.querySelector("article")?.innerText;
       return {title, content};
     });
   }
 
-  private searchForQuery(searchQuery: string): HandlerFunction<void> {
-    return () => Scraper.searchAndEnter("input:not([aria-hidden=\"true\"])", searchQuery);
+  private searchForQuery(searchQuery: string): HandlerFunction<void>[] {
+    return Scraper.searchAndEnter("input:not([aria-hidden=\"true\"])", searchQuery);
   }
 
   async getGoogleNewsArticlesFor(searchQuery: string): Promise<RunReturn<{ articlesUrl: string[] }>> {
@@ -48,7 +48,8 @@ export default class Newsletter implements NewsletterContract {
       .setWithStealthPlugin(true)
       .setHandlers([
         this.goToGoogleNews(),
-        this.searchForQuery(searchQuery),
+        Scraper.removeGoogleGPDR(),
+        ...this.searchForQuery(searchQuery),
         this.getArticlesUrls(),
       ]);
 
