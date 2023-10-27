@@ -25,15 +25,15 @@ export interface LoggerContract {
 
   getCurrentChannelName(): string;
 
-  debug(message: string, ...values: unknown[]): true | Error;
+  debug(message?: string, ...values: unknown[]): true | Error;
 
-  info(message: string, ...values: unknown[]): true | Error;
+  info(message?: string, ...values: unknown[]): true | Error;
 
-  warn(message: string, ...values: unknown[]): true | Error;
+  warn(message?: string, ...values: unknown[]): true | Error;
 
-  error(message: string, ...values: unknown[]): true | Error;
+  error(message?: string, ...values: unknown[]): true | Error;
 
-  fatal(message: string, ...values: unknown[]): true | Error;
+  fatal(message?: string, ...values: unknown[]): true | Error;
 
   table(table: any[]): true | Error;
 }
@@ -117,27 +117,27 @@ export default class Logger implements LoggerContract {
     return this.logChannelName;
   }
 
-  debug(message: string, ...values: unknown[]): true | Error {
+  debug(message?: string, ...values: unknown[]): true | Error {
     const logLine = this.attachParametersToMessage(message, values);
     return this.writeLine(LogLevelEnum.DEBUG, logLine);
   }
 
-  info(message: string, ...values: unknown[]): true | Error {
+  info(message?: string, ...values: unknown[]): true | Error {
     const logLine = this.attachParametersToMessage(message, values);
     return this.writeLine(LogLevelEnum.INFO, logLine);
   }
 
-  warn(message: string, ...values: unknown[]): true | Error {
+  warn(message?: string, ...values: unknown[]): true | Error {
     const logLine = this.attachParametersToMessage(message, values);
     return this.writeLine(LogLevelEnum.WARN, logLine);
   }
 
-  error(message: string, ...values: unknown[]): true | Error {
+  error(message?: string, ...values: unknown[]): true | Error {
     const logLine = this.attachParametersToMessage(message, values);
     return this.writeLine(LogLevelEnum.ERROR, logLine);
   }
 
-  fatal(message: string, ...values: unknown[]): true | Error {
+  fatal(message?: string, ...values: unknown[]): true | Error {
     const logLine = this.attachParametersToMessage(message, values);
     return this.writeLine(LogLevelEnum.FATAL, logLine);
   }
@@ -200,9 +200,9 @@ export default class Logger implements LoggerContract {
     return this.saveLog(logFileName, logLineWithAnnotation);
   }
 
-  private attachParametersToMessage(message: string, values: unknown[]): string {
-    let logLine = message;
-    if (values.length) {
+  private attachParametersToMessage(message?: string, values?: unknown[]): string {
+    let logLine = message || "";
+    if (values?.length) {
       logLine += ", parameters: " + JSON.stringify(values);
     }
     return logLine;

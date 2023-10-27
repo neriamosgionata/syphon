@@ -6,7 +6,7 @@ export default class NewsletterProvider {
   }
 
   public register() {
-    this.app.container.singleton(AppContainerAliasesEnum.News, () => new (require("App/Services/Newsletter/Newsletter").default)());
+    this.app.container.singleton(AppContainerAliasesEnum.Newsletter, () => new (require("App/Services/Newsletter/Newsletter").default)());
   }
 
   public async boot() {

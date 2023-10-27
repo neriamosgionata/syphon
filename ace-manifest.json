@@ -126,6 +126,26 @@
       "aliases": [],
       "flags": []
     },
+    "test:newsletter_articles": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/TestNewsletterArticles",
+      "commandName": "test:newsletter_articles",
+      "description": "",
+      "args": [
+        {
+          "type": "string",
+          "propertyName": "query",
+          "name": "query",
+          "required": true,
+          "description": "Query"
+        }
+      ],
+      "aliases": [],
+      "flags": []
+    },
     "dump:rcfile": {
       "settings": {},
       "commandPath": "@adonisjs/core/build/commands/DumpRc",

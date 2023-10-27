@@ -12,6 +12,12 @@ export interface ScraperContract extends BaseScraperContract {
 
   //SETUP
 
+  setWithHeadlessChrome(headlessChrome: boolean | string): ScraperContract;
+
+  setWithStealthPlugin(withStealthPlugin: boolean): ScraperContract;
+
+  setWithAdblockerPlugin(withAdblockerPlugin: boolean): ScraperContract;
+
   setLoggerChannel(logChannel: string, writeOnConsole: boolean): ScraperContract;
 
   setTests(testsFunctions: TestFunction[]): ScraperContract;

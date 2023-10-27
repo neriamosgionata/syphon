@@ -4,7 +4,7 @@ import {HandlerFunction, RunReturn} from "App/Services/Scraper/BaseScraper";
 export interface NewsletterContract {
   getGoogleNewsArticlesFor(searchQuery: string): Promise<RunReturn<{ articlesUrl: string[] }>>;
 
-  getArticles(articleUrls: string[]): Promise<Map<string, { title?: string, content?: string }>>;
+  getArticles(articleUrls: string[]): Promise<Map<string, RunReturn<{ title?: string; content?: string }>>>;
 }
 
 export default class Newsletter implements NewsletterContract {
@@ -44,6 +44,8 @@ export default class Newsletter implements NewsletterContract {
 
   async getGoogleNewsArticlesFor(searchQuery: string): Promise<RunReturn<{ articlesUrl: string[] }>> {
     const scraper = Scraper
+      .setWithAdblockerPlugin(true)
+      .setWithStealthPlugin(true)
       .setHandlers([
         this.goToGoogleNews(),
         this.searchForQuery(searchQuery),
@@ -55,11 +57,13 @@ export default class Newsletter implements NewsletterContract {
     }>();
   }
 
-  async getArticles(articleUrls: string[]): Promise<Map<string, { title?: string; content?: string }>> {
-    const map = new Map<string, { title?: string, content?: string }>();
+  async getArticles(articleUrls: string[]): Promise<Map<string, RunReturn<{ title?: string; content?: string }>>> {
+    const map = new Map<string, RunReturn<{ title?: string; content?: string }>>();
 
     for (let articleUrl of articleUrls) {
       const scraper = Scraper
+        .setWithAdblockerPlugin(true)
+        .setWithStealthPlugin(true)
         .setHandlers([
           this.goToArticleUrl(articleUrl),
           this.getArticleContent(),
@@ -70,7 +74,7 @@ export default class Newsletter implements NewsletterContract {
         content?: string
       }>();
 
-      map.set(articleUrl, res.results);
+      map.set(articleUrl, res);
     }
 
     return map;

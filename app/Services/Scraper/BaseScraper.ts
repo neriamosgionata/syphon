@@ -2,7 +2,6 @@ import {Browser, BrowserContext, executablePath, Page} from "puppeteer";
 import {LoggerContract} from "App/Services/Logger/Logger";
 import Logger from "@ioc:Providers/Logger";
 import ScraperStatus from "App/Models/ScraperStatus";
-import puppeteer from "puppeteer-extra";
 
 export type TestFunction = (_browser: Browser, _page: Page) => Promise<boolean>;
 
@@ -16,6 +15,12 @@ export interface BaseScraperContract {
   run<T extends HandlerReturn<any>>(): Promise<RunReturn<T>>;
 
   // SETUP
+
+  setWithHeadlessChrome(headlessChrome: boolean | string): BaseScraperContract;
+
+  setWithStealthPlugin(withStealthPlugin: boolean): BaseScraperContract;
+
+  setWithAdblockerPlugin(withAdblockerPlugin: boolean): BaseScraperContract;
 
   setLoggerChannel(logChannel: string, writeOnConsole: boolean): BaseScraperContract;
 
@@ -54,12 +59,30 @@ export default class BaseScraper implements BaseScraperContract {
 
   protected logger: LoggerContract;
 
+  protected withStealthPlugin: boolean = false;
+  protected withAdblockerPlugin: boolean = false;
+
   constructor(
-    protected headlessChrome: boolean = true,
+    protected withHeadlessChrome: boolean | string = true,
     protected writeOnConsole: boolean = false,
     protected logChannel: string = "default",
   ) {
     this.logger = Logger.logger(logChannel, "scraper", writeOnConsole);
+  }
+
+  setWithHeadlessChrome(headlessChrome: boolean | string): this {
+    this.withHeadlessChrome = headlessChrome;
+    return this;
+  }
+
+  setWithStealthPlugin(withStealthPlugin: boolean): this {
+    this.withStealthPlugin = withStealthPlugin;
+    return this;
+  }
+
+  setWithAdblockerPlugin(withAdblockerPlugin: boolean): this {
+    this.withAdblockerPlugin = withAdblockerPlugin;
+    return this;
   }
 
   // SETUP
@@ -225,10 +248,23 @@ export default class BaseScraper implements BaseScraperContract {
         isMobile: false,
         width: 1920,
       },
-      headless: this.headlessChrome,
+      headless: this.withHeadlessChrome,
       args
     };
 
+    const puppeteer = (await import("puppeteer-extra")).default;
+    const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
+    const AdblockerPlugin = (await import("puppeteer-extra-plugin-adblocker")).default;
+
+    if (this.withStealthPlugin) {
+      puppeteer.use(StealthPlugin());
+    }
+
+    if (this.withAdblockerPlugin) {
+      puppeteer.use(AdblockerPlugin());
+    }
+
+    // @ts-ignore
     this.browser = await puppeteer.launch(launchArgs);
     this.context = await this.browser.createIncognitoBrowserContext();
     this.page = await this.browser.newPage();
