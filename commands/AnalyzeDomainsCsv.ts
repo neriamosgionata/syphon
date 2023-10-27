@@ -48,7 +48,7 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
       return 1;
     }
 
-    let totalElement = 266688348;
+    let totalElement = 266736104;
     let singleRows = 50000;
     let perChunk = singleRows * 16;
 
