@@ -49,6 +49,16 @@ export const logMessage = (log: string, logLevel: string = "info", error?: Error
   } as JobMessage);
 };
 
+export const messageToParent = (payload: any) => {
+  const {parentPort, workerData} = retriveWorkerThreadsData();
+  parentPort?.postMessage({
+    status: JobStatusEnum.MESSAGE,
+    id: workerData.id,
+    tags: workerData.tags,
+    payload
+  } as JobMessage);
+}
+
 export const runJob = (mainHandler: () => void | Promise<void>): RunJobFunction => {
   return async () => {
     isRunning();

@@ -3,11 +3,23 @@ import fs from "fs";
 import moment from "moment";
 import {LogChannelEnum} from "App/Enums/LogChannelEnum";
 import {LogLevelEnum} from "App/Enums/LogLevelEnum";
+import Application from "@ioc:Adonis/Core/Application";
+import {AppContainerAliasesEnum} from "App/Enums/AppContainerAliasesEnum";
 
 export interface LoggerContract {
   removeOneTimeLog(): void;
 
-  channel(channelName: string): LoggerContract;
+  changeAppDefaultLogger(
+    logChannelName: string,
+    logPrefix: string,
+    printToConsole: boolean,
+  ): void;
+
+  logger(
+    logChannelName: string,
+    logPrefix: string,
+    printToConsole: boolean,
+  ): LoggerContract;
 
   setPrintToConsole(status: boolean): LoggerContract;
 
@@ -32,10 +44,9 @@ export default class Logger implements LoggerContract {
     lifeTime: number, //not implemented yet
     permissions: number,
     type: LogChannelEnum,
-  } = Config.get("app.logger.log_channels.default");
+  };
 
-  private logFolder: string = Config.get("app.logger.log_folder");
-  private channelName = "default";
+  private logFolder: string;
 
   private LOG_LEVEL_TO_FILE = {
     [LogLevelEnum.DEBUG]: "info",
@@ -45,7 +56,38 @@ export default class Logger implements LoggerContract {
     [LogLevelEnum.FATAL]: "error"
   };
 
-  private printToConsole: boolean = false;
+  constructor(
+    private logChannelName: string = "default",
+    private logPrefix: string = "adonis",
+    private printToConsole: boolean = false,
+  ) {
+    this.logFolder = Config.get("app.logger.log_folder");
+    this.printToConsole = printToConsole;
+    this.logPrefix = logPrefix;
+
+    if (logChannelName) {
+      this.logChannelName = logChannelName;
+      this.config = Config.get("app.logger.log_channels." + logChannelName);
+      if (!this.config) {
+        this.warn("Log channel used doesn't exist, reverting back to default");
+      }
+    }
+
+    if (!this.config || !logChannelName) {
+      this.logChannelName = "default";
+      this.config = Config.get("app.logger.log_channels.default");
+    }
+  }
+
+  changeAppDefaultLogger(
+    logChannelName: string = "default",
+    logPrefix: string = "",
+    printToConsole: boolean,
+  ) {
+    Application.container.singleton(AppContainerAliasesEnum.Logger, () => {
+      return this.logger(logChannelName, logPrefix, printToConsole);
+    });
+  }
 
   removeOneTimeLog(): void {
     if (this.config.type === LogChannelEnum.ONETIME) {
@@ -63,28 +105,16 @@ export default class Logger implements LoggerContract {
     }
   }
 
-  //This methods changes the singleton configuration
-  // @ts-ignore
-  channel(channelName: string = "default"): this {
-    this.config = Config.get("app.logger.log_channels." + channelName);
-
-    if (channelName !== this.channelName) {
-      this.removeOneTimeLog();
-    }
-
-    this.channelName = channelName;
-
-    if (!this.config) {
-      this.config = Config.get("app.logger.log_channels.default");
-      this.channelName = "default";
-      this.warn("Log channel used doesn't exist, reverting back to default");
-    }
-
-    return this;
+  logger(
+    logChannelName: string = "default",
+    logPrefix: string = "",
+    printToConsole: boolean = false,
+  ): LoggerContract {
+    return new Logger(logChannelName, logPrefix, printToConsole);
   }
 
   getCurrentChannelName(): string {
-    return this.channelName;
+    return this.logChannelName;
   }
 
   debug(message: string, ...values: unknown[]): true | Error {
@@ -127,7 +157,7 @@ export default class Logger implements LoggerContract {
   }
 
   private getLogFileName(logFileLevel: LogLevelEnum) {
-    let logFileName = this.config.baseName || "adonis";
+    let logFileName = this.logPrefix || this.config.baseName || "adonis";
 
     switch (this.config.type) {
       case LogChannelEnum.DAILY:

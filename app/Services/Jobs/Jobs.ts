@@ -33,6 +33,9 @@ export interface JobContract {
 
 export type JobParameters = { [p: string | number]: any };
 
+export type Callback = (message: JobMessage) => void;
+export type ErrorCallback = (error: Error, id: string, tags: string[]) => void;
+
 export interface JobMessage {
   status: JobStatusEnum;
   id: string;
@@ -40,6 +43,7 @@ export interface JobMessage {
   error?: Error;
   log?: string;
   logLevel?: string;
+  payload?: any;
 }
 
 export default class Jobs implements JobContract {
@@ -51,6 +55,10 @@ export default class Jobs implements JobContract {
       } else {
         Logger[message.logLevel || "info"](message.log);
       }
+      return;
+    }
+
+    if (message.status === JobStatusEnum.MESSAGE) {
       return;
     }
 
@@ -87,11 +95,17 @@ export default class Jobs implements JobContract {
       .exec();
   }
 
-  private defaultCallback(message: JobMessage) {
+  private defaultCallback(message: JobMessage, callback?: Callback) {
+    if (callback) {
+      callback(message);
+    }
     return this.catchJobMessage(message);
   }
 
-  private defaultErrorCallback(error: Error, id: string, tags: string[] = []) {
+  private defaultErrorCallback(error: Error, id: string, tags: string[] = [], errorCallBack?: ErrorCallback) {
+    if (errorCallBack) {
+      errorCallBack(error, id, tags);
+    }
     return this.catchJobMessage({status: JobStatusEnum.FAILED, id, tags, error});
   }
 
@@ -113,8 +127,8 @@ export default class Jobs implements JobContract {
     jobName: string,
     parameters: T,
     tags: string[] = [],
-    callback?: (message: JobMessage) => void,
-    errorCallback?: (error: Error, id: string, tags: string[]) => void
+    callback?: Callback,
+    errorCallback?: ErrorCallback,
   ): Promise<{ id: string, tags: string[] }> {
 
     if (!await this.jobIsRegistered(jobName)) {
@@ -166,21 +180,11 @@ export default class Jobs implements JobContract {
     });
 
     worker.on("message", (message: JobMessage) => {
-      if (callback) {
-        callback(message);
-        return;
-      }
-
-      this.defaultCallback(message);
+      this.defaultCallback(message, callback);
     });
 
     worker.on("error", (err: Error) => {
-      if (errorCallback) {
-        errorCallback(err, id, tags);
-        return;
-      }
-
-      this.defaultErrorCallback(err, id, tags);
+      this.defaultErrorCallback(err, id, tags, errorCallback);
     });
 
     return {
@@ -228,10 +232,10 @@ export default class Jobs implements JobContract {
     jobName: string,
     parameters: T,
     tags: string[] = [],
-    callback?: (message: JobMessage) => void,
-    errorCallback?: (error: Error, id: string, tags: string[]) => void,
+    callback?: Callback,
+    errorCallback?: ErrorCallback,
     id?: string
-  ): Promise<{ id: string, tags: string[] }> {
+  ): Promise<{ id: string, tags: string[], error?: Error }> {
 
     if (!await this.jobIsRegistered(jobName)) {
       throw new Error("Job not registered");
@@ -239,9 +243,9 @@ export default class Jobs implements JobContract {
 
     Logger.info("Running job", jobName, tags, id);
 
-    let resolver: (value: unknown) => void;
+    let resolver: (value?: Error) => void;
 
-    const promise = new Promise((res) => {
+    const promise = new Promise<undefined | Error>((res) => {
       resolver = res;
     });
 
@@ -262,32 +266,25 @@ export default class Jobs implements JobContract {
 
     worker.on("message", (message: JobMessage) => {
       if (message.status === JobStatusEnum.COMPLETED || message.status === JobStatusEnum.FAILED) {
-        resolver(null);
-      }
-      if (callback) {
-        callback(message);
-        return;
+        resolver(undefined);
       }
 
-      this.defaultCallback(message);
+      this.defaultCallback(message, callback);
     });
 
     worker.on("error", (err: Error) => {
-      if (errorCallback) {
-        errorCallback(err, actualId, tags);
-        return;
-      }
-
-      this.defaultErrorCallback(err, actualId, tags);
+      this.defaultErrorCallback(err, actualId, tags, errorCallback);
+      resolver(err);
     });
 
-    await promise;
+    const err = await promise;
 
     Logger.info("Job finished", actualId, tags);
 
     return {
       id: actualId,
-      tags
+      tags,
+      error: err
     };
   }
 }
