@@ -89,7 +89,8 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
       stream,
       {
         delimiter: ";",
-        headers: ["1", "2", "3", "4", "5", "6", "7", "8"]
+        headers: ["1", "2", "3", "4", "5", "6", "7", "8"],
+        ignoreEmpty: true,
       }
     );
 
@@ -167,6 +168,9 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
 
             csvStream.resume();
           });
+      })
+      .on("error", (err) => {
+        Logger.error("Ignoring line because of error: ", err.message, err.stack);
       })
       .on("end", async () => {
 

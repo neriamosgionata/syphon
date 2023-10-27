@@ -42,9 +42,13 @@ export interface ScraperContract extends BaseScraperContract {
 
   typeIn(selector: string, text: string, options?: { delay: number }): Promise<void>;
 
+  keyEnter(selector: string, options?: { delay: number }): Promise<void>;
+
   click(selector: string): Promise<void>;
 
   focus(selector: string): Promise<void>;
+
+  searchAndEnter(inputSelector: string, searchQuery: string): Promise<void>;
 
   evaluate<T>(fn: (...args: any[]) => T): Promise<T>;
 }
@@ -115,6 +119,25 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     throw new Error("Page is not ready");
   }
 
+  async keyEnter(selector: string, options: { delay: number } = {delay: 0}): Promise<void> {
+    if (this.page) {
+      try {
+        await this.page.evaluate((selector) => {
+          const element = (document.querySelector(selector) as HTMLInputElement);
+          element.focus();
+        }, selector);
+
+        await new Promise((resolve) => setTimeout(resolve, options.delay ?? (32 + (Math.random() * 137))));
+
+        await this.page.keyboard.press("Enter");
+      } catch (e) {
+        await this.registerError(e, "keyEnter");
+      }
+      return;
+    }
+    throw new Error("Page is not ready");
+  }
+
   async evaluate<T>(fn: (...args: any[]) => T): Promise<T> {
     if (this.page) {
       try {
@@ -149,5 +172,11 @@ export default class Scraper extends BaseScraper implements ScraperContract {
       return;
     }
     throw new Error("Page is not ready");
+  }
+
+  async searchAndEnter(inputSelector: string, searchQuery: string): Promise<void> {
+    await this.typeIn(inputSelector, searchQuery, {delay: 33})
+    await this.keyEnter(inputSelector, {delay: 37});
+    await this.waitRandom();
   }
 }

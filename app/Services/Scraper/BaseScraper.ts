@@ -250,8 +250,6 @@ export default class BaseScraper implements BaseScraperContract {
       await this.writeTableLog(['ERRORS', ...this.errors.map((e) => e.message)]);
     }
 
-    await this.writeLog('info', '\n\r');
-
     this.registeredHandlers = [];
     this.registeredTests = [];
   }
