@@ -1,16 +1,16 @@
 import {Browser, Page} from "puppeteer";
 import BaseScraper, {
   BaseScraperContract,
-  HandlerFunction,
-  HandlerReturn,
-  RunReturn,
-  TestFunction
+  ScraperHandlerFunction,
+  ScraperHandlerReturn,
+  ScraperRunReturn,
+  ScraperTestFunction
 } from "App/Services/Scraper/BaseScraper";
 import Config from "@ioc:Adonis/Core/Config";
 import fs from "fs";
 
 export interface ScraperContract extends BaseScraperContract {
-  run<T extends HandlerReturn<any>>(): Promise<RunReturn<T>>;
+  run<T extends ScraperHandlerReturn<any>>(): Promise<ScraperRunReturn<T>>;
 
   //SETUP
 
@@ -22,37 +22,37 @@ export interface ScraperContract extends BaseScraperContract {
 
   setLoggerChannel(logChannel: string, writeOnConsole: boolean): ScraperContract;
 
-  setTests(testsFunctions: TestFunction[]): ScraperContract;
+  setTests(testsFunctions: ScraperTestFunction[]): ScraperContract;
 
-  setHandlers(handlersFunctions: HandlerFunction<any>[]): ScraperContract;
+  setHandlers(handlersFunctions: ScraperHandlerFunction<any>[]): ScraperContract;
 
   setScraperStatusName(name: string): ScraperContract;
 
   //HELPERS
 
-  goto(href: string, timeoutMs: number): HandlerFunction<void>;
+  goto(href: string, timeoutMs: number): ScraperHandlerFunction<void>;
 
-  checkForCaptcha(page: Page): HandlerFunction<boolean>;
+  checkForCaptcha(page: Page): ScraperHandlerFunction<boolean>;
 
-  waitRandom(): HandlerFunction<void>;
+  waitRandom(): ScraperHandlerFunction<void>;
 
-  removeCookiesHref(page: Page): HandlerFunction<void>;
+  removeCookiesHref(page: Page): ScraperHandlerFunction<void>;
 
-  typeIn(selector: string, text: string, options?: { delay: number }): HandlerFunction<void>;
+  typeIn(selector: string, text: string, options?: { delay: number }): ScraperHandlerFunction<void>;
 
-  keyEnter(selector: string, options?: { delay: number }): HandlerFunction<void>;
+  keyEnter(selector: string, options?: { delay: number }): ScraperHandlerFunction<void>;
 
-  click(selector: string): HandlerFunction<void>;
+  click(selector: string): ScraperHandlerFunction<void>;
 
-  focus(selector: string): HandlerFunction<void>;
+  focus(selector: string): ScraperHandlerFunction<void>;
 
-  searchAndEnter(inputSelector: string, searchQuery: string): HandlerFunction<void>[];
+  searchAndEnter(inputSelector: string, searchQuery: string): ScraperHandlerFunction<void>[];
 
-  evaluate<T>(fn: (...args: any[]) => T): HandlerFunction<T>;
+  evaluate<T>(fn: (...args: any[]) => T, ...args: any[]): ScraperHandlerFunction<T>;
 
-  takeScreenshot(): HandlerFunction<void>;
+  takeScreenshot(name?: string): ScraperHandlerFunction<void>;
 
-  removeGoogleGPDR(): HandlerFunction<void>;
+  removeGoogleGPDR(): ScraperHandlerFunction<void>;
 }
 
 export default class Scraper extends BaseScraper implements ScraperContract {
@@ -66,7 +66,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
 
   //HELPERS
 
-  goto(href: string, timeoutMs: number = 10000): HandlerFunction<void> {
+  goto(href: string, timeoutMs: number = 10000): ScraperHandlerFunction<void> {
     return async (_browser: Browser, _page: Page) => {
       if (_page) {
         await Promise.all([
@@ -81,7 +81,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  checkForCaptcha(): HandlerFunction<boolean> {
+  checkForCaptcha(): ScraperHandlerFunction<boolean> {
     return async (_browser: Browser, _page: Page) => {
       return _page.evaluate(() => {
         const selectors = [...document.querySelectorAll('iframe')] as HTMLIFrameElement[];
@@ -90,13 +90,13 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  waitRandom(): HandlerFunction<void> {
+  waitRandom(): ScraperHandlerFunction<void> {
     return async (_browser: Browser, _page: Page) => {
       await new Promise((res) => setTimeout(res, 87 + Math.random() * 5000));
     }
   }
 
-  removeCookiesHref(page: Page): HandlerFunction<void> {
+  removeCookiesHref(page: Page): ScraperHandlerFunction<void> {
     return async (_browser: Browser, _page: Page) => {
       const client = await page.target().createCDPSession();
       const cookies = (await client.send('Network.getAllCookies')).cookies;
@@ -104,7 +104,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  typeIn(selector: string, text: string, options: { delay: number } = {delay: 0}): HandlerFunction<void> {
+  typeIn(selector: string, text: string, options: { delay: number } = {delay: 0}): ScraperHandlerFunction<void> {
     return async (_browser: Browser, _page: Page) => {
       if (_page) {
         await _page.evaluate((selector) => {
@@ -123,7 +123,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  keyEnter(selector: string, options: { delay: number } = {delay: 0}): HandlerFunction<void> {
+  keyEnter(selector: string, options: { delay: number } = {delay: 0}): ScraperHandlerFunction<void> {
     return async (_browser: Browser, _page: Page) => {
       if (_page) {
         await _page.evaluate((selector) => {
@@ -140,16 +140,16 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  evaluate<T>(fn: (...args: any[]) => T): HandlerFunction<T> {
+  evaluate<T>(fn: (...args: any[]) => T, ...args: any[]): ScraperHandlerFunction<T> {
     return async (_browser: Browser, _page: Page) => {
       if (_page) {
-        return await _page.evaluate(fn);
+        return await _page.evaluate(fn, ...args);
       }
       throw new Error("Page is not ready");
     }
   }
 
-  click(selector: string): HandlerFunction<void> {
+  click(selector: string): ScraperHandlerFunction<void> {
     return async (_browser: Browser, _page: Page) => {
       if (_page) {
         await _page.click(selector);
@@ -158,7 +158,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  focus(selector: string): HandlerFunction<void> {
+  focus(selector: string): ScraperHandlerFunction<void> {
     return async (_browser: Browser, _page: Page) => {
       if (_page) {
         await _page.focus(selector);
@@ -168,7 +168,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  searchAndEnter(inputSelector: string, searchQuery: string): HandlerFunction<void>[] {
+  searchAndEnter(inputSelector: string, searchQuery: string): ScraperHandlerFunction<void>[] {
     return [
       this.typeIn(inputSelector, searchQuery, {delay: 33}),
       this.keyEnter(inputSelector, {delay: 37}),
@@ -176,7 +176,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     ];
   }
 
-  takeScreenshot(): HandlerFunction<void> {
+  takeScreenshot(name?: string): ScraperHandlerFunction<void> {
     return async (_browser: Browser, _page: Page) => {
       if (_page) {
         const path = Config.get("app.storage.data_folder") + "/screenshots";
@@ -185,7 +185,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
           fs.mkdirSync(path, {recursive: true});
         }
 
-        const fullPath = path + "/screenshot-" + Date.now() + ".png";
+        const fullPath = path + (name ?? "/screenshot-" + Date.now() + ".png");
         await _page.screenshot({path: fullPath});
         return;
       }
@@ -193,7 +193,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  removeGoogleGPDR(): HandlerFunction<void> {
+  removeGoogleGPDR(): ScraperHandlerFunction<void> {
     return async (_browser: Browser, _page: Page) => {
 
       for (const context of _page.frames()) {

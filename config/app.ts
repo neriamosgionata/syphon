@@ -197,6 +197,12 @@ export const logger: LoggerConfig = {
       lifeTime: 7, //days
       permissions: 755,
       type: LogChannelEnum.DAILY
+    },
+    scraper: {
+      baseName: "scraper-daily",
+      lifeTime: 7, //days
+      permissions: 755,
+      type: LogChannelEnum.DAILY,
     }
   }
 };

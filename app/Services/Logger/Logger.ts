@@ -39,14 +39,14 @@ export interface LoggerContract {
 }
 
 export default class Logger implements LoggerContract {
-  private config: {
+  private readonly config: {
     baseName: string,
     lifeTime: number, //not implemented yet
     permissions: number,
     type: LogChannelEnum,
   };
 
-  private logFolder: string;
+  private readonly logFolder: string;
 
   private LOG_LEVEL_TO_FILE = {
     [LogLevelEnum.DEBUG]: "info",
@@ -57,8 +57,8 @@ export default class Logger implements LoggerContract {
   };
 
   constructor(
-    private logChannelName: string = "default",
-    private logPrefix: string = "adonis",
+    private readonly logChannelName: string = "default",
+    private readonly logPrefix: string = "adonis",
     private printToConsole: boolean = false,
   ) {
     this.logFolder = Config.get("app.logger.log_folder");

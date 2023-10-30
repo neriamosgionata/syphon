@@ -6,7 +6,7 @@ export default class LogServiceProvider {
   }
 
   public register() {
-    this.app.container.singleton(AppContainerAliasesEnum.Logger, () => new (require("App/Services/Logger/Logger").default)());
+    this.app.container.singleton(AppContainerAliasesEnum.Logger, () => new (require("App/Services/Logger/Logger").default)("daily"));
   }
 
   public async boot() {

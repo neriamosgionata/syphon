@@ -13,7 +13,7 @@ export interface JobContract {
     jobName: string,
     parameters: T,
     tags?: string[],
-    callback?: (message: JobMessage) => void,
+    payloadCallback?: (message: JobMessage) => void,
     errorCallback?: (error: Error, id: string, tags: string[]) => void
   ): Promise<{ id: string, tags: string[] }>;
 
@@ -21,7 +21,7 @@ export interface JobContract {
     jobName: string,
     parameters: T,
     tags?: string[],
-    callback?: (message: JobMessage) => void,
+    payloadCallback?: (message: JobMessage) => void,
     errorCallback?: (error: Error, id: string, tags: string[]) => void,
     id?: string
   ): Promise<{ id: string, tags: string[], error?: Error }>;
@@ -95,9 +95,10 @@ export default class Jobs implements JobContract {
       .exec();
   }
 
-  private async defaultCallback(message: JobMessage, callback?: Callback) {
-    if (callback) {
-      await callback(message);
+  private async defaultCallback(message: JobMessage, payloadCallback?: Callback) {
+    if (payloadCallback && message.status === JobStatusEnum.MESSAGE) {
+      await payloadCallback(message);
+      return;
     }
     return this.catchJobMessage(message);
   }
@@ -127,7 +128,7 @@ export default class Jobs implements JobContract {
     jobName: string,
     parameters: T,
     tags: string[] = [],
-    callback?: Callback,
+    payloadCallback?: Callback,
     errorCallback?: ErrorCallback,
   ): Promise<{ id: string, tags: string[] }> {
 
@@ -180,7 +181,7 @@ export default class Jobs implements JobContract {
     });
 
     worker.on("message", (message: JobMessage) => {
-      this.defaultCallback(message, callback);
+      this.defaultCallback(message, payloadCallback);
     });
 
     worker.on("error", (err: Error) => {
@@ -232,7 +233,7 @@ export default class Jobs implements JobContract {
     jobName: string,
     parameters: T,
     tags: string[] = [],
-    callback?: Callback,
+    payloadCallback?: Callback,
     errorCallback?: ErrorCallback,
     id?: string
   ): Promise<{ id: string, tags: string[], error?: Error }> {
@@ -269,7 +270,7 @@ export default class Jobs implements JobContract {
         resolver(undefined);
       }
 
-      this.defaultCallback(message, callback);
+      this.defaultCallback(message, payloadCallback);
     });
 
     worker.on("error", (err: Error) => {

@@ -3,16 +3,16 @@ import {LoggerContract} from "App/Services/Logger/Logger";
 import Logger from "@ioc:Providers/Logger";
 import ScraperStatus from "App/Models/ScraperStatus";
 
-export type TestFunction = (_browser: Browser, _page: Page) => Promise<boolean>;
+export type ScraperTestFunction = (_browser: Browser, _page: Page) => Promise<boolean>;
 
-export type HandlerReturn<T extends ({ [p: string | number]: any } | null | undefined)> = T;
+export type ScraperHandlerReturn<T extends ({ [p: string | number]: any } | null | undefined)> = T;
 
-export type HandlerFunction<T extends HandlerReturn<any>> = (_browser: Browser, _page: Page) => Promise<T>;
+export type ScraperHandlerFunction<T extends ScraperHandlerReturn<any>> = (_browser: Browser, _page: Page) => Promise<T>;
 
-export type RunReturn<T extends HandlerReturn<any>> = { results: T, errors: Error[] };
+export type ScraperRunReturn<T extends ScraperHandlerReturn<any>> = { results: T, errors: Error[] };
 
 export interface BaseScraperContract {
-  run<T extends HandlerReturn<any>>(): Promise<RunReturn<T>>;
+  run<T extends ScraperHandlerReturn<any>>(): Promise<ScraperRunReturn<T>>;
 
   // SETUP
 
@@ -24,9 +24,9 @@ export interface BaseScraperContract {
 
   setLoggerChannel(logChannel: string, writeOnConsole: boolean): BaseScraperContract;
 
-  setTests(testsFunctions: TestFunction[]): BaseScraperContract;
+  setTests(testsFunctions: ScraperTestFunction[]): BaseScraperContract;
 
-  setHandlers(handlersFunctions: HandlerFunction<any>[]): BaseScraperContract;
+  setHandlers(handlersFunctions: ScraperHandlerFunction<any>[]): BaseScraperContract;
 
   setScraperStatusName(name: string): BaseScraperContract;
 
@@ -54,8 +54,8 @@ export default class BaseScraper implements BaseScraperContract {
 
   protected context: BrowserContext;
 
-  protected registeredTests: TestFunction[] = [];
-  protected registeredHandlers: HandlerFunction<any>[] = [];
+  protected registeredTests: ScraperTestFunction[] = [];
+  protected registeredHandlers: ScraperHandlerFunction<any>[] = [];
 
   protected logger: LoggerContract;
 
@@ -92,12 +92,12 @@ export default class BaseScraper implements BaseScraperContract {
     return this;
   }
 
-  setTests(testsFunctions: TestFunction[]): this {
+  setTests(testsFunctions: ScraperTestFunction[]): this {
     this.registeredTests = testsFunctions;
     return this;
   }
 
-  setHandlers(handlersFunctions: HandlerFunction<any>[]): this {
+  setHandlers(handlersFunctions: ScraperHandlerFunction<any>[]): this {
     this.registeredHandlers = handlersFunctions;
     return this;
   }
@@ -173,7 +173,7 @@ export default class BaseScraper implements BaseScraperContract {
 
   //HANDLER
 
-  async run<T extends HandlerReturn<any>>(): Promise<RunReturn<T>> {
+  async run<T extends ScraperHandlerReturn<any>>(): Promise<ScraperRunReturn<T>> {
     await this.start();
 
     this.writeLog('info', "-> testing task service functionalities");
@@ -249,7 +249,8 @@ export default class BaseScraper implements BaseScraperContract {
         width: 1920,
       },
       headless: this.withHeadlessChrome,
-      args
+      args,
+      protocolTimeout: 300000,
     };
 
     const puppeteer = (await import("puppeteer-extra")).default;
@@ -290,7 +291,7 @@ export default class BaseScraper implements BaseScraperContract {
     this.registeredTests = [];
   }
 
-  protected async handle<T extends HandlerReturn<any>>(): Promise<T> {
+  protected async handle<T extends ScraperHandlerReturn<any>>(): Promise<T> {
     let result: T = {} as T;
 
     this.writeLog('info', "-> handling function to puppeteer");

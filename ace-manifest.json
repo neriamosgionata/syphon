@@ -126,13 +126,13 @@
       "aliases": [],
       "flags": []
     },
-    "test:newsletter_articles": {
+    "test:newsletter": {
       "settings": {
         "loadApp": true,
         "stayAlive": false
       },
-      "commandPath": "./commands/TestNewsletterArticles",
-      "commandName": "test:newsletter_articles",
+      "commandPath": "./commands/TestNewsletter",
+      "commandName": "test:newsletter",
       "description": "",
       "args": [
         {

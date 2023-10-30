@@ -2,7 +2,7 @@ import {BaseCommand} from '@adonisjs/core/build/standalone'
 import fs from "fs";
 import ProgressBar from "@ioc:Providers/ProgressBar";
 import Logger from '@ioc:Providers/Logger';
-import {AnalyzeDomainsCsvJobParameters, Row} from "App/Jobs/AnalyzeDomainsCsv";
+import {AnalyzeDomainsCsvJobParameters, Row} from "App/Jobs/AnalyzeDomainsCsvJob";
 import Jobs from "@ioc:Providers/Jobs";
 import {parseStream} from "fast-csv";
 import path from "path";
@@ -124,7 +124,7 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
             return () => new Promise<void>((resP) => {
                 Jobs
                   .runWithoutDispatch<AnalyzeDomainsCsvJobParameters>(
-                    "AnalyzeDomainsCsv",
+                    "AnalyzeDomainsCsvJob",
                     {
                       rows: [...rows]
                     },
@@ -187,7 +187,7 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
               return () => new Promise<void>((resP) => {
                   Jobs
                     .runWithoutDispatch<AnalyzeDomainsCsvJobParameters>(
-                      "AnalyzeDomainsCsv",
+                      "AnalyzeDomainsCsvJob",
                       {
                         rows: [...rows]
                       },
