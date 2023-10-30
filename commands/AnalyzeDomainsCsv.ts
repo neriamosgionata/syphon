@@ -171,6 +171,8 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
       })
       .on("error", (err) => {
         Logger.error("Ignoring line because of error: ", err.message, err.stack);
+
+        csvStream.resume();
       })
       .on("end", async () => {
 
