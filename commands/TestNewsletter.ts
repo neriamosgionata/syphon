@@ -62,10 +62,11 @@ export default class TestNewsletter extends BaseCommand {
     let CHUNK_LENGTH = 4;
 
     for (const articleUrl of articleUrls) {
-      chunk.push(() => Jobs.runWithoutDispatch<ScrapeNewsArticleJobParameters>(
+      chunk.push(
+        () => Jobs.runWithoutDispatch<ScrapeNewsArticleJobParameters>(
           "ScrapeNewsArticleJob",
           {
-            articleUrl: articleUrl,
+            articleUrl,
           },
           [],
           (jobMessage) => {

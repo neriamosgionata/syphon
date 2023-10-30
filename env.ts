@@ -36,5 +36,7 @@ export default Env.rules({
   LOG_FOLDER: Env.schema.string(),
 
   MONGO_DSN: Env.schema.string(),
-  MONGO_DATABASE: Env.schema.string()
+  MONGO_DATABASE: Env.schema.string(),
+
+  //H20_URL: Env.schema.string(),
 });

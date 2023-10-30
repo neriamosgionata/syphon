@@ -50,7 +50,7 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
 
     let totalElement = 266736104;
     let singleRows = 50000;
-    let perChunk = singleRows * 16;
+    let perChunk = singleRows * 8;
 
     let totalBatches = Math.ceil(totalElement / perChunk);
 
@@ -99,7 +99,7 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
 
     csvStream
       .on("data", (row: Row) => {
-        if (currentIndex === 16) {
+        if (currentIndex === 8) {
           currentIndex = 0;
         }
 
