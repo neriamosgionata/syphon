@@ -59,6 +59,18 @@
       "aliases": [],
       "flags": []
     },
+    "match:domains_csv": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/MatchDomainsCsv",
+      "commandName": "match:domains_csv",
+      "description": "",
+      "args": [],
+      "aliases": [],
+      "flags": []
+    },
     "test:ticker_chart": {
       "settings": {
         "loadApp": true,

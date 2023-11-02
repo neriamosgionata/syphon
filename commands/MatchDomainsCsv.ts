@@ -2,17 +2,17 @@ import {BaseCommand} from '@adonisjs/core/build/standalone'
 import fs from "fs";
 import ProgressBar from "@ioc:Providers/ProgressBar";
 import Logger from '@ioc:Providers/Logger';
-import {AnalyzeDomainsCsvJobParameters, Row} from "App/Jobs/AnalyzeDomainsCsvJob";
 import Jobs from "@ioc:Providers/Jobs";
 import {parseStream} from "fast-csv";
 import path from "path";
 import Config from "@ioc:Adonis/Core/Config";
+import {MatchDomainsCsvJobParameters, Row} from "App/Jobs/MatchDomainsCsvJob";
 
-export default class AnalyzeDomainsCsv extends BaseCommand {
+export default class MatchDomainsCsv extends BaseCommand {
   /**
    * Command name is used to run the command
    */
-  public static commandName = 'analyze:domains_csv'
+  public static commandName = 'match:domains_csv'
 
   /**
    * Command description is displayed in the "help" output
@@ -35,15 +35,16 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
     stayAlive: false,
   }
 
-  private mapFunction(rows: Row[], index: number): () => Promise<void> {
+  private mapFunction(rows: Row[], toMatch: { "1": string, "2": string }[], index: number): () => Promise<void> {
     return () => new Promise<void>((resP) => {
         Jobs
-          .runWithoutDispatch<AnalyzeDomainsCsvJobParameters>(
-            "AnalyzeDomainsCsvJob",
+          .runWithoutDispatch<MatchDomainsCsvJobParameters>(
+            "MatchDomainsCsvJob",
             {
               rows: [...rows],
+              toMatch: [...toMatch],
             },
-            ["domains-detailed-found.csv"],
+            ["domains-detailed-matched.csv"],
             undefined,
             undefined,
             index.toString(),
@@ -57,7 +58,8 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
 
   public async run() {
     const filePath = path.join(Config.get("app.storage.data_folder"), "domains-detailed.csv");
-    const filePathEnd = path.join(Config.get("app.storage.data_folder"), "domains-detailed-found.csv");
+    const filePathEnd = path.join(Config.get("app.storage.data_folder"), "domains-detailed-matched.csv");
+    const filePathMatch = path.join(Config.get("app.storage.data_folder"), "bp-campari.csv");
 
     if (fs.existsSync(filePathEnd)) {
       fs.unlinkSync(filePathEnd);
@@ -68,21 +70,40 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
       return 1;
     }
 
-    let totalElement = 266728176;
-    let singleRows = 50000;
-    let perChunk = singleRows * 8;
+    //STEP 1
+    const toMatch: { "1": string, "2": string }[] = [];
 
-    let totalBatches = Math.ceil(totalElement / perChunk);
-
-    Logger.info(`Total batches: ${totalBatches}`);
-
-    ProgressBar.addBar(totalBatches, "Analyzing CSV, batches", "cyan");
-
-    let resolveCsvCommand: (value: (PromiseLike<unknown> | unknown)) => void;
-    const endPromise = new Promise((res) => {
-      resolveCsvCommand = res;
+    let resolveCsvMatchCommand: (value: (PromiseLike<unknown> | unknown)) => void;
+    const promiseMatch = new Promise((res) => {
+      resolveCsvMatchCommand = res;
     });
+    const csvStreamMatch = parseStream(
+      fs.createReadStream(filePathMatch),
+      {
+        delimiter: ",",
+        headers: ["1", "2"],
+        ignoreEmpty: true,
+      }
+    );
 
+    csvStreamMatch
+      .on("data", (row: Row) => {
+        toMatch.push({
+          "1": row["1"],
+          "2": row["2"],
+        });
+      })
+      .on("error", (err) => {
+        Logger.error("step1: error while streaming: ", err.message, err.stack);
+        resolveCsvMatchCommand(null);
+      })
+      .on("end", async () => {
+        resolveCsvMatchCommand(null);
+      });
+
+    await promiseMatch;
+
+    //STEP 2
     let currentRows: Row[][] = [
       [],
       [],
@@ -99,21 +120,34 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
       [],
       [],
       [],
-    ]
+    ];
 
-    const stream = fs.createReadStream(filePath)
+    let currentIndex = 0;
+    let added = 0;
+
+    let totalElement = 266728176;
+    let singleRows = 50000;
+    let perChunk = singleRows * 8;
+
+    let totalBatches = Math.ceil(totalElement / perChunk);
+
+    Logger.info(`Total batches: ${totalBatches}`);
+
+    ProgressBar.addBar(totalBatches, "Analyzing CSV, batches", "cyan");
+
+    let resolveCsvCommand: (value: (PromiseLike<unknown> | unknown)) => void;
+    const endPromise = new Promise((res) => {
+      resolveCsvCommand = res;
+    });
 
     const csvStream = parseStream(
-      stream,
+      fs.createReadStream(filePath),
       {
         delimiter: ";",
         headers: ["1", "2", "3", "4", "5", "6", "7", "8"],
         ignoreEmpty: true,
       }
     );
-
-    let currentIndex = 0;
-    let added = 0;
 
     csvStream
       .on("data", (row: Row) => {
@@ -130,16 +164,13 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
           return;
         }
 
-        Logger.info("Executing batch, pausing stream, added " + added + " rows");
-
         added = 0;
 
         csvStream.pause();
 
-
         Promise
           .all(
-            currentRows.map((rows, i) => this.mapFunction(rows, i)())
+            currentRows.map((rows, i) => this.mapFunction(rows, toMatch, i)())
           )
           .finally(async () => {
             currentRows = [
@@ -164,21 +195,17 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
           });
       })
       .on("error", (err) => {
-        Logger.error("error while streaming: ", err.message, err.stack);
+        Logger.error("step2: error while streaming: ", err.message, err.stack);
         ProgressBar.stopAll();
         resolveCsvCommand(null);
       })
       .on("end", async () => {
-        const cr = currentRows.filter((rows) => rows.length > 0)
+        const cr = currentRows.filter((rows) => rows.length > 0);
 
         if (cr.length === 0) {
-          Logger.info("Executing last batch");
-
           await Promise.all(
-            cr.map((rows, i) => this.mapFunction(rows, i)())
+            cr.map((rows, i) => this.mapFunction(rows, toMatch, i)())
           );
-
-          ProgressBar.next();
         }
 
         ProgressBar.stopAll();

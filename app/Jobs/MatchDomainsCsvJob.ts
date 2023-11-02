@@ -4,6 +4,19 @@ import fuzz from "fuzzball";
 import Config from "@ioc:Adonis/Core/Config";
 import path from "path";
 
+export type Row = {
+  '1': string,
+  '2': string,
+  '3': string,
+  '4': string,
+  '5': string,
+  '6': string,
+  '7': string,
+  '8': string,
+  '9': string,
+  '10': string,
+}
+
 const EXCLUDE = {
   "Campari": [],
   "Aperol": [],
@@ -23,37 +36,6 @@ const EXCLUDE = {
   "Glen Grant": [],
 }
 
-const SOCIETIES = [
-  "Campari",
-  "Aperol",
-  "Skyyvodka",
-  "Wild Turkey",
-  "Grand Marnier",
-  "Espolon",
-  "Appleton Estate",
-  "Bulldog Gin",
-  "Trois Rivères",
-  "Crodino",
-  "Averna",
-  "Cinzano",
-  "Riccadonna",
-  "Kingstone 62",
-  "Wray & Nephew",
-  "Glen Grant",
-];
-
-export type Row = {
-  '1': string,
-  '2': string,
-  '3': string,
-  '4': string,
-  '5': string,
-  '6': string,
-  '7': string,
-  '8': string,
-  '9': string,
-}
-
 const rowsToString = (rows: Row[]) => {
   let csv = "";
 
@@ -65,7 +47,7 @@ const rowsToString = (rows: Row[]) => {
 }
 
 const appendCsvLines = (rows: Row[]) => {
-  const filePath = path.join(Config.get("app.storage.data_folder"), "domains-detailed-found.csv");
+  const filePath = path.join(Config.get("app.storage.data_folder"), "domains-detailed-matched.csv");
 
   const stream = fs.createWriteStream(filePath, {flags: 'a'})
   stream.write(rowsToString(rows), (err) => {
@@ -76,7 +58,7 @@ const appendCsvLines = (rows: Row[]) => {
   stream.end();
 }
 
-const analyzeCsvRows = (rows: Row[]) => {
+const analyzeCsvRows = (rows: Row[], toMatch: { "1": string, "2": string }[]) => {
   let toAppend: Row[] = [];
 
   for (let row of rows) {
@@ -95,9 +77,8 @@ const analyzeCsvRows = (rows: Row[]) => {
     const row3LowerSplit2 = row3Lower.split(" ").join("_");
     const row3LowerSplit3 = row3Lower.split(" ").join("-");
 
-    for (const society of SOCIETIES) {
-      const societyLower = society.toLowerCase();
-      const excludes: string[] = EXCLUDE[society];
+    for (const society of toMatch) {
+      const excludes: string[] = EXCLUDE[society["1"]];
 
       if (excludes?.length > 0) {
         let found = false;
@@ -118,31 +99,32 @@ const analyzeCsvRows = (rows: Row[]) => {
       }
 
       if (
-        fuzz.token_set_ratio(row1Lower, societyLower) >= 65 ||
-        fuzz.token_set_ratio(row1LowerSplit1, societyLower) >= 65 ||
-        fuzz.token_set_ratio(row1LowerSplit2, societyLower) >= 65 ||
-        fuzz.token_set_ratio(row1LowerSplit3, societyLower) >= 65 ||
+        fuzz.token_set_ratio(row1Lower, society["2"]) >= 65 ||
+        fuzz.token_set_ratio(row1LowerSplit1, society["2"]) >= 65 ||
+        fuzz.token_set_ratio(row1LowerSplit2, society["2"]) >= 65 ||
+        fuzz.token_set_ratio(row1LowerSplit3, society["2"]) >= 65 ||
 
-        fuzz.token_set_ratio(row2Lower, societyLower) >= 65 ||
-        fuzz.token_set_ratio(row2LowerSplit1, societyLower) >= 65 ||
-        fuzz.token_set_ratio(row2LowerSplit2, societyLower) >= 65 ||
-        fuzz.token_set_ratio(row2LowerSplit3, societyLower) >= 65 ||
+        fuzz.token_set_ratio(row2Lower, society["2"]) >= 65 ||
+        fuzz.token_set_ratio(row2LowerSplit1, society["2"]) >= 65 ||
+        fuzz.token_set_ratio(row2LowerSplit2, society["2"]) >= 65 ||
+        fuzz.token_set_ratio(row2LowerSplit3, society["2"]) >= 65 ||
 
-        fuzz.token_set_ratio(row3Lower, societyLower) >= 65 ||
-        fuzz.token_set_ratio(row3LowerSplit1, societyLower) >= 65 ||
-        fuzz.token_set_ratio(row3LowerSplit2, societyLower) >= 65 ||
-        fuzz.token_set_ratio(row3LowerSplit3, societyLower) >= 65
+        fuzz.token_set_ratio(row3Lower, society["2"]) >= 65 ||
+        fuzz.token_set_ratio(row3LowerSplit1, society["2"]) >= 65 ||
+        fuzz.token_set_ratio(row3LowerSplit2, society["2"]) >= 65 ||
+        fuzz.token_set_ratio(row3LowerSplit3, society["2"]) >= 65
       ) {
         toAppend.push({
-          '1': row['1'] || "",
-          '2': row['2'] || "",
-          '3': row['3'] || "",
-          '4': row['4'] || "",
-          '5': row['5'] || "",
-          '6': row['6'] || "",
-          '7': row['7'] || "",
-          '8': row['8'] || "",
-          '9': society
+          '1': society["1"],
+          '2': society["2"],
+          '3': row['1'] || "",
+          '4': row['2'] || "",
+          '5': row['3'] || "",
+          '6': row['4'] || "",
+          '7': row['5'] || "",
+          '8': row['6'] || "",
+          '9': row['7'] || "",
+          '10': row['8'] || "",
         });
         break;
       }
@@ -153,12 +135,13 @@ const analyzeCsvRows = (rows: Row[]) => {
 }
 
 const handler = () => {
-  const {rows} = loadData<AnalyzeDomainsCsvJobParameters>(["rows"]);
-  analyzeCsvRows(rows);
+  const {rows, toMatch} = loadData<MatchDomainsCsvJobParameters>(["rows", "toMatch"]);
+  analyzeCsvRows(rows, toMatch);
 };
 
-export interface AnalyzeDomainsCsvJobParameters {
+export interface MatchDomainsCsvJobParameters {
   rows: Row[];
+  toMatch: { "1": string, "2": string }[];
 }
 
 export default runJob(handler);
