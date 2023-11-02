@@ -104,10 +104,10 @@ const analyzeCsvRows = (rows: Row[]) => {
       }
 
       if (
-        fuzz.token_set_ratio(row1Lower, societyLower) >= 70 ||
-        fuzz.token_set_ratio(row2LowerSplit1, societyLower) >= 70 ||
-        fuzz.token_set_ratio(row2LowerSplit2, societyLower) >= 70 ||
-        fuzz.token_set_ratio(row2LowerSplit3, societyLower) >= 70
+        fuzz.token_set_ratio(row1Lower, societyLower) >= 65 ||
+        fuzz.token_set_ratio(row2LowerSplit1, societyLower) >= 65 ||
+        fuzz.token_set_ratio(row2LowerSplit2, societyLower) >= 65 ||
+        fuzz.token_set_ratio(row2LowerSplit3, societyLower) >= 65
       ) {
         toAppend.push({
           '1': row['1'] || "",
