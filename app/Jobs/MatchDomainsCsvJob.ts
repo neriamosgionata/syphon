@@ -63,19 +63,7 @@ const analyzeCsvRows = (rows: Row[], toMatch: { "1": string, "2": string }[]) =>
 
   for (let row of rows) {
     const row1Lower = row['1'].toLowerCase();
-    const row1LowerSplit1 = row1Lower.split(" ").join("");
-    const row1LowerSplit2 = row1Lower.split(" ").join("_");
-    const row1LowerSplit3 = row1Lower.split(" ").join("-");
-
     const row2Lower = row['2'].toLowerCase();
-    const row2LowerSplit1 = row2Lower.split(" ").join("");
-    const row2LowerSplit2 = row2Lower.split(" ").join("_");
-    const row2LowerSplit3 = row2Lower.split(" ").join("-");
-
-    const row3Lower = row['3'].toLowerCase();
-    const row3LowerSplit1 = row3Lower.split(" ").join("");
-    const row3LowerSplit2 = row3Lower.split(" ").join("_");
-    const row3LowerSplit3 = row3Lower.split(" ").join("-");
 
     for (const society of toMatch) {
       const excludes: string[] = EXCLUDE[society["1"]];
@@ -85,8 +73,7 @@ const analyzeCsvRows = (rows: Row[], toMatch: { "1": string, "2": string }[]) =>
         for (const exclude of excludes) {
           if (
             fuzz.token_set_ratio(row1Lower, exclude.toLowerCase()) > 85 ||
-            fuzz.token_set_ratio(row2Lower, exclude.toLowerCase()) > 85 ||
-            fuzz.token_set_ratio(row3Lower, exclude.toLowerCase()) > 85
+            fuzz.token_set_ratio(row2Lower, exclude.toLowerCase()) > 85
           ) {
             found = true;
             break;
@@ -100,19 +87,7 @@ const analyzeCsvRows = (rows: Row[], toMatch: { "1": string, "2": string }[]) =>
 
       if (
         fuzz.token_set_ratio(row1Lower, society["2"]) >= 65 ||
-        fuzz.token_set_ratio(row1LowerSplit1, society["2"]) >= 65 ||
-        fuzz.token_set_ratio(row1LowerSplit2, society["2"]) >= 65 ||
-        fuzz.token_set_ratio(row1LowerSplit3, society["2"]) >= 65 ||
-
-        fuzz.token_set_ratio(row2Lower, society["2"]) >= 65 ||
-        fuzz.token_set_ratio(row2LowerSplit1, society["2"]) >= 65 ||
-        fuzz.token_set_ratio(row2LowerSplit2, society["2"]) >= 65 ||
-        fuzz.token_set_ratio(row2LowerSplit3, society["2"]) >= 65 ||
-
-        fuzz.token_set_ratio(row3Lower, society["2"]) >= 65 ||
-        fuzz.token_set_ratio(row3LowerSplit1, society["2"]) >= 65 ||
-        fuzz.token_set_ratio(row3LowerSplit2, society["2"]) >= 65 ||
-        fuzz.token_set_ratio(row3LowerSplit3, society["2"]) >= 65
+        fuzz.token_set_ratio(row2Lower, society["2"]) >= 65
       ) {
         toAppend.push({
           '1': society["1"],
