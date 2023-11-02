@@ -69,8 +69,8 @@ export default class AnalyzeDomainsCsv extends BaseCommand {
     }
 
     let totalElement = 266728176;
-    let singleRows = 50000;
-    let perChunk = singleRows * 8;
+    let singleRows = 25000;
+    let perChunk = singleRows * 15;
 
     let totalBatches = Math.ceil(totalElement / perChunk);
 
