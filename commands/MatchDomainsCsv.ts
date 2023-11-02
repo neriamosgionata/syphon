@@ -86,6 +86,8 @@ export default class MatchDomainsCsv extends BaseCommand {
       }
     );
 
+    Logger.info("Loading to match");
+
     csvStreamMatch
       .on("data", (row: Row) => {
         toMatch.push({
@@ -98,6 +100,7 @@ export default class MatchDomainsCsv extends BaseCommand {
         resolveCsvMatchCommand(null);
       })
       .on("end", async () => {
+        Logger.info(`Total to match: ${toMatch.length}`)
         resolveCsvMatchCommand(null);
       });
 
@@ -131,7 +134,7 @@ export default class MatchDomainsCsv extends BaseCommand {
 
     let totalBatches = Math.ceil(totalElement / perChunk);
 
-    Logger.info(`Total batches: ${totalBatches}`);
+    Logger.info(`Total csv batches: ${totalBatches}`);
 
     ProgressBar.addBar(totalBatches, "Analyzing CSV, batches", "cyan");
 
