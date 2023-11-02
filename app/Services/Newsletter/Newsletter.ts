@@ -39,7 +39,34 @@ export default class Newsletter implements NewsletterContract {
   private getArticleContent(): ScraperHandlerFunction<{ title?: string, content?: string }> {
     return Scraper.evaluate(() => {
       const title = (document.querySelector("h1") || document.querySelector("h2"))?.innerText;
-      const content = document.querySelector("article")?.innerText;
+
+      const articleBodySelectors = [
+        'div[class*="articleBody" i]',
+        'div[class*="article-body" i]',
+        'div[class*="description" i]',
+        'article > p',
+        'article > div',
+      ]
+
+      let content = "";
+
+      for (const articleBodySelector of articleBodySelectors) {
+        const allElements = [
+          ...document.querySelectorAll(articleBodySelector)
+        ] as HTMLElement[];
+
+        if (allElements.length === 0) {
+          continue;
+        }
+
+        const tmpContent = allElements.map(el => el.innerText).join("\n");
+
+        if (tmpContent) {
+          content = tmpContent;
+          break;
+        }
+      }
+
       return {title, content};
     });
   }

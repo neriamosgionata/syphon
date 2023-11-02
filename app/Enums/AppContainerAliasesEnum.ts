@@ -8,4 +8,6 @@ export enum AppContainerAliasesEnum {
   Newsletter = "Providers/Newsletter",
   Scraper = "Providers/Scraper",
   ProgressBar = "Providers/ProgressBar",
+  Helper = "Providers/Helper",
+  StringCleaner = "Providers/StringCleaner",
 }

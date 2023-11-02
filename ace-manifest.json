@@ -146,6 +146,26 @@
       "aliases": [],
       "flags": []
     },
+    "test:profiler": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/TestProfiler",
+      "commandName": "test:profiler",
+      "description": "",
+      "args": [
+        {
+          "type": "string",
+          "propertyName": "query",
+          "name": "query",
+          "required": true,
+          "description": "Query"
+        }
+      ],
+      "aliases": [],
+      "flags": []
+    },
     "dump:rcfile": {
       "settings": {},
       "commandPath": "@adonisjs/core/build/commands/DumpRc",

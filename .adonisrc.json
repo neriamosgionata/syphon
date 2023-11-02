@@ -32,6 +32,8 @@
     "./providers/MongoProvider",
     "./providers/ProgressBarProvider",
     "./providers/ScraperProvider",
+    "./providers/StringCleanerProvider",
+    "./providers/HelperProvider",
     "@adonisjs/core",
     "@adonisjs/lucid",
     "@adonisjs/auth",

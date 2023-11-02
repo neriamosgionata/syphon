@@ -7,7 +7,7 @@ import BaseScraper, {
   ScraperTestFunction
 } from "App/Services/Scraper/BaseScraper";
 import Config from "@ioc:Adonis/Core/Config";
-import fs from "fs";
+import Drive from "@ioc:Adonis/Core/Drive";
 
 export interface ScraperContract extends BaseScraperContract {
   run<T extends ScraperHandlerReturn<any>>(): Promise<ScraperRunReturn<T>>;
@@ -181,12 +181,10 @@ export default class Scraper extends BaseScraper implements ScraperContract {
       if (_page) {
         const path = Config.get("app.storage.data_folder") + "/screenshots";
 
-        if (!fs.existsSync(path)) {
-          fs.mkdirSync(path, {recursive: true});
-        }
-
         const fullPath = path + (name ?? "/screenshot-" + Date.now() + ".png");
-        await _page.screenshot({path: fullPath});
+        const img = await _page.screenshot();
+
+        await Drive.put(fullPath, img);
         return;
       }
       throw new Error("Page is not ready");
