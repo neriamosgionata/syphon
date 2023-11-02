@@ -1,4 +1,4 @@
-import {loadData, messageToParent, runJob} from "App/Services/Jobs/JobHelpers";
+import {BaseJobParameters, loadData, messageToParent, runJob} from "App/Services/Jobs/JobHelpers";
 import Newsletter from "@ioc:Providers/Newsletter";
 
 const scraperNewsArticle = async (articleUrl: string) => {
@@ -13,7 +13,7 @@ const handler = async () => {
   messageToParent(res);
 };
 
-export interface ScrapeNewsArticleJobParameters {
+export interface ScrapeNewsArticleJobParameters extends BaseJobParameters {
   articleUrl: string;
 }
 

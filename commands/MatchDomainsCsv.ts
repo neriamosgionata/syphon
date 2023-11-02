@@ -167,6 +167,8 @@ export default class MatchDomainsCsv extends BaseCommand {
           return;
         }
 
+        Logger.info(`Added ${added} rows, starting jobs`);
+
         added = 0;
 
         csvStream.pause();

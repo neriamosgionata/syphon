@@ -2,7 +2,7 @@ import Finance from "@ioc:Providers/Finance";
 import Config from "@ioc:Adonis/Core/Config";
 import TickerChart from "App/Models/TickerChart";
 import {ChartResultArray, ChartResultArrayQuote} from "yahoo-finance2/dist/esm/src/modules/chart";
-import {loadData, runJob} from "App/Services/Jobs/JobHelpers";
+import {BaseJobParameters, loadData, runJob} from "App/Services/Jobs/JobHelpers";
 import {ChartInterval} from "App/Services/Finance/Finance";
 import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
 import Database from "@ioc:Adonis/Lucid/Database";
@@ -84,7 +84,7 @@ const handler = async () => {
   }
 };
 
-export interface ImportChartDataJobParameters {
+export interface ImportChartDataJobParameters extends BaseJobParameters {
   ticker: string | string[];
   fromDate: string | number;
   interval: ChartInterval;

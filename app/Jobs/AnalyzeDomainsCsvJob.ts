@@ -1,4 +1,4 @@
-import {loadData, logMessage, runJob} from "App/Services/Jobs/JobHelpers";
+import {BaseJobParameters, loadData, logMessage, runJob} from "App/Services/Jobs/JobHelpers";
 import fs from "fs";
 import fuzz from "fuzzball";
 import Config from "@ioc:Adonis/Core/Config";
@@ -132,7 +132,7 @@ const handler = () => {
   analyzeCsvRows(rows);
 };
 
-export interface AnalyzeDomainsCsvJobParameters {
+export interface AnalyzeDomainsCsvJobParameters extends BaseJobParameters {
   rows: Row[];
 }
 

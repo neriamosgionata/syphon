@@ -1,6 +1,11 @@
 import {JobStatusEnum} from "App/Enums/JobStatusEnum";
 import {JobMessage} from "App/Services/Jobs/Jobs";
 
+export interface BaseJobParameters {
+  id: string,
+  tags: string[]
+}
+
 export const retriveWorkerThreadsData = () => {
   const {parentPort, workerData} = require("worker_threads");
   return {parentPort, workerData};
@@ -26,7 +31,7 @@ export const isCompleted = () => {
   parentPort?.postMessage({status: JobStatusEnum.COMPLETED, id: workerData.id, tags: workerData.tags} as JobMessage);
 };
 
-export const loadData = <T extends { [p: string | number]: any }>(keys: string[]): T => {
+export const loadData = <T extends BaseJobParameters>(keys: string[]): T => {
   const {workerData} = retriveWorkerThreadsData();
   const data: T = {} as T;
 

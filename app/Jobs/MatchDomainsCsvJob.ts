@@ -1,4 +1,4 @@
-import {loadData, logMessage, runJob} from "App/Services/Jobs/JobHelpers";
+import {BaseJobParameters, loadData, logMessage, runJob} from "App/Services/Jobs/JobHelpers";
 import fs from "fs";
 import fuzz from "fuzzball";
 import Config from "@ioc:Adonis/Core/Config";
@@ -70,6 +70,7 @@ const analyzeCsvRows = (rows: Row[], toMatch: { "1": string, "2": string }[]) =>
 
       if (excludes?.length > 0) {
         let found = false;
+
         for (const exclude of excludes) {
           if (
             fuzz.token_set_ratio(row1Lower, exclude.toLowerCase()) > 85 ||
@@ -114,7 +115,7 @@ const handler = () => {
   analyzeCsvRows(rows, toMatch);
 };
 
-export interface MatchDomainsCsvJobParameters {
+export interface MatchDomainsCsvJobParameters extends BaseJobParameters {
   rows: Row[];
   toMatch: { "1": string, "2": string }[];
 }
