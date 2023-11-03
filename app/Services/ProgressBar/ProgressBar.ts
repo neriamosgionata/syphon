@@ -3,7 +3,7 @@ import colors from "ansi-colors";
 import Application from "@ioc:Adonis/Core/Application";
 
 export interface ProgressBarContract {
-  addBar(length: number, title?: string, color?: string): number;
+  addBar(length: number, title?: string, color?: string, index?: number): number;
 
   next(index?: number, steps?: number): void;
 
@@ -36,7 +36,7 @@ export default class ProgressBar implements ProgressBarContract {
     this.multibarService = new progress.MultiBar({stream: stdout});
   }
 
-  addBar(length: number, title: string = "Progress", color: string = "cyan"): number {
+  addBar(length: number, title: string = "Progress", color: string = "cyan", index?: number): number {
     const titleLength = title.length;
     const maxTitleLength = 30;
     let toAdd = Math.ceil(maxTitleLength - titleLength);
@@ -53,8 +53,6 @@ export default class ProgressBar implements ProgressBarContract {
 
     newTitle += title + " -";
 
-    this.stepsStatus.push(0);
-
     if (Application.environment === "console") {
       const bar = this.multibarService.create(
         length,
@@ -62,9 +60,21 @@ export default class ProgressBar implements ProgressBarContract {
         null,
         {format: newTitle + ' |' + colors[color]('{bar}') + '| {percentage}% | ETA: {eta}s | {value}/{total}'}
       );
+
+      if (index) {
+        this.bars[index] = bar;
+        return index;
+      }
+
       return this.bars.push(bar) - 1;
     }
 
+    if (index) {
+      this.stepsStatus[index] = 0;
+      return index;
+    }
+
+    this.stepsStatus.push(0);
     return this.stepsStatus.length - 1;
   }
 

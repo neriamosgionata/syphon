@@ -102,18 +102,18 @@ export default class Jobs implements JobContract {
     }
 
     if (message.status === JobMessageEnum.PROGRESS_BAR_ON) {
-      const index = ProgressBar.addBar(message.payload.total, message.payload.title);
-      sendToWorker(worker, JobMessageEnum.PROGRESS_BAR_INDEX, {progressIndex: index});
+      ProgressBar.addBar(message.payload.total, message.payload.title, message.payload.progressBarIndex);
+      sendToWorker(worker, JobMessageEnum.PROGRESS_BAR_INDEX, {progressBarIndex: message.payload.progressBarIndex});
       return;
     }
 
     if (message.status === JobMessageEnum.PROGRESS_BAR_UPDATE) {
-      ProgressBar.next(message.payload.progressIndex, message.payload.current);
+      ProgressBar.next(message.payload.progressBarIndex, message.payload.current);
       return;
     }
 
     if (message.status === JobMessageEnum.PROGRESS_BAR_OFF) {
-      ProgressBar.stop(message.payload.progressIndex);
+      ProgressBar.stop(message.payload.progressBarIndex);
       return;
     }
 

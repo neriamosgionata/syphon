@@ -4,7 +4,7 @@ import {JobMessage} from "App/Services/Jobs/Jobs";
 export interface BaseJobParameters {
   id?: string,
   tags?: string[],
-  progressIndex?: number,
+  progressBarIndex?: number,
 }
 
 export const retriveWorkerThreadsData = () => {
@@ -78,7 +78,7 @@ export const runJob = (mainHandler: () => void | Promise<void>): RunJobFunction 
   };
 };
 
-export const progressBarOn = (total: number, title?: string) => {
+export const progressBarOn = (progressBarIndex: number, total: number, title?: string) => {
   const {parentPort, workerData} = retriveWorkerThreadsData();
   parentPort?.postMessage({
     status: JobMessageEnum.PROGRESS_BAR_ON,
@@ -87,11 +87,12 @@ export const progressBarOn = (total: number, title?: string) => {
     payload: {
       title,
       total,
+      progressBarIndex
     }
   } as JobMessage);
 }
 
-export const progressBarUpdate = (progressIndex: number, current: number) => {
+export const progressBarUpdate = (progressBarIndex: number, current: number) => {
   const {parentPort, workerData} = retriveWorkerThreadsData();
   parentPort?.postMessage({
     status: JobMessageEnum.PROGRESS_BAR_UPDATE,
@@ -99,19 +100,19 @@ export const progressBarUpdate = (progressIndex: number, current: number) => {
     tags: workerData.tags,
     payload: {
       current,
-      progressIndex,
+      progressBarIndex,
     }
   } as JobMessage);
 }
 
-export const progressBarOff = (progressIndex: number) => {
+export const progressBarOff = (progressBarIndex: number) => {
   const {parentPort, workerData} = retriveWorkerThreadsData();
   parentPort?.postMessage({
     status: JobMessageEnum.PROGRESS_BAR_OFF,
     id: workerData.id,
     tags: workerData.tags,
     payload: {
-      progressIndex,
+      progressBarIndex,
     }
   } as JobMessage);
 }
