@@ -30,7 +30,7 @@ export interface ScraperContract extends BaseScraperContract {
 
   //HELPERS
 
-  goto(href: string, timeoutMs: number): ScraperHandlerFunction<void>;
+  goto(href: string, timeoutMs?: number): ScraperHandlerFunction<void>;
 
   checkForCaptcha(page: Page): ScraperHandlerFunction<boolean>;
 
@@ -52,7 +52,7 @@ export interface ScraperContract extends BaseScraperContract {
 
   takeScreenshot(name?: string): ScraperHandlerFunction<void>;
 
-  removeGoogleGPDR(): ScraperHandlerFunction<void>;
+  removeGPDR(): ScraperHandlerFunction<void>;
 }
 
 export default class Scraper extends BaseScraper implements ScraperContract {
@@ -191,7 +191,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  removeGoogleGPDR(): ScraperHandlerFunction<void> {
+  removeGPDR(): ScraperHandlerFunction<void> {
     return async (_browser: Browser, _page: Page) => {
 
       for (const context of _page.frames()) {
@@ -207,7 +207,11 @@ export default class Scraper extends BaseScraper implements ScraperContract {
             + '([^a-zA-Z0-9]+)?$'
           );
 
-          const buttons = [...document.querySelectorAll('button'), ...document.querySelectorAll('input[type="button"]')] as HTMLButtonElement[];
+          const buttons = [
+            ...document.querySelectorAll('button'),
+            ...document.querySelectorAll('input[type="button"]'),
+            ...document.querySelectorAll('input[type="submit"]'),
+          ] as HTMLButtonElement[];
 
           for (let button of buttons) {
             if (button.innerText.toLowerCase().match(new RegExp(acceptREString, 'i'))) {
@@ -220,7 +224,11 @@ export default class Scraper extends BaseScraper implements ScraperContract {
 
       await new Promise((resolve) => setTimeout(resolve, 32 + Math.random() * 250));
 
-      await _page.waitForNavigation({timeout: 10000});
+      try {
+        await _page.waitForNavigation({timeout: 10000});
+      } catch (e) {
+
+      }
     }
   }
 

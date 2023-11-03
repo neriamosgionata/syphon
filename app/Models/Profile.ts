@@ -85,10 +85,10 @@ export default class Profile extends BaseModel {
   @column()
   financialCurrency: string | null;
 
-  @column()
+  @column({columnName: "average_daily_volume_3_month"})
   averageDailyVolume3Month: number | null;
 
-  @column()
+  @column({columnName: "average_daily_volume_10_day"})
   averageDailyVolume10Day: number | null;
 
   @column()

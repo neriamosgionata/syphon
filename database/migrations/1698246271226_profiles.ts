@@ -9,8 +9,11 @@ export default class extends BaseSchema {
     this.schema.createTable(this.tableName, (table) => {
       table.increments('id')
 
-      table.string('language').notNullable()
-      table.string('region').notNullable()
+      table.string('ticker').notNullable()
+      table.dateTime("index_date").notNullable()
+
+      table.string('language').nullable()
+      table.string('region').nullable()
       table.enum('quote_type', [
         ProfileQuoteTypeEnum.CRYPTOCURRENCY,
         ProfileQuoteTypeEnum.CURRENCY,
@@ -20,7 +23,7 @@ export default class extends BaseSchema {
         ProfileQuoteTypeEnum.INDEX,
         ProfileQuoteTypeEnum.OPTION,
         ProfileQuoteTypeEnum.MUTUALFUND,
-      ]).notNullable()
+      ]).nullable()
       table.string('quote_source_name').nullable()
       table.string('currency').nullable()
       table.enum('market_state', [
@@ -30,16 +33,16 @@ export default class extends BaseSchema {
         ProfileMarketStateEnum.PREPRE,
         ProfileMarketStateEnum.POST,
         ProfileMarketStateEnum.POSTPOST,
-      ]).notNullable()
-      table.boolean('tradeable').notNullable()
+      ]).nullable()
+      table.boolean('tradeable').nullable()
       table.boolean('crypto_tradeable').nullable()
-      table.string('exchange').notNullable()
+      table.string('exchange').nullable()
       table.string('short_name').nullable()
       table.string('long_name').nullable()
-      table.string('exchange_timezone_name').notNullable()
-      table.string('exchange_timezone_short_name').notNullable()
-      table.string('market').notNullable()
-      table.dateTime('dividend_date').notNullable()
+      table.string('exchange_timezone_name').nullable()
+      table.string('exchange_timezone_short_name').nullable()
+      table.string('market').nullable()
+      table.dateTime('dividend_date').nullable()
       table.float('trailing_annual_dividend_rate').nullable()
       table.float('trailing_pe').nullable()
       table.float('trailing_annual_dividend_yield').nullable()
@@ -54,12 +57,11 @@ export default class extends BaseSchema {
       table.float('average_daily_volume_3_month').nullable()
       table.float('average_daily_volume_10_day').nullable()
       table.string('display_name').nullable()
-      table.string('ticker').notNullable()
+
       table.float('ytd_return').nullable()
       table.string('prev_name').nullable()
       table.string('average_analyst_rating').nullable()
       table.float('open_interest').nullable()
-      table.dateTime("index_date").notNullable()
 
       /**
        * Uses timestamptz for PostgreSQL and DATETIME2 for MSSQL

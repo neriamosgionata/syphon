@@ -6,7 +6,7 @@ export default class LogServiceProvider {
   }
 
   public register() {
-    this.app.container.singleton(AppContainerAliasesEnum.Finance, () => new (require("App/Services/Finance/Finance").default)());
+    this.app.container.singleton(AppContainerAliasesEnum.Finance, () => new (require("App/Services/Finance/Finance").default)(true));
   }
 
   public async boot() {

@@ -71,6 +71,18 @@
       "aliases": [],
       "flags": []
     },
+    "scrape:yahoo_finance": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/ScrapeYahooFinance",
+      "commandName": "scrape:yahoo_finance",
+      "description": "",
+      "args": [],
+      "aliases": [],
+      "flags": []
+    },
     "test:ticker_chart": {
       "settings": {
         "loadApp": true,

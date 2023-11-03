@@ -1,9 +1,10 @@
-import {JobStatusEnum} from "App/Enums/JobStatusEnum";
+import {JobMessageEnum} from "App/Enums/JobMessageEnum";
 import {JobMessage} from "App/Services/Jobs/Jobs";
 
 export interface BaseJobParameters {
-  id: string,
-  tags: string[]
+  id?: string,
+  tags?: string[],
+  progressIndex?: number,
 }
 
 export const retriveWorkerThreadsData = () => {
@@ -13,13 +14,13 @@ export const retriveWorkerThreadsData = () => {
 
 export const isRunning = () => {
   const {parentPort, workerData} = retriveWorkerThreadsData();
-  parentPort?.postMessage({status: JobStatusEnum.RUNNING, id: workerData.id, tags: workerData.tags} as JobMessage);
+  parentPort?.postMessage({status: JobMessageEnum.RUNNING, id: workerData.id, tags: workerData.tags} as JobMessage);
 };
 
 export const isFailed = (err: Error) => {
   const {parentPort, workerData} = retriveWorkerThreadsData();
   parentPort?.postMessage({
-    status: JobStatusEnum.FAILED,
+    status: JobMessageEnum.FAILED,
     id: workerData.id,
     tags: workerData.tags,
     error: err
@@ -28,7 +29,7 @@ export const isFailed = (err: Error) => {
 
 export const isCompleted = () => {
   const {parentPort, workerData} = retriveWorkerThreadsData();
-  parentPort?.postMessage({status: JobStatusEnum.COMPLETED, id: workerData.id, tags: workerData.tags} as JobMessage);
+  parentPort?.postMessage({status: JobMessageEnum.COMPLETED, id: workerData.id, tags: workerData.tags} as JobMessage);
 };
 
 export const loadData = <T extends BaseJobParameters>(keys: string[]): T => {
@@ -45,7 +46,7 @@ export const loadData = <T extends BaseJobParameters>(keys: string[]): T => {
 export const logMessage = (log: string, logLevel: string = "info", error?: Error) => {
   const {parentPort, workerData} = retriveWorkerThreadsData();
   parentPort?.postMessage({
-    status: JobStatusEnum.LOGGING,
+    status: JobMessageEnum.LOGGING,
     id: workerData.id,
     tags: workerData.tags,
     log,
@@ -57,7 +58,7 @@ export const logMessage = (log: string, logLevel: string = "info", error?: Error
 export const messageToParent = (payload: any) => {
   const {parentPort, workerData} = retriveWorkerThreadsData();
   parentPort?.postMessage({
-    status: JobStatusEnum.MESSAGE,
+    status: JobMessageEnum.MESSAGE,
     id: workerData.id,
     tags: workerData.tags,
     payload
@@ -76,5 +77,57 @@ export const runJob = (mainHandler: () => void | Promise<void>): RunJobFunction 
     }
   };
 };
+
+export const progressBarOn = (total: number, title?: string) => {
+  const {parentPort, workerData} = retriveWorkerThreadsData();
+  parentPort?.postMessage({
+    status: JobMessageEnum.PROGRESS_BAR_ON,
+    id: workerData.id,
+    tags: workerData.tags,
+    payload: {
+      title,
+      total,
+    }
+  } as JobMessage);
+}
+
+export const progressBarUpdate = (progressIndex: number, current: number) => {
+  const {parentPort, workerData} = retriveWorkerThreadsData();
+  parentPort?.postMessage({
+    status: JobMessageEnum.PROGRESS_BAR_UPDATE,
+    id: workerData.id,
+    tags: workerData.tags,
+    payload: {
+      current,
+      progressIndex,
+    }
+  } as JobMessage);
+}
+
+export const progressBarOff = (progressIndex: number) => {
+  const {parentPort, workerData} = retriveWorkerThreadsData();
+  parentPort?.postMessage({
+    status: JobMessageEnum.PROGRESS_BAR_OFF,
+    id: workerData.id,
+    tags: workerData.tags,
+    payload: {
+      progressIndex,
+    }
+  } as JobMessage);
+}
+
+export const registerCallbackToParentMessage = (callback: (parentMessage: JobMessage) => void) => {
+  const {parentPort} = retriveWorkerThreadsData();
+  parentPort?.on("message", callback);
+}
+
+export const sendToWorker = (worker: any, status: JobMessageEnum, payload: any) => {
+  worker.postMessage(
+    {
+      status,
+      payload
+    } as JobMessage
+  );
+}
 
 export type RunJobFunction = () => Promise<void>;

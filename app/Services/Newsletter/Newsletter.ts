@@ -11,7 +11,7 @@ export interface NewsletterContract {
 
 export default class Newsletter implements NewsletterContract {
   private goToGoogleNews(): ScraperHandlerFunction<void> {
-    return Scraper.goto("https://news.google.com/", 10000);
+    return Scraper.goto("https://news.google.com/");
   }
 
   private getArticlesUrls(searchQuery: string): ScraperHandlerFunction<{ articlesUrl: string[] }> {
@@ -33,7 +33,7 @@ export default class Newsletter implements NewsletterContract {
   }
 
   private goToArticleUrl(articleUrl: string): ScraperHandlerFunction<void> {
-    return Scraper.goto(articleUrl, 10000);
+    return Scraper.goto(articleUrl);
   }
 
   private getArticleContent(): ScraperHandlerFunction<{ title?: string, content?: string }> {
@@ -81,7 +81,7 @@ export default class Newsletter implements NewsletterContract {
       .setWithStealthPlugin(true)
       .setHandlers([
         this.goToGoogleNews(),
-        Scraper.removeGoogleGPDR(),
+        Scraper.removeGPDR(),
         ...this.searchForQuery(searchQuery),
         this.getArticlesUrls(searchQuery),
       ]);
@@ -99,11 +99,12 @@ export default class Newsletter implements NewsletterContract {
 
     for (let articleUrl of articleUrls) {
       const scraper = Scraper
+        .setScraperStatusName("newsletter-get-articles")
         .setWithAdblockerPlugin(true)
         .setWithStealthPlugin(true)
         .setHandlers([
           this.goToArticleUrl(articleUrl),
-          Scraper.removeGoogleGPDR(),
+          Scraper.removeGPDR(),
           this.getArticleContent(),
         ]);
 
@@ -120,11 +121,12 @@ export default class Newsletter implements NewsletterContract {
 
   async getArticle(articleUrl: string): Promise<ScraperRunReturn<{ title?: string, content?: string }>> {
     const scraper = Scraper
+      .setScraperStatusName("newsletter-get-single-article")
       .setWithAdblockerPlugin(true)
       .setWithStealthPlugin(true)
       .setHandlers([
         this.goToArticleUrl(articleUrl),
-        Scraper.removeGoogleGPDR(),
+        Scraper.removeGPDR(),
         this.getArticleContent(),
       ]);
 

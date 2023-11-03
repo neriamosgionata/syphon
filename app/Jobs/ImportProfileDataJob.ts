@@ -7,11 +7,11 @@ import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/to
 import {ProfileQuoteTypeEnum} from "App/Enums/ProfileQuoteTypeEnum";
 import {ProfileMarketStateEnum} from "App/Enums/ProfileMarketStateEnum";
 
-const createProfile = async (ticker: string, profile: Quote) => {
+const createObject = (ticker: string, profile: Quote) => {
   const currentDate = new Date();
   const defaultAppDateTimeFormat = Config.get("app.date_formats.default");
 
-  await Profile.create({
+  return {
     ticker: ticker,
     language: profile.language,
     region: profile.region,
@@ -47,7 +47,20 @@ const createProfile = async (ticker: string, profile: Quote) => {
     averageAnalystRating: profile.averageAnalystRating,
     openInterest: profile.openInterest,
     indexDate: toLuxon(currentDate, defaultAppDateTimeFormat),
-  });
+  }
+}
+
+const createProfile = async (ticker: string, profile: Quote) => {
+  await Profile
+    .create(createObject(ticker, profile))
+}
+
+const updateProfile = async (ticker: string, profile: Quote) => {
+  await Profile
+    .query()
+    .where("ticker", ticker)
+    .update(createObject(ticker, profile))
+    .exec();
 }
 
 const importQuoteFromFinance = async (ticker: string) => {
@@ -59,15 +72,19 @@ const importQuoteFromFinance = async (ticker: string) => {
     .orderBy("indexDate", "desc")
     .first();
 
-  const now = new Date();
-  const lastIndexDate = lastIndex ? lastIndex.indexDate.toJSDate() : now;
-  const nowMinus15Days = new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000);
+  if (!lastIndex) {
+    await createProfile(ticker, quote);
+    return;
+  }
+
+  const lastIndexDate = lastIndex.indexDate.toJSDate();
+  const nowMinus15Days = new Date((new Date()).getTime() - (15 * 24 * 60 * 60 * 1000));
 
   if (lastIndexDate > nowMinus15Days) {
     return;
   }
 
-  await createProfile(ticker, quote);
+  await updateProfile(ticker, quote);
 }
 
 const handler = async () => {

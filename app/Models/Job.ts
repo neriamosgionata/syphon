@@ -1,6 +1,6 @@
 import {DateTime} from "luxon";
 import {BaseModel, column} from "@ioc:Adonis/Lucid/Orm";
-import {JobStatusEnum} from "App/Enums/JobStatusEnum";
+import {JobMessageEnum} from "App/Enums/JobMessageEnum";
 
 export default class Job extends BaseModel {
   @column({isPrimary: true})
@@ -13,7 +13,7 @@ export default class Job extends BaseModel {
   public tags: string | null;
 
   @column()
-  public status: JobStatusEnum;
+  public status: JobMessageEnum;
 
   @column()
   public parameters: string | null;
