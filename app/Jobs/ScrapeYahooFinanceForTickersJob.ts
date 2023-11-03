@@ -12,8 +12,8 @@ import {ImportProfileDataJobParameters} from "App/Jobs/ImportProfileDataJob";
 import {ImportChartDataJobParameters} from "App/Jobs/ImportChartDataJob";
 import {DateTime} from "luxon";
 
-let progressBarIndex1: number = 1;
-let progressBarIndex2: number = 2;
+let progressBarIndex1: number = 0;
+let progressBarIndex2: number = 1;
 
 const importTickers = async (tickers: string[]) => {
   logMessage("Importing total tickers data: " + tickers.length, "info");
@@ -39,7 +39,7 @@ const importTickers = async (tickers: string[]) => {
 
     await Jobs.waitUntilAllDone(toWait);
 
-    progressBarUpdate(progressBarIndex1 as number, batch.length);
+    progressBarUpdate(progressBarIndex1, batch.length);
 
     logMessage("Imported tickers data: " + batch.length, "info");
 
@@ -50,7 +50,7 @@ const importTickers = async (tickers: string[]) => {
 
   logMessage("Importing tickers data done", "info");
 
-  progressBarOff(progressBarIndex1 as number);
+  progressBarOff(progressBarIndex1);
 }
 
 const importCharts = async (tickers: string[]) => {
@@ -81,7 +81,7 @@ const importCharts = async (tickers: string[]) => {
 
     await Jobs.waitUntilAllDone(toWait);
 
-    progressBarUpdate(progressBarIndex2 as number, batch.length);
+    progressBarUpdate(progressBarIndex2, batch.length);
 
     logMessage("Imported charts for tickers: " + batch.length, "info");
 
@@ -92,7 +92,7 @@ const importCharts = async (tickers: string[]) => {
 
   logMessage("Importing charts for tickers done", "info");
 
-  progressBarOff(progressBarIndex2 as number);
+  progressBarOff(progressBarIndex2);
 }
 
 const scrapeYahooFinance = async () => {
@@ -102,10 +102,8 @@ const scrapeYahooFinance = async () => {
 
   logMessage("Scraping Yahoo Finance for tickers done", "info")
 
-  const p1 = importTickers(tickers);
-  const p2 = importCharts(tickers);
-
-  await Promise.all([p1, p2]);
+  await importTickers(tickers);
+  await importCharts(tickers);
 }
 
 const handler = async () => {

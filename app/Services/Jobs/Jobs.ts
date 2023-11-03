@@ -8,7 +8,6 @@ import path from "path";
 import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
 import Config from "@ioc:Adonis/Core/Config";
 import ProgressBar from "@ioc:Providers/ProgressBar";
-import {sendToWorker} from "App/Services/Jobs/JobHelpers";
 
 export interface JobContract {
   dispatch<T extends JobParameters>(
@@ -86,7 +85,7 @@ export default class Jobs implements JobContract {
       .exec();
   }
 
-  private async defaultCallback(worker: Worker, message: JobMessage, payloadCallback?: Callback) {
+  private async defaultCallback(message: JobMessage, payloadCallback?: Callback) {
     if (payloadCallback && message.status === JobMessageEnum.MESSAGE) {
       await payloadCallback(message);
       return;
@@ -102,8 +101,7 @@ export default class Jobs implements JobContract {
     }
 
     if (message.status === JobMessageEnum.PROGRESS_BAR_ON) {
-      ProgressBar.addBar(message.payload.total, message.payload.title, message.payload.progressBarIndex);
-      sendToWorker(worker, JobMessageEnum.PROGRESS_BAR_INDEX, {progressBarIndex: message.payload.progressBarIndex});
+      ProgressBar.addBar(message.payload.total, message.payload.title, "cyan", message.payload.progressBarIndex);
       return;
     }
 
@@ -198,7 +196,7 @@ export default class Jobs implements JobContract {
     });
 
     worker.on("message", (message: JobMessage) => {
-      this.defaultCallback(worker, message, payloadCallback);
+      this.defaultCallback(message, payloadCallback);
     });
 
     worker.on("error", (err: Error) => {
