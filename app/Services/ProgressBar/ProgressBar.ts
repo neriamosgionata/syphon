@@ -61,15 +61,14 @@ export default class ProgressBar implements ProgressBarContract {
         {format: newTitle + ' |' + colors[color]('{bar}') + '| {percentage}% | ETA: {eta}s | {value}/{total}'}
       );
 
-      if (index) {
+      if (index !== undefined) {
         this.bars[index] = bar;
-        return index;
+      } else {
+        this.bars.push(bar);
       }
-
-      return this.bars.push(bar) - 1;
     }
 
-    if (index) {
+    if (index !== undefined) {
       this.stepsStatus[index] = 0;
       return index;
     }

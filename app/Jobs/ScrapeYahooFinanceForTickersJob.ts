@@ -18,7 +18,7 @@ let progressBarIndex2: number = 1;
 const importTickers = async (tickers: string[]) => {
   logMessage("Importing total tickers data: " + tickers.length, "info");
 
-  progressBarOn(1, tickers.length, "Importing tickers data...");
+  progressBarOn(progressBarIndex1, tickers.length, "Importing tickers data...");
 
   while (tickers.length > 0) {
     const batch = tickers.splice(0, 4);
@@ -56,7 +56,7 @@ const importTickers = async (tickers: string[]) => {
 const importCharts = async (tickers: string[]) => {
   logMessage("Importing charts for total tickers: " + tickers.length, "info");
 
-  progressBarOn(2, tickers.length, "Importing charts...");
+  progressBarOn(progressBarIndex2, tickers.length, "Importing charts...");
 
   const fromDate = DateTime.fromISO("2010-01-01").toJSDate().getTime();
 
