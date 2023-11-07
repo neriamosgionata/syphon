@@ -102,8 +102,8 @@ const scrapeYahooFinance = async () => {
 
   logMessage("Scraping Yahoo Finance for tickers done", "info")
 
-  await importTickers(tickers);
-  await importCharts(tickers);
+  await importTickers([...tickers]);
+  await importCharts([...tickers]);
 }
 
 const handler = async () => {
