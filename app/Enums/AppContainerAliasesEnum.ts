@@ -10,4 +10,5 @@ export enum AppContainerAliasesEnum {
   ProgressBar = "Providers/ProgressBar",
   Helper = "Providers/Helper",
   StringCleaner = "Providers/StringCleaner",
+  Filters = "Providers/Filters",
 }
