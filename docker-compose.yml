@@ -28,3 +28,16 @@ services:
     environment:
       - REDIS_PASSWORD=root
       - REDIS_PORT=6379
+
+  mysql:
+    image: mysql:latest
+    restart: always
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: syphon
+      MYSQL_USER: syphon
+      MYSQL_PASSWORD: syphon
+    volumes:
+      - ./mysql:/var/lib/mysql
