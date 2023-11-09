@@ -64,15 +64,14 @@ const updateProfile = async (ticker: string, profile: Quote) => {
 }
 
 const importQuoteFromFinance = async (ticker: string) => {
-  const quote = await Finance.getQuoteViaTicker(ticker);
-
   const lastIndex = await Profile
     .query()
     .where("ticker", ticker)
-    .orderBy("indexDate", "desc")
+    .orderBy("index_date", "desc")
     .first();
 
   if (!lastIndex) {
+    const quote = await Finance.getQuoteViaTicker(ticker);
     await createProfile(ticker, quote);
     return;
   }
@@ -84,6 +83,7 @@ const importQuoteFromFinance = async (ticker: string) => {
     return;
   }
 
+  const quote = await Finance.getQuoteViaTicker(ticker);
   await updateProfile(ticker, quote);
 }
 

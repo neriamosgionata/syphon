@@ -5,7 +5,6 @@ import {ChartResultArray, ChartResultArrayQuote} from "yahoo-finance2/dist/esm/s
 import {BaseJobParameters, loadData, runJob} from "App/Services/Jobs/JobHelpers";
 import {ChartInterval} from "App/Services/Finance/Finance";
 import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
-import Database from "@ioc:Adonis/Lucid/Database";
 
 const createChartEntry = async (
   ticker: string,
@@ -28,43 +27,34 @@ const createChartEntry = async (
 };
 
 const importElementsFromFinance = async (ticker: string, chart: ChartResultArray, interval: ChartInterval) => {
-  const trx = await Database.transaction();
+  const elements = chart.quotes.reverse();
 
-  try {
-    const elements = chart.quotes;
+  const lastTicker = await TickerChart
+    .query()
+    .where("ticker", ticker)
+    .where("interval", interval)
+    .orderBy("date", "desc")
+    .first();
 
-    const lastTicker = await TickerChart
-      .query()
-      .useTransaction(trx)
-      .where("ticker", ticker)
-      .where("interval", interval)
-      .orderBy("date", "desc")
-      .first();
-
-    if (!lastTicker) {
-      for (const row of elements) {
-        await createChartEntry(ticker, row, interval);
-      }
-      return;
-    }
-
-    const lastDate = lastTicker.date;
-    const lastDateIndex = elements.findIndex((el) => el.date === lastDate.toJSDate());
-
-    if (lastDateIndex === -1) {
-      for (const row of elements) {
-        await createChartEntry(ticker, row, interval);
-      }
-      return;
-    }
-
-    for (const row of elements.slice(lastDateIndex + 1)) {
+  if (!lastTicker) {
+    for (const row of elements) {
       await createChartEntry(ticker, row, interval);
     }
+    return;
+  }
 
-    await trx.commit();
-  } catch (e) {
-    await trx.rollback();
+  const lastDate = lastTicker.date;
+  const lastDateIndex = elements.findIndex((el) => el.date < lastDate.toJSDate());
+
+  if (lastDateIndex === -1) {
+    for (const row of elements) {
+      await createChartEntry(ticker, row, interval);
+    }
+    return;
+  }
+
+  for (const row of elements.slice(lastDateIndex + 1)) {
+    await createChartEntry(ticker, row, interval);
   }
 };
 
