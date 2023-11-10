@@ -5,5 +5,19 @@ export default class ChartsController {
 
   }
 
+  store({}: HttpContextContract) {
 
+  }
+
+  show({}: HttpContextContract) {
+
+  }
+
+  update({}: HttpContextContract) {
+
+  }
+
+  destroy({}: HttpContextContract) {
+
+  }
 }

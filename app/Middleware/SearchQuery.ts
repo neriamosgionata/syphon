@@ -1,19 +1,24 @@
 import {HttpContextContract} from "@ioc:Adonis/Core/HttpContext";
 import Filters from "@ioc:Providers/Filters";
 
-export default (baseModel: string) => {
-  return async ({request, response}: HttpContextContract, next: () => void | Promise<void>) => {
+export default class SearchQueryMiddleware {
+
+  async handle({request, response}: HttpContextContract, next: () => void | Promise<void>, baseModel?: string) {
     await next();
 
     const {query, limit, page, sort, order} = request.qs();
 
-    const loadedModel = await import(`App/Models/${baseModel}`);
+    if (!baseModel) {
+      return response.badRequest("No base model provided");
+    }
 
-    let queryBuilder = loadedModel.query();
+    const loadedModel = require(`App/Models/${baseModel}`);
+    let queryBuilder = loadedModel.default.query();
 
-    const filter = Filters.parseQueryString(query);
-
-    queryBuilder = Filters.resolveFilter(filter, queryBuilder);
+    if (query) {
+      const filter = Filters.parseQueryString(query);
+      queryBuilder = Filters.resolveFilter(filter, queryBuilder);
+    }
 
     if (sort && order) {
       queryBuilder.orderBy(sort, order);
@@ -40,4 +45,5 @@ export default (baseModel: string) => {
 
     return response.json(resp);
   }
+
 }

@@ -1,4 +1,4 @@
-import {BaseJobParameters, loadData, runJob} from "App/Services/Jobs/JobHelpers";
+import {BaseJobParameters, loadData, logMessage, runJob} from "App/Services/Jobs/JobHelpers";
 import {Quote} from "yahoo-finance2/dist/esm/src/modules/quote";
 import Finance from "@ioc:Providers/Finance";
 import Profile from "App/Models/Profile";
@@ -95,7 +95,11 @@ const handler = async () => {
   }
 
   for (const ticker of parameters.ticker) {
-    await importQuoteFromFinance(ticker);
+    try {
+      await importQuoteFromFinance(ticker);
+    } catch (e) {
+      logMessage(`Error importing profile data for ${ticker}: ${e.message}`, "error");
+    }
   }
 };
 

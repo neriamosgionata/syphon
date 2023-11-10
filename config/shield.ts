@@ -5,7 +5,7 @@
  * file.
  */
 
-import { ShieldConfig } from '@ioc:Adonis/Addons/Shield'
+import {ShieldConfig} from '@ioc:Adonis/Addons/Shield'
 
 /*
 |--------------------------------------------------------------------------
@@ -43,8 +43,7 @@ export const csp: ShieldConfig['csp'] = {
   | }
   |
   */
-  directives: {
-  },
+  directives: {},
 
   /*
   |--------------------------------------------------------------------------
@@ -92,7 +91,7 @@ export const csrf: ShieldConfig['csrf'] = {
 	| ```
   |
   */
-  exceptRoutes: [],
+  exceptRoutes: ({request}) => request.url().includes('/api'),
 
   /*
   |--------------------------------------------------------------------------

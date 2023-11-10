@@ -9,17 +9,17 @@ export default class extends BaseSchema {
 
       table.string("name").notNullable();
 
+      table.text("tags").notNullable().defaultTo("");
+
       table.integer("status").notNullable();
 
       table.json("parameters").nullable();
 
-      table.text("tags").nullable();
-
       table.text("error").nullable();
       table.text("error_stack").nullable();
 
-      table.dateTime("started_at").nullable();
-      table.dateTime("finished_at").nullable();
+      table.dateTime("started_at", {useTz: true}).nullable();
+      table.dateTime("finished_at", {useTz: true}).nullable();
 
       /**
        * Uses timestamptz for PostgreSQL and DATETIME2 for MSSQL

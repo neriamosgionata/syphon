@@ -1,15 +1,11 @@
 import Route from "@ioc:Adonis/Core/Route";
-import SearchQuery from "App/Middleware/SearchQuery";
 
-Route
-  .resource("charts", "ChartsController")
-  .apiOnly()
-  .middleware({
-    "*": [
-      "auth"
-    ],
-    index: [
-      "auth",
-      SearchQuery("TickerChart")
-    ]
-  });
+
+Route.group(() => {
+  Route
+    .resource("charts", "ChartsController")
+    .apiOnly()
+    .middleware({index: ["search:TickerChart"]});
+})
+  .middleware(["auth:api"])
+  .prefix("api/v1")

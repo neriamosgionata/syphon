@@ -10,7 +10,7 @@ export default class extends BaseSchema {
       table.increments('id')
 
       table.string('ticker').notNullable()
-      table.dateTime("index_date").notNullable()
+      table.dateTime("index_date", {useTz: true}).notNullable()
 
       table.string('language').nullable()
       table.string('region').nullable()
@@ -42,7 +42,7 @@ export default class extends BaseSchema {
       table.string('exchange_timezone_name').nullable()
       table.string('exchange_timezone_short_name').nullable()
       table.string('market').nullable()
-      table.dateTime('dividend_date').nullable()
+      table.dateTime('dividend_date', {useTz: true}).nullable()
       table.float('trailing_annual_dividend_rate').nullable()
       table.float('trailing_pe').nullable()
       table.float('trailing_annual_dividend_yield').nullable()
