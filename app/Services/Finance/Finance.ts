@@ -4,6 +4,7 @@ import {ChartResultArray} from "yahoo-finance2/dist/esm/src/modules/chart";
 import {QuoteSummaryResult} from "yahoo-finance2/dist/esm/src/modules/quoteSummary-iface";
 import Scraper from "@ioc:Providers/Scraper";
 import {ScraperHandlerFunction} from "App/Services/Scraper/BaseScraper";
+import ProgressBar from "@ioc:Providers/ProgressBar";
 
 export type ChartInterval =
   "1m"
@@ -79,6 +80,20 @@ export default class Finance implements FinanceContract {
 
   //SCRAPING
 
+  private crawlTotalPages(): ScraperHandlerFunction<{ total_pages: number }> {
+    return Scraper.evaluate(() => {
+      const selectorTotalPages = '#fin-scr-res-table > div > div > span:nth-child(2)';
+
+      const str = document.querySelector(selectorTotalPages)?.textContent || "1-25 of 0 results";
+
+      let total_pages = parseInt(str.split(" ")[2])
+
+      total_pages = isNaN(total_pages) ? 0 : total_pages;
+
+      return {total_pages};
+    });
+  }
+
   private crawlListOfTickersEtfs(): ScraperHandlerFunction<{ tickers: string[] }> {
     return Scraper.evaluate(() => {
       const selectorTable = "table tbody tr";
@@ -108,7 +123,24 @@ export default class Finance implements FinanceContract {
 
     let tickersFound: string[] = [];
 
-    let res = await Scraper
+    let resTotalPages = await Scraper
+      .setScraperStatusName("newsletter-get-single-article")
+      .setWithAdblockerPlugin(true)
+      .setWithStealthPlugin(true)
+      .setHandlers([
+        Scraper.goto(`https://finance.yahoo.com/etfs?count=${count}`),
+        Scraper.waitRandom(),
+        Scraper.removeGPDR(),
+        this.crawlTotalPages(),
+      ])
+      .run<{ total_pages: number }>();
+
+    const pIndex = ProgressBar.addBar(
+      Math.ceil(resTotalPages.results.total_pages / count) + 1,
+      "Scraping Yahoo Finance results for ETFs tickers",
+    );
+
+    let resTickers = await Scraper
       .setScraperStatusName("newsletter-get-single-article")
       .setWithAdblockerPlugin(true)
       .setWithStealthPlugin(true)
@@ -120,10 +152,12 @@ export default class Finance implements FinanceContract {
       ])
       .run<{ tickers: string[] }>();
 
-    tickersFound.push(...(res.results?.tickers || []));
+    tickersFound.push(...(resTickers.results?.tickers || []));
 
-    while ((res.results?.tickers || []).length > 0) {
-      res = await Scraper
+    ProgressBar.next(pIndex);
+
+    while ((resTickers.results?.tickers || []).length > 0) {
+      resTickers = await Scraper
         .setScraperStatusName("newsletter-get-single-article")
         .setWithAdblockerPlugin(true)
         .setWithStealthPlugin(true)
@@ -135,10 +169,14 @@ export default class Finance implements FinanceContract {
         ])
         .run<{ tickers: string[] }>();
 
-      tickersFound.push(...(res.results?.tickers || []));
+      tickersFound.push(...(resTickers.results?.tickers || []));
 
       offset += count;
+
+      ProgressBar.next(pIndex);
     }
+
+    ProgressBar.stop(pIndex);
 
     return tickersFound;
   }

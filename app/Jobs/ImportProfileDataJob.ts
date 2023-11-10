@@ -1,4 +1,4 @@
-import {BaseJobParameters, loadData, logMessage, runJob} from "App/Services/Jobs/JobHelpers";
+import {BaseJobParameters, loadData, runJob} from "App/Services/Jobs/JobHelpers";
 import {Quote} from "yahoo-finance2/dist/esm/src/modules/quote";
 import Finance from "@ioc:Providers/Finance";
 import Profile from "App/Models/Profile";
@@ -6,6 +6,7 @@ import Config from "@ioc:Adonis/Core/Config";
 import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
 import {ProfileQuoteTypeEnum} from "App/Enums/ProfileQuoteTypeEnum";
 import {ProfileMarketStateEnum} from "App/Enums/ProfileMarketStateEnum";
+import Logger from "@ioc:Providers/Logger";
 
 const createObject = (ticker: string, profile: Quote) => {
   const currentDate = new Date();
@@ -98,7 +99,7 @@ const handler = async () => {
     try {
       await importQuoteFromFinance(ticker);
     } catch (e) {
-      logMessage(`Error importing profile data for ${ticker}: ${e.message}`, "error");
+      Logger.error(`Error importing profile data for ${ticker}: ${e.message}`);
     }
   }
 };

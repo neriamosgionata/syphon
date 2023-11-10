@@ -102,7 +102,7 @@ export default class Jobs implements JobContract {
     }
 
     if (message.status === JobMessageEnum.PROGRESS_BAR_ON) {
-      ProgressBar.addBar(message.payload.total, message.payload.title, "cyan", message.payload.progressBarIndex);
+      ProgressBar.addBar(message.payload.total, message.payload.title, message.payload.progressBarIndex);
       return;
     }
 
@@ -113,6 +113,11 @@ export default class Jobs implements JobContract {
 
     if (message.status === JobMessageEnum.PROGRESS_BAR_OFF) {
       ProgressBar.stop(message.payload.progressBarIndex);
+      return;
+    }
+
+    if (message.status === JobMessageEnum.PROGRESS_BAR_OFF_ALL) {
+      ProgressBar.stopAll();
       return;
     }
 

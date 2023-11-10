@@ -71,9 +71,9 @@ export const runJob = (mainHandler: () => void | Promise<void>): RunJobFunction 
 
     try {
       await mainHandler();
-      isCompleted()
+      isCompleted();
     } catch (err) {
-      isFailed(err)
+      isFailed(err);
     }
   };
 };
@@ -114,6 +114,16 @@ export const progressBarOff = (progressBarIndex: number) => {
     payload: {
       progressBarIndex,
     }
+  } as JobMessage);
+}
+
+export const progressBarOffAll = () => {
+  const {parentPort, workerData} = retriveWorkerThreadsData();
+  parentPort?.postMessage({
+    status: JobMessageEnum.PROGRESS_BAR_OFF_ALL,
+    id: workerData.id,
+    tags: workerData.tags,
+    payload: {}
   } as JobMessage);
 }
 

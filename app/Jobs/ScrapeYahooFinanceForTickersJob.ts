@@ -1,24 +1,19 @@
-import {
-  BaseJobParameters,
-  logMessage,
-  progressBarOff,
-  progressBarOn,
-  progressBarUpdate,
-  runJob
-} from "App/Services/Jobs/JobHelpers";
+import {BaseJobParameters, runJob} from "App/Services/Jobs/JobHelpers";
 import Finance from "@ioc:Providers/Finance";
 import Jobs from "@ioc:Providers/Jobs";
 import {ImportProfileDataJobParameters} from "App/Jobs/ImportProfileDataJob";
 import {ImportChartDataJobParameters} from "App/Jobs/ImportChartDataJob";
 import {DateTime} from "luxon";
+import Logger from "@ioc:Providers/Logger";
+import ProgressBar from "@ioc:Providers/ProgressBar";
 
 let progressBarIndex1: number = 0;
 let progressBarIndex2: number = 1;
 
 const importTickers = async (tickers: string[]) => {
-  logMessage("Importing total tickers data: " + tickers.length, "info");
+  Logger.info("Importing total tickers data: " + tickers.length);
 
-  progressBarOn(progressBarIndex1, tickers.length, "Importing tickers data...");
+  ProgressBar.addBar(tickers.length, "Importing tickers data...", progressBarIndex1);
 
   while (tickers.length > 0) {
     const batch = tickers.splice(0, 8);
@@ -39,24 +34,24 @@ const importTickers = async (tickers: string[]) => {
 
     await Jobs.waitUntilAllDone(toWait);
 
-    progressBarUpdate(progressBarIndex1, batch.length);
+    ProgressBar.next(progressBarIndex1, batch.length);
 
-    logMessage("Imported tickers data: " + batch.length, "info");
+    Logger.info("Imported tickers data: " + batch.length);
 
-    logMessage("Waiting 10 seconds before next batch", "info");
+    Logger.info("Waiting 10 seconds before next batch");
 
     await new Promise(resolve => setTimeout(resolve, 10000));
   }
 
-  logMessage("Importing tickers data done", "info");
+  Logger.info("Importing tickers data done");
 
-  progressBarOff(progressBarIndex1);
+  ProgressBar.stop(progressBarIndex1);
 }
 
 const importCharts = async (tickers: string[]) => {
-  logMessage("Importing charts for total tickers: " + tickers.length, "info");
+  Logger.info("Importing charts for total tickers: " + tickers.length);
 
-  progressBarOn(progressBarIndex2, tickers.length, "Importing charts...");
+  ProgressBar.addBar(tickers.length, "Importing charts...", progressBarIndex2);
 
   const fromDate = DateTime.fromISO("2010-01-01").toJSDate().getTime();
 
@@ -81,33 +76,33 @@ const importCharts = async (tickers: string[]) => {
 
     await Jobs.waitUntilAllDone(toWait);
 
-    progressBarUpdate(progressBarIndex2, batch.length);
+    ProgressBar.next(progressBarIndex2, batch.length);
 
-    logMessage("Imported charts for tickers: " + batch.length, "info");
+    Logger.info("Imported charts for tickers: " + batch.length);
 
-    logMessage("Waiting 10 seconds before next batch", "info");
+    Logger.info("Waiting 10 seconds before next batch");
 
     await new Promise(resolve => setTimeout(resolve, 10000));
   }
 
-  logMessage("Importing charts for tickers done", "info");
+  Logger.info("Importing charts for tickers done");
 
-  progressBarOff(progressBarIndex2);
+  ProgressBar.stop(progressBarIndex2);
 }
 
 const scrapeYahooFinance = async () => {
-  logMessage("Scraping Yahoo Finance for tickers", "info")
+  Logger.info("Scraping Yahoo Finance for tickers");
 
   const tickers = await Finance.scrapeYahooFinanceForTickerListEtfs();
 
-  logMessage("Scraping Yahoo Finance for tickers done", "info")
+  Logger.info("Scraping Yahoo Finance for tickers done");
 
   await importTickers([...tickers]);
   await importCharts([...tickers]);
 }
 
 const handler = async () => {
-  logMessage("Setting up systems..", "info");
+  Logger.info("Setting up systems..");
 
   await scrapeYahooFinance();
 };

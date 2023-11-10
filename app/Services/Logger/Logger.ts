@@ -5,6 +5,8 @@ import {LogChannelEnum} from "App/Enums/LogChannelEnum";
 import {LogLevelEnum} from "App/Enums/LogLevelEnum";
 import Application from "@ioc:Adonis/Core/Application";
 import {AppContainerAliasesEnum} from "App/Enums/AppContainerAliasesEnum";
+import {logMessage} from "App/Services/Jobs/JobHelpers";
+import {isMainThread} from "node:worker_threads";
 
 export interface LoggerContract {
   removeOneTimeLog(): void;
@@ -192,11 +194,18 @@ export default class Logger implements LoggerContract {
   }
 
   private writeLine(level: LogLevelEnum, logLine: string): true | Error {
+    if (!isMainThread) {
+      logMessage(logLine, level);
+      return true;
+    }
+
     const logFileName = this.getLogFileName(level);
     const logLineWithAnnotation = this.getLogLine(level, logLine);
+
     if (this.printToConsole) {
       console.log(logLineWithAnnotation);
     }
+
     return this.saveLog(logFileName, logLineWithAnnotation);
   }
 

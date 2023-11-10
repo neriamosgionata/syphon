@@ -1,9 +1,11 @@
 import progress from 'cli-progress';
 import colors from "ansi-colors";
 import Application from "@ioc:Adonis/Core/Application";
+import {isMainThread} from "node:worker_threads";
+import {progressBarOff, progressBarOffAll, progressBarOn, progressBarUpdate} from "App/Services/Jobs/JobHelpers";
 
 export interface ProgressBarContract {
-  addBar(length: number, title?: string, color?: string, index?: number): number;
+  addBar(length: number, title?: string, index?: number, color?: string): number;
 
   next(index?: number, steps?: number): void;
 
@@ -36,7 +38,12 @@ export default class ProgressBar implements ProgressBarContract {
     this.multibarService = new progress.MultiBar({stream: stdout});
   }
 
-  addBar(length: number, title: string = "Progress", color: string = "cyan", index?: number): number {
+  addBar(length: number, title: string = "Progress", index?: number, color: string = "cyan"): number {
+    if (!isMainThread) {
+      progressBarOn(index || 0, length, title);
+      return index || 0;
+    }
+
     const titleLength = title.length;
     const maxTitleLength = 30;
     let toAdd = Math.ceil(maxTitleLength - titleLength);
@@ -78,6 +85,11 @@ export default class ProgressBar implements ProgressBarContract {
   }
 
   next(index: number = 0, steps: number = 1): void {
+    if (!isMainThread) {
+      progressBarUpdate(index, steps);
+      return;
+    }
+
     this.stepsStatus[index] += steps;
 
     if (Application.environment === "console") {
@@ -86,6 +98,11 @@ export default class ProgressBar implements ProgressBarContract {
   }
 
   prev(index: number = 0, steps: number = 1): void {
+    if (!isMainThread) {
+      progressBarUpdate(index, -steps);
+      return;
+    }
+
     this.stepsStatus[index] -= steps;
 
     if (Application.environment === "console") {
@@ -94,6 +111,11 @@ export default class ProgressBar implements ProgressBarContract {
   }
 
   stop(index: number = 0): void {
+    if (!isMainThread) {
+      progressBarOff(index);
+      return;
+    }
+
     this.stepsStatus.splice(index, 1);
 
     if (Application.environment === "console") {
@@ -103,6 +125,11 @@ export default class ProgressBar implements ProgressBarContract {
   }
 
   stopAll(): void {
+    if (!isMainThread) {
+      progressBarOffAll();
+      return;
+    }
+
     this.bars = [];
     this.stepsStatus = [];
 
