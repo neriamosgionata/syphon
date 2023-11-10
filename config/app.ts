@@ -258,7 +258,7 @@ export const profiler: ProfilerConfig = {
 export const validator: ValidatorConfig = {};
 
 export const date_formats = {
-  default: "YYYY-MM-DDTHH:mm:ss.sssZ"
+  default: "YYYY-MM-DDTHH:mm:ss.sss"
 };
 
 export const storage = {

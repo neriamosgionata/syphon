@@ -8,6 +8,7 @@ import path from "path";
 import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
 import Config from "@ioc:Adonis/Core/Config";
 import ProgressBar from "@ioc:Providers/ProgressBar";
+import {now} from "moment";
 
 export interface JobContract {
   dispatch<T extends JobParameters>(
@@ -79,8 +80,8 @@ export default class Jobs implements JobContract {
         status: message.status,
         error: message.error?.message,
         errorStack: message.error?.stack,
-        startedAt: isStarted ? toLuxon(new Date(), defaultAppDateTimeFormat) : null,
-        finishedAt: isFinished ? toLuxon(new Date(), defaultAppDateTimeFormat) : null,
+        startedAt: isStarted ? toLuxon(now(), defaultAppDateTimeFormat) : null,
+        finishedAt: isFinished ? toLuxon(now(), defaultAppDateTimeFormat) : null,
       })
       .exec();
   }
