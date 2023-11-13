@@ -300,10 +300,7 @@ export default class BaseScraper implements BaseScraperContract {
       try {
         const res = await this.registeredHandlers[funcIndex](this.browser, this.page);
         if (res !== undefined && res !== null) {
-          this.writeLog('info', 'Handler returned, func index: ' + funcIndex);
           result = {...res};
-        } else {
-          this.writeLog('info', 'Handler returned empty, func index: ' + funcIndex);
         }
       } catch (err) {
         await this.registerError(new Error('Handler failed, func index: ' + funcIndex), "Handler_failed_" + funcIndex);
