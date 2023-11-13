@@ -43,15 +43,14 @@ export const loadData = <T extends BaseJobParameters>(keys: string[]): T => {
   return data;
 };
 
-export const logMessage = (log: string, logLevel: string = "info", error?: Error) => {
+export const logMessage = (log: string, logLevel: string = "info") => {
   const {parentPort, workerData} = retriveWorkerThreadsData();
   parentPort?.postMessage({
     status: JobMessageEnum.LOGGING,
     id: workerData.id,
     tags: workerData.tags,
     log,
-    logLevel,
-    error
+    logLevel
   } as JobMessage);
 };
 

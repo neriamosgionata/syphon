@@ -93,11 +93,7 @@ export default class Jobs implements JobContract {
     }
 
     if (message.status === JobMessageEnum.LOGGING) {
-      if (message.logLevel === "error" || message.error) {
-        Logger.error("Error occurred in Job Id", message.id, message.tags, message.error?.name, message.error?.message, message.error?.stack);
-      } else {
-        Logger[message.logLevel || "info"](message.log);
-      }
+      Logger[message.logLevel || "info"](message.log, message.id, message.tags);
       return;
     }
 
