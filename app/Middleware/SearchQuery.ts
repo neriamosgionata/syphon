@@ -1,19 +1,24 @@
 import {HttpContextContract} from "@ioc:Adonis/Core/HttpContext";
 import Filters from "@ioc:Providers/Filters";
+import {ModelQueryBuilderContract} from "@ioc:Adonis/Lucid/Orm";
 
 export default class SearchQueryMiddleware {
 
   async handle({request, response}: HttpContextContract, next: () => void | Promise<void>, baseModel?: string) {
     await next();
 
-    const {query, limit, page, sort, order} = request.qs();
+    let {query, perPage, page, sort, order} = request.qs();
+
+    perPage = perPage ?? 25;
+    page = page ?? 1;
 
     if (!baseModel) {
       return response.badRequest("No base model provided");
     }
 
     const loadedModel = require(`App/Models/${baseModel}`);
-    let queryBuilder = loadedModel.default.query();
+
+    let queryBuilder: ModelQueryBuilderContract<any, any> = loadedModel.default.query();
 
     if (query) {
       const filter = Filters.parseQueryString(query);
@@ -24,22 +29,14 @@ export default class SearchQueryMiddleware {
       queryBuilder.orderBy(sort, order);
     }
 
-    if (limit) {
-      queryBuilder.limit(limit);
-    }
-
-    if (page) {
-      queryBuilder.offset((page - 1) * limit);
-    }
-
-    const data = await queryBuilder.exec();
+    const data = await queryBuilder.paginate(page, perPage);
 
     const resp = {
-      data: data,
+      data: data.all(),
       meta: {
-        total: queryBuilder.count,
+        total: data.total,
         page: page,
-        limit: limit,
+        perPage: perPage,
       },
     }
 

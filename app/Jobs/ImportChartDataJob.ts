@@ -70,7 +70,7 @@ const handler = async () => {
     try {
       await importElementsFromFinance(
         ticker,
-        await Finance.getChartViaTicker(ticker, parameters.fromDate),
+        await Finance.getChartViaTicker(ticker, parameters.fromDate, undefined, parameters.interval),
         parameters.interval
       );
     } catch (e) {
