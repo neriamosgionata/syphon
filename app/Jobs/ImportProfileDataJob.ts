@@ -41,7 +41,7 @@ const createObject = (ticker: string, profile: Quote) => {
     marketCap: profile.marketCap,
     financialCurrency: profile.financialCurrency,
     averageDailyVolume3Month: profile.averageDailyVolume3Month,
-    averageDailyVolume10Day: profile.averageDailyVolume10Day?.toFixed(8),
+    averageDailyVolume10Day: profile.averageDailyVolume10Day,
     displayName: profile.displayName,
     ytdReturn: profile.ytdReturn,
     prevName: profile.prevName,

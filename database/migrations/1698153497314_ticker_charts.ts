@@ -12,10 +12,10 @@ export default class extends BaseSchema {
       table.datetime("date").notNullable();
 
       table.bigInteger("volume").nullable();
-      table.float("open").nullable();
-      table.float("low").nullable();
-      table.float("close").nullable();
-      table.float("adjclose").nullable();
+      table.double("open").nullable();
+      table.double("low").nullable();
+      table.double("close").nullable();
+      table.double("adjclose").nullable();
 
       table.enum("interval", [
         "1m",
