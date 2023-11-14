@@ -1,6 +1,6 @@
 import {HttpContextContract} from "@ioc:Adonis/Core/HttpContext";
 import Filters from "@ioc:Providers/Filters";
-import {ModelQueryBuilderContract} from "@ioc:Adonis/Lucid/Orm";
+import {LucidModel, ModelQueryBuilderContract} from "@ioc:Adonis/Lucid/Orm";
 
 export default class SearchQueryMiddleware {
 
@@ -16,7 +16,7 @@ export default class SearchQueryMiddleware {
       return response.badRequest("No base model provided");
     }
 
-    const loadedModel = require(`App/Models/${baseModel}`);
+    const loadedModel: { default: LucidModel } = require(`App/Models/${baseModel}`);
 
     let queryBuilder: ModelQueryBuilderContract<any, any> = loadedModel.default.query();
 
@@ -33,12 +33,10 @@ export default class SearchQueryMiddleware {
 
     const resp = {
       data: data.all(),
-      meta: {
-        total: data.total,
-        page: page,
-        perPage: perPage,
-      },
+      meta: data.getMeta(),
     }
+
+    resp.meta.query = query || null;
 
     return response.json(resp);
   }
