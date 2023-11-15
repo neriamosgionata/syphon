@@ -1,17 +1,5 @@
 {
   "commands": {
-    "analyze:domains_csv": {
-      "settings": {
-        "loadApp": true,
-        "stayAlive": false
-      },
-      "commandPath": "./commands/AnalyzeDomainsCsv",
-      "commandName": "analyze:domains_csv",
-      "description": "",
-      "args": [],
-      "aliases": [],
-      "flags": []
-    },
     "import:chart_data": {
       "settings": {
         "loadApp": true,
@@ -56,18 +44,6 @@
           "description": "Ticker"
         }
       ],
-      "aliases": [],
-      "flags": []
-    },
-    "match:domains_csv": {
-      "settings": {
-        "loadApp": true,
-        "stayAlive": false
-      },
-      "commandPath": "./commands/MatchDomainsCsv",
-      "commandName": "match:domains_csv",
-      "description": "",
-      "args": [],
       "aliases": [],
       "flags": []
     },
@@ -812,6 +788,37 @@
           "description": "Actions to implement"
         }
       ]
+    },
+    "make:task": {
+      "settings": {
+        "loadApp": true
+      },
+      "commandPath": "adonis5-scheduler/build/commands/MakeTask",
+      "commandName": "make:task",
+      "description": "Generate task from template",
+      "args": [
+        {
+          "type": "string",
+          "propertyName": "name",
+          "name": "name",
+          "required": true,
+          "description": "Name of the task"
+        }
+      ],
+      "aliases": [],
+      "flags": []
+    },
+    "scheduler:run": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": true
+      },
+      "commandPath": "adonis5-scheduler/build/commands/SchedulerRun",
+      "commandName": "scheduler:run",
+      "description": "Start one or more workers",
+      "args": [],
+      "aliases": [],
+      "flags": []
     }
   },
   "aliases": {}

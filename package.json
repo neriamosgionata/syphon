@@ -37,6 +37,7 @@
     "@types/stopword": "2.0.2",
     "@types/uuid": "9.0.6",
     "adonis-preset-ts": "2.1.0",
+    "adonis5-scheduler": "^2.1.1",
     "anglicize": "^1.0.0",
     "axios": "1.6.0",
     "cli-progress": "3.12.0",
