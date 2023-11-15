@@ -28,6 +28,8 @@ export const FilterSplitter: Symbol = ";";
 
 export const BooleanAndSym: Symbol = "&";
 export const BooleanOrSym: Symbol = "|";
+export const LikeSym: Symbol = "like";
+export const NotLikeSym: Symbol = "!like";
 export const EqualSym: Symbol = "=";
 export const NotEqualSym: Symbol = "!=";
 export const GreaterThanSym: Symbol = ">";
@@ -69,7 +71,7 @@ export const Operators: { [p: Symbol]: Operator<any> } = {
   [EqualSym]: {
     symbol: EqualSym,
     executor: (q, a, av) => {
-      return q.where(a, av);
+      return q.where(a, "=", av);
     },
   },
 
@@ -120,5 +122,19 @@ export const Operators: { [p: Symbol]: Operator<any> } = {
     executor: (q, a, av) => {
       return q.whereNotIn(a, av);
     },
-  }
+  },
+
+  [LikeSym]: {
+    symbol: LikeSym,
+    executor: (q, a, av) => {
+      return q.where(a, "like", av);
+    },
+  },
+
+  [NotLikeSym]: {
+    symbol: NotLikeSym,
+    executor: (q, a, av) => {
+      return q.where(a, "not like", av);
+    },
+  },
 };
