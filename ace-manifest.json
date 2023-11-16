@@ -8,7 +8,15 @@
       "commandPath": "./commands/CheckInstalledPackages",
       "commandName": "check:packages",
       "description": "",
-      "args": [],
+      "args": [
+        {
+          "type": "string",
+          "propertyName": "toIgnore",
+          "name": "toIgnore",
+          "required": false,
+          "description": "To ignore"
+        }
+      ],
       "aliases": [],
       "flags": []
     },

@@ -1,10 +1,11 @@
-import {BaseCommand} from '@adonisjs/core/build/standalone'
+import {args, BaseCommand} from '@adonisjs/core/build/standalone'
 import {JobContract} from "App/Services/Jobs/Jobs";
 import {AppContainerAliasesEnum} from "App/Enums/AppContainerAliasesEnum";
 import {ScrapeNpmRegistryJobParameters} from "App/Jobs/ScrapeNpmRegistryJob";
 import Helper from "@ioc:Providers/Helper";
 import NpmPackage from "App/Models/NpmPackage";
 import Console from "@ioc:Providers/Console";
+import {UpdateNpmPackagesJobParameters} from "App/Jobs/UpdateNpmPackagesJob";
 
 export default class CheckInstalledPackages extends BaseCommand {
   /**
@@ -33,6 +34,12 @@ export default class CheckInstalledPackages extends BaseCommand {
     stayAlive: false,
   }
 
+  @args.string({description: "Update packages?", required: false})
+  public updatePackages: string = "n";
+
+  @args.string({description: "To ignore", required: false})
+  public toIgnore?: string;
+
   public async run() {
     const Jobs: JobContract = this.application.container.use(AppContainerAliasesEnum.Jobs);
 
@@ -42,6 +49,8 @@ export default class CheckInstalledPackages extends BaseCommand {
         {}
       )
     );
+
+    let toIgnore: string[] = this.toIgnore ? this.toIgnore.split(",") : [];
 
     const packages = await NpmPackage.all();
     const packagesAndVersions = packages.map((p) => {
@@ -59,7 +68,7 @@ export default class CheckInstalledPackages extends BaseCommand {
       }
     });
 
-    let status = packagesAndVersions.map((p) => {
+    let npmPackages = packagesAndVersions.map((p) => {
       const installedPackage = installedPackagesAndVersions.find((ip) => ip.name === p.name);
       if (!installedPackage || !p.version) {
         return {
@@ -76,14 +85,29 @@ export default class CheckInstalledPackages extends BaseCommand {
       };
     });
 
-    status = status.filter((s) => s.status !== "up to date");
+    npmPackages = npmPackages.filter((s) => s.status !== "up to date");
+    npmPackages = npmPackages.filter((s) => !toIgnore.includes(s.name));
 
-    if (status.length) {
-      Console.log("The following packages are outdated:");
-      Console.table(status);
+    if (!npmPackages.length) {
+      Console.log("All packages are up to date");
       return;
     }
 
-    Console.log("All packages are up to date");
+    Console.log("The following packages are outdated:");
+    Console.table(npmPackages);
+
+    if (this.updatePackages.includes("y")) {
+      Console.log("Updating them...");
+
+      await Jobs.waitUntilDone(
+        await Jobs.dispatch<UpdateNpmPackagesJobParameters>(
+          "UpdateNpmPackagesJob",
+          {
+            npmPackages: npmPackages as { 'current version': string; status: string; name: string; version: string }[],
+          }
+        )
+      );
+    }
+
   }
 }

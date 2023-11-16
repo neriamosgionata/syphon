@@ -96,8 +96,6 @@ const scrapeNpmRegistryJob = async () => {
 }
 
 const handler = async () => {
-  Logger.info("Setting up systems..");
-
   await scrapeNpmRegistryJob();
 };
 

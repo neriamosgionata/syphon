@@ -102,7 +102,7 @@ const scrapeYahooFinance = async () => {
 }
 
 const handler = async () => {
-  Logger.info("Setting up systems..");
+
 
   await scrapeYahooFinance();
 };
