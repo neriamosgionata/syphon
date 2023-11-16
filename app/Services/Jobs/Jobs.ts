@@ -7,6 +7,7 @@ import {Worker} from "worker_threads";
 import path from "path";
 import ProgressBar from "@ioc:Providers/ProgressBar";
 import {DateTime} from "luxon";
+import Console from "@ioc:Providers/Console";
 
 export interface JobContract {
   dispatch<T extends JobParameters>(
@@ -113,9 +114,9 @@ export default class Jobs implements JobContract {
       return;
     }
 
-    if ( message.status === JobMessageEnum.CONSOLE_LOG ) {
-
-        return;
+    if (message.status === JobMessageEnum.CONSOLE_LOG) {
+      Console[message.payload.logLevel](...message.payload.args);
+      return;
     }
 
     return this.catchJobMessage(message);
