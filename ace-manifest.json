@@ -11,6 +11,13 @@
       "args": [
         {
           "type": "string",
+          "propertyName": "updatePackages",
+          "name": "updatePackages",
+          "required": false,
+          "description": "Update packages?"
+        },
+        {
+          "type": "string",
           "propertyName": "toIgnore",
           "name": "toIgnore",
           "required": false,
@@ -76,6 +83,18 @@
           "description": "Ticker"
         }
       ],
+      "aliases": [],
+      "flags": []
+    },
+    "purge:ticker_chart_data": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/PurgeTickerChartData",
+      "commandName": "purge:ticker_chart_data",
+      "description": "",
+      "args": [],
       "aliases": [],
       "flags": []
     },

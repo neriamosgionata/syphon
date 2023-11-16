@@ -77,8 +77,8 @@ const importQuoteFromFinance = async (ticker: string) => {
     return;
   }
 
-  const lastIndexDate = lastIndex.indexDate.toJSDate();
-  const nowMinus15Days = new Date((new Date()).getTime() - (15 * 24 * 60 * 60 * 1000));
+  const lastIndexDate = lastIndex.indexDate.toJSDate().getTime();
+  const nowMinus15Days = (new Date()).getTime() - (15 * 24 * 60 * 60 * 1000);
 
   if (lastIndexDate > nowMinus15Days) {
     return;

@@ -37,6 +37,9 @@ export default class TickerChart extends BaseModel {
   public adjclose: number | null;
 
   @column()
+  public high: number | null;
+
+  @column()
   public interval: ChartInterval;
 
   static async getTickerChart(
