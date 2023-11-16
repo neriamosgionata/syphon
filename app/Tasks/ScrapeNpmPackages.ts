@@ -4,7 +4,7 @@ import {ScrapeNpmRegistryJobParameters} from "App/Jobs/ScrapeNpmRegistryJob";
 
 export default class ScrapeNpmPackages extends BaseTask {
   public static get schedule() {
-    return CronTimeV2.everyWeek();
+    return CronTimeV2.everyDayAt(11, 30);
   }
 
   public static get useLock() {
