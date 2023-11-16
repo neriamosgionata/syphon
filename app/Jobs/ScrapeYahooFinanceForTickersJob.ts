@@ -1,4 +1,4 @@
-import {BaseJobParameters, runJob} from "App/Services/Jobs/JobHelpers";
+import {BaseJobParameters, configureJob} from "App/Services/Jobs/JobHelpers";
 import Finance from "@ioc:Providers/Finance";
 import Jobs from "@ioc:Providers/Jobs";
 import {ImportProfileDataJobParameters} from "App/Jobs/ImportProfileDataJob";
@@ -13,7 +13,7 @@ let progressBarIndex2: number = 1;
 const importTickers = async (tickers: string[]) => {
   Logger.info("Importing total tickers data: " + tickers.length);
 
-  ProgressBar.addBar(tickers.length, "Importing tickers data...", progressBarIndex1);
+  ProgressBar.newBar(tickers.length, "Importing tickers data...", progressBarIndex1);
 
   while (tickers.length > 0) {
     const batch = tickers.splice(0, 4);
@@ -34,7 +34,7 @@ const importTickers = async (tickers: string[]) => {
 
     await Jobs.waitUntilAllDone(toWait);
 
-    ProgressBar.next(progressBarIndex1, batch.length);
+    ProgressBar.increment(progressBarIndex1, batch.length);
 
     Logger.info("Imported tickers data: " + batch.length);
 
@@ -45,13 +45,13 @@ const importTickers = async (tickers: string[]) => {
 
   Logger.info("Importing tickers data done");
 
-  ProgressBar.stop(progressBarIndex1);
+  ProgressBar.finish(progressBarIndex1);
 }
 
 const importCharts = async (tickers: string[]) => {
   Logger.info("Importing charts for total tickers: " + tickers.length);
 
-  ProgressBar.addBar(tickers.length, "Importing charts...", progressBarIndex2);
+  ProgressBar.newBar(tickers.length, "Importing charts...", progressBarIndex2);
 
   const fromDate = DateTime.fromISO("2010-01-01").toJSDate().getTime();
 
@@ -76,7 +76,7 @@ const importCharts = async (tickers: string[]) => {
 
     await Jobs.waitUntilAllDone(toWait);
 
-    ProgressBar.next(progressBarIndex2, batch.length);
+    ProgressBar.increment(progressBarIndex2, batch.length);
 
     Logger.info("Imported charts for tickers: " + batch.length);
 
@@ -87,7 +87,7 @@ const importCharts = async (tickers: string[]) => {
 
   Logger.info("Importing charts for tickers done");
 
-  ProgressBar.stop(progressBarIndex2);
+  ProgressBar.finish(progressBarIndex2);
 }
 
 const scrapeYahooFinance = async () => {
@@ -111,4 +111,4 @@ export interface ScrapeYahooFinanceForTickersJobParameters extends BaseJobParame
 
 }
 
-export default runJob(handler);
+export default configureJob(handler);

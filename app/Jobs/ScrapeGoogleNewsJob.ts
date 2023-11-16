@@ -1,4 +1,4 @@
-import {BaseJobParameters, loadData, messageToParent, runJob} from "App/Services/Jobs/JobHelpers";
+import {BaseJobParameters, loadData, messageToParent, configureJob} from "App/Services/Jobs/JobHelpers";
 import Newsletter from "@ioc:Providers/Newsletter";
 
 const scraperGoogleNews = async (searchQuery: string) => {
@@ -17,4 +17,4 @@ export interface ScrapeGoogleNewsJobParameters extends BaseJobParameters {
   searchQuery: string;
 }
 
-export default runJob(handler);
+export default configureJob(handler);

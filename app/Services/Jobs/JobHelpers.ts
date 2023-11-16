@@ -64,7 +64,7 @@ export const messageToParent = (payload: any) => {
   } as JobMessage);
 }
 
-export const runJob = (mainHandler: () => void | Promise<void>): RunJobFunction => {
+export const configureJob = (mainHandler: () => void | Promise<void>): RunJobFunction => {
   return async () => {
     isRunning();
 
@@ -138,6 +138,19 @@ export const sendToWorker = (worker: any, status: JobMessageEnum, payload: any) 
       payload
     } as JobMessage
   );
+}
+
+export const consoleLog = (logLevel: string = "info", ...args: any[]) => {
+  const {parentPort, workerData} = retriveWorkerThreadsData();
+  parentPort?.postMessage({
+    status: JobMessageEnum.CONSOLE_LOG,
+    id: workerData.id,
+    tags: workerData.tags,
+    payload: {
+      logLevel,
+      args,
+    }
+  } as JobMessage);
 }
 
 export type RunJobFunction = () => Promise<void>;

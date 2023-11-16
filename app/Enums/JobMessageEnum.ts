@@ -9,5 +9,5 @@ export enum JobMessageEnum {
   PROGRESS_BAR_UPDATE = 6,
   PROGRESS_BAR_OFF = 7,
   PROGRESS_BAR_OFF_ALL = 8,
-  PROGRESS_BAR_INDEX = 9,
+  CONSOLE_LOG = 9,
 }

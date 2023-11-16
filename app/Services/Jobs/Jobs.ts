@@ -5,10 +5,8 @@ import Application from "@ioc:Adonis/Core/Application";
 import Logger from "@ioc:Providers/Logger";
 import {Worker} from "worker_threads";
 import path from "path";
-import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
-import Config from "@ioc:Adonis/Core/Config";
 import ProgressBar from "@ioc:Providers/ProgressBar";
-import {now} from "moment";
+import {DateTime} from "luxon";
 
 export interface JobContract {
   dispatch<T extends JobParameters>(
@@ -70,8 +68,6 @@ export default class Jobs implements JobContract {
       isStarted = true;
     }
 
-    const defaultAppDateTimeFormat = Config.get("app.date_formats.default");
-
     await Job
       .query()
       .where("id", message.id)
@@ -80,8 +76,8 @@ export default class Jobs implements JobContract {
         status: message.status,
         error: message.error?.message,
         errorStack: message.error?.stack,
-        startedAt: isStarted ? toLuxon(now(), defaultAppDateTimeFormat) : null,
-        finishedAt: isFinished ? toLuxon(now(), defaultAppDateTimeFormat) : null,
+        startedAt: isStarted ? DateTime.now().toISO() : null,
+        finishedAt: isFinished ? DateTime.now().toISO() : null,
       })
       .exec();
   }
@@ -98,23 +94,28 @@ export default class Jobs implements JobContract {
     }
 
     if (message.status === JobMessageEnum.PROGRESS_BAR_ON) {
-      ProgressBar.addBar(message.payload.total, message.payload.title, message.payload.progressBarIndex);
+      ProgressBar.newBar(message.payload.total, message.payload.title, message.payload.progressBarIndex);
       return;
     }
 
     if (message.status === JobMessageEnum.PROGRESS_BAR_UPDATE) {
-      ProgressBar.next(message.payload.progressBarIndex, message.payload.current);
+      ProgressBar.increment(message.payload.progressBarIndex, message.payload.current);
       return;
     }
 
     if (message.status === JobMessageEnum.PROGRESS_BAR_OFF) {
-      ProgressBar.stop(message.payload.progressBarIndex);
+      ProgressBar.finish(message.payload.progressBarIndex);
       return;
     }
 
     if (message.status === JobMessageEnum.PROGRESS_BAR_OFF_ALL) {
-      ProgressBar.stopAll();
+      ProgressBar.finishAll();
       return;
+    }
+
+    if ( message.status === JobMessageEnum.CONSOLE_LOG ) {
+
+        return;
     }
 
     return this.catchJobMessage(message);

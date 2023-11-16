@@ -1,5 +1,6 @@
-import { args, BaseCommand } from "@adonisjs/core/build/standalone";
+import {args, BaseCommand} from "@adonisjs/core/build/standalone";
 import Finance from "@ioc:Providers/Finance";
+import Console from "@ioc:Providers/Console";
 
 export default class TestFinanceTicker extends BaseCommand {
   /**
@@ -28,10 +29,10 @@ export default class TestFinanceTicker extends BaseCommand {
     stayAlive: false
   };
 
-  @args.string({ description: "Ticker", required: true })
+  @args.string({description: "Ticker", required: true})
   public ticker: string;
 
   public async run() {
-    console.log(await Finance.getQuoteViaTicker(this.ticker));
+    Console.log(await Finance.getQuoteViaTicker(this.ticker));
   }
 }

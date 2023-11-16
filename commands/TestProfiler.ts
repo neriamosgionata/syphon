@@ -1,5 +1,6 @@
 import {args, BaseCommand} from "@adonisjs/core/build/standalone";
 import Profiler from "@ioc:Providers/Profiler";
+import Console from "@ioc:Providers/Console";
 
 export default class TestProfiler extends BaseCommand {
   /**
@@ -32,6 +33,6 @@ export default class TestProfiler extends BaseCommand {
   public query: string;
 
   public async run() {
-    console.log(await Profiler.askAnything(this.query));
+    Console.log(await Profiler.askAnything(this.query));
   }
 }

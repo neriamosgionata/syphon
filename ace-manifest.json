@@ -1,5 +1,29 @@
 {
   "commands": {
+    "check:packages": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/CheckInstalledPackages",
+      "commandName": "check:packages",
+      "description": "",
+      "args": [],
+      "aliases": [],
+      "flags": []
+    },
+    "clear:logs": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/ClearLogs",
+      "commandName": "clear:logs",
+      "description": "",
+      "args": [],
+      "aliases": [],
+      "flags": []
+    },
     "import:chart_data": {
       "settings": {
         "loadApp": true,

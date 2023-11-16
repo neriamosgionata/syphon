@@ -11,4 +11,5 @@ export enum AppContainerAliasesEnum {
   Helper = "Providers/Helper",
   StringCleaner = "Providers/StringCleaner",
   Filters = "Providers/Filters",
+  Console = "Providers/Console",
 }

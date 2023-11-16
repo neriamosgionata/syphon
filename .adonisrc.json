@@ -36,6 +36,7 @@
     "./providers/FiltersProvider",
     "./providers/StringCleanerProvider",
     "./providers/HelperProvider",
+    "./providers/ConsoleProvider",
     "@adonisjs/core",
     "@adonisjs/lucid",
     "@adonisjs/auth",

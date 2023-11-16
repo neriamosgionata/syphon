@@ -2,7 +2,7 @@ import Finance from "@ioc:Providers/Finance";
 import Config from "@ioc:Adonis/Core/Config";
 import TickerChart from "App/Models/TickerChart";
 import {ChartResultArray, ChartResultArrayQuote} from "yahoo-finance2/dist/esm/src/modules/chart";
-import {BaseJobParameters, loadData, runJob} from "App/Services/Jobs/JobHelpers";
+import {BaseJobParameters, loadData, configureJob} from "App/Services/Jobs/JobHelpers";
 import {ChartInterval} from "App/Services/Finance/Finance";
 import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
 import Logger from "@ioc:Providers/Logger";
@@ -85,4 +85,4 @@ export interface ImportChartDataJobParameters extends BaseJobParameters {
   interval: ChartInterval;
 }
 
-export default runJob(handler);
+export default configureJob(handler);

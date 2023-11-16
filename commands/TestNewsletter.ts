@@ -5,6 +5,7 @@ import {ScrapeGoogleNewsJobParameters} from "App/Jobs/ScrapeGoogleNewsJob";
 import {ScraperRunReturn} from "App/Services/Scraper/BaseScraper";
 import {ScrapeNewsArticleJobParameters} from "App/Jobs/ScrapeNewsArticleJob";
 import Helper from "@ioc:Providers/Helper";
+import Console from "@ioc:Providers/Console";
 
 export default class TestNewsletter extends BaseCommand {
   /**
@@ -109,9 +110,9 @@ export default class TestNewsletter extends BaseCommand {
       }
     }
 
-    console.log(`Found ${found} articles`);
+    Console.log(`Found ${found} articles`);
 
-    // console.log(toLoad);
+    // Console.log(toLoad);
 
   }
 }

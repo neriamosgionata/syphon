@@ -7,6 +7,7 @@ import Application from "@ioc:Adonis/Core/Application";
 import {AppContainerAliasesEnum} from "App/Enums/AppContainerAliasesEnum";
 import {logMessage} from "App/Services/Jobs/JobHelpers";
 import {isMainThread} from "node:worker_threads";
+import Console from "@ioc:Providers/Console";
 
 export interface LoggerContract {
   removeOneTimeLog(): void;
@@ -37,7 +38,7 @@ export interface LoggerContract {
 
   fatal(message?: string, ...values: unknown[]): true | Error;
 
-  table(table: any[]): true | Error;
+  table(table: any[], columnNames?: string[]): true | Error;
 }
 
 export default class Logger implements LoggerContract {
@@ -144,8 +145,8 @@ export default class Logger implements LoggerContract {
     return this.writeLine(LogLevelEnum.FATAL, logLine);
   }
 
-  table(table: any[]): true | Error {
-    const logLine = this.createTableLog(table);
+  table(table: any[], columnNames: string[] = []): true | Error {
+    const logLine = this.createTableLog(table, columnNames);
     return this.writeLine(LogLevelEnum.INFO, logLine);
   }
 
@@ -203,7 +204,7 @@ export default class Logger implements LoggerContract {
     const logLineWithAnnotation = this.getLogLine(level, logLine);
 
     if (this.printToConsole) {
-      console.log(logLineWithAnnotation);
+      Console.log(logLineWithAnnotation);
     }
 
     return this.saveLog(logFileName, logLineWithAnnotation);
@@ -217,77 +218,54 @@ export default class Logger implements LoggerContract {
     return logLine;
   }
 
-  private createTableLog(table: any[]) {
+  private recursiveObjectToString(object: any): string {
     let logLine = "";
 
-    const columnNames: string[] = [];
-    const columns: any[][] = [];
-    const anyColumn: any[] = [];
+    let first = true;
 
-    table.forEach((element) => {
-      if (typeof element === "object") {
-        Object.entries(element).forEach((keyValue) => {
-          let index = columnNames.indexOf(keyValue[0]);
-
-          if (!columns[index]) {
-            columns[index] = [];
-          }
-
-          if (index > -1) {
-            columns[index].push(keyValue[1]);
-            return;
-          }
-
-          index = columnNames.push(keyValue[0]) - 1;
-          columns[index].push(keyValue[1]);
-        });
-
-        return;
+    for (const [key, value] of Object.entries(object)) {
+      if (!first) {
+        logLine += ", ";
       }
 
-      anyColumn.push(element);
-      return;
+      logLine += key + ": ";
+
+      if (typeof value === "object") {
+        logLine += this.recursiveObjectToString(value);
+      } else if (value instanceof Date) {
+        logLine += value.toISOString();
+      } else {
+        logLine += value;
+      }
+
+      first = false;
+
+    }
+    return logLine;
+  }
+
+  private createTableLog(table: any[], columnNames: string[] = []): string {
+    let logLine = "\n";
+
+    if (columnNames.length) {
+      logLine += columnNames.join("\t|") + "\n";
+    }
+
+    table.forEach((row) => {
+      logLine += "|\t";
+
+      if (Array.isArray(row)) {
+        logLine += this.recursiveObjectToString(row);
+      } else if (row instanceof Date) {
+        logLine += row.toISOString();
+      } else if (typeof row === "object") {
+        logLine += Object.entries(row).map(([key, value]) => key + ":" + value).join("|\t");
+      } else {
+        logLine += row;
+      }
+
+      logLine += "\t|\n";
     });
-
-
-    if (columns.length) {
-      const cnLength = columnNames.length;
-
-      let maxColumnLength = 0;
-
-      columns.forEach((column) => {
-        maxColumnLength = column.length > maxColumnLength ? column.length : maxColumnLength;
-      });
-
-      logLine += "|" + ("---------".repeat(cnLength)) + "| \n";
-      logLine += "|";
-
-      columnNames.forEach((element) => {
-        logLine += element + " | ";
-      });
-
-      logLine += " \n";
-
-      columnNames.forEach((_element, index) => {
-        logLine += "|";
-        for (let i = 0; i < maxColumnLength; i++) {
-          logLine += (columns[index][i] || " ") + " | ";
-        }
-      });
-
-      logLine += " \n \n \n ";
-    }
-
-    if (anyColumn.length) {
-      logLine += "|----------------------------------| \n";
-      logLine += "|";
-
-      anyColumn.forEach((element) => {
-        logLine += element + " | ";
-      });
-
-      logLine += " \n";
-    }
 
     return logLine;
   }

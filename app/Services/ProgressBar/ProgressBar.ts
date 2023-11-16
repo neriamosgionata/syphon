@@ -5,15 +5,15 @@ import {isMainThread} from "node:worker_threads";
 import {progressBarOff, progressBarOffAll, progressBarOn, progressBarUpdate} from "App/Services/Jobs/JobHelpers";
 
 export interface ProgressBarContract {
-  addBar(length: number, title?: string, index?: number, color?: string): number;
+  newBar(length: number, title?: string, index?: number, color?: string): number;
 
-  next(index?: number, steps?: number): void;
+  increment(index?: number, steps?: number): void;
 
-  prev(index?: number, steps?: number): void;
+  decrement(index?: number, steps?: number): void;
 
-  stop(index?: number): void;
+  finish(index?: number): void;
 
-  stopAll(): void;
+  finishAll(): void;
 
   forceCurrentStdout(): void;
 }
@@ -38,7 +38,7 @@ export default class ProgressBar implements ProgressBarContract {
     this.multibarService = new progress.MultiBar({stream: stdout});
   }
 
-  addBar(length: number, title: string = "Progress", index?: number, color: string = "cyan"): number {
+  newBar(length: number, title: string = "Progress", index?: number, color: string = "cyan"): number {
     if (!isMainThread) {
       progressBarOn(index || 0, length, title);
       return index || 0;
@@ -84,7 +84,7 @@ export default class ProgressBar implements ProgressBarContract {
     return this.stepsStatus.length - 1;
   }
 
-  next(index: number = 0, steps: number = 1): void {
+  increment(index: number = 0, steps: number = 1): void {
     if (!isMainThread) {
       progressBarUpdate(index, steps);
       return;
@@ -97,7 +97,7 @@ export default class ProgressBar implements ProgressBarContract {
     }
   }
 
-  prev(index: number = 0, steps: number = 1): void {
+  decrement(index: number = 0, steps: number = 1): void {
     if (!isMainThread) {
       progressBarUpdate(index, -steps);
       return;
@@ -110,7 +110,7 @@ export default class ProgressBar implements ProgressBarContract {
     }
   }
 
-  stop(index: number = 0): void {
+  finish(index: number = 0): void {
     if (!isMainThread) {
       progressBarOff(index);
       return;
@@ -124,7 +124,7 @@ export default class ProgressBar implements ProgressBarContract {
     }
   }
 
-  stopAll(): void {
+  finishAll(): void {
     if (!isMainThread) {
       progressBarOffAll();
       return;

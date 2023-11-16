@@ -2,6 +2,7 @@ import {Browser, BrowserContext, executablePath, Page} from "puppeteer";
 import {LoggerContract} from "App/Services/Logger/Logger";
 import Logger from "@ioc:Providers/Logger";
 import ScraperStatus from "App/Models/ScraperStatus";
+import Console from "@ioc:Providers/Console";
 
 export type ScraperTestFunction = (_browser: Browser, _page: Page) => Promise<boolean>;
 
@@ -146,8 +147,8 @@ export default class BaseScraper implements BaseScraperContract {
     this.errors.push(error);
 
     if (this.writeOnConsole) {
-      console.error("Error message: ", error.message);
-      console.error("Error stack: ", error.stack);
+      Console.error("Error message: ", error.message);
+      Console.error("Error stack: ", error.stack);
     }
   }
 
@@ -155,7 +156,7 @@ export default class BaseScraper implements BaseScraperContract {
     this.logger.table(table);
 
     if (this.writeOnConsole) {
-      console.table(table);
+      Console.table(table);
     }
   }
 
@@ -163,7 +164,7 @@ export default class BaseScraper implements BaseScraperContract {
     this.logger[level.trim()](message, ...values);
 
     if (this.writeOnConsole) {
-      console[level](message, ...values);
+      Console[level](message, ...values);
     }
   }
 
@@ -175,8 +176,6 @@ export default class BaseScraper implements BaseScraperContract {
 
   async run<T extends ScraperHandlerReturn<any>>(): Promise<ScraperRunReturn<T>> {
     await this.start();
-
-    this.writeLog('info', "-> testing task service functionalities");
 
     if (!(await this.test())) {
       await this.registerError(new Error('Initial test was not successful, skipping task'), "Tests");
@@ -294,8 +293,6 @@ export default class BaseScraper implements BaseScraperContract {
   protected async handle<T extends ScraperHandlerReturn<any>>(): Promise<T> {
     let result: T = {} as T;
 
-    this.writeLog('info', "-> handling function to puppeteer");
-
     for (const funcIndex in this.registeredHandlers) {
       try {
         const res = await this.registeredHandlers[funcIndex](this.browser, this.page);
@@ -312,8 +309,6 @@ export default class BaseScraper implements BaseScraperContract {
   }
 
   protected async test(): Promise<boolean> {
-    this.writeLog('info', "-> testing function to puppeteer");
-
     for (const funcIndex in this.registeredTests) {
       try {
         if (!(await this.registeredTests[funcIndex](this.browser, this.page))) {

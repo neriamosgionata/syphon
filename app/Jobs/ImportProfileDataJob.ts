@@ -1,4 +1,4 @@
-import {BaseJobParameters, loadData, runJob} from "App/Services/Jobs/JobHelpers";
+import {BaseJobParameters, loadData, configureJob} from "App/Services/Jobs/JobHelpers";
 import {Quote} from "yahoo-finance2/dist/esm/src/modules/quote";
 import Finance from "@ioc:Providers/Finance";
 import Profile from "App/Models/Profile";
@@ -108,4 +108,4 @@ export interface ImportProfileDataJobParameters extends BaseJobParameters {
   ticker: string | string[];
 }
 
-export default runJob(handler);
+export default configureJob(handler);

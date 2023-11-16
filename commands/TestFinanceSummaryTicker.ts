@@ -1,5 +1,6 @@
 import { args, BaseCommand } from "@adonisjs/core/build/standalone";
 import Finance from "@ioc:Providers/Finance";
+import Console from "@ioc:Providers/Console";
 
 export default class TestFinanceSummaryTicker extends BaseCommand {
   /**
@@ -32,6 +33,6 @@ export default class TestFinanceSummaryTicker extends BaseCommand {
   public ticker: string;
 
   public async run() {
-    console.log(await Finance.getSummaryQuoteViaTicker(this.ticker));
+    Console.log(await Finance.getSummaryQuoteViaTicker(this.ticker));
   }
 }

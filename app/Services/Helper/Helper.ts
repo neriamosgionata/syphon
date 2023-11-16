@@ -1,6 +1,8 @@
 import {deu, eng, eus, fra, ita, removeStopwords, spa} from "stopword";
 import natural from "natural";
 import StringCleaner from "@ioc:Providers/StringCleaner";
+import fs from "fs";
+import PackageJson from "App/Models/PackageJson";
 
 export interface HelperContract {
   pythonSerializedToJson(pythonObj: string): string;
@@ -8,6 +10,10 @@ export interface HelperContract {
   cleanText(text: string): string;
 
   removeStopwords(text: string, customStops?: string[]): string;
+
+  loadInstalledPackageNames(): string[];
+
+  loadInstalledPackage(): Record<string, string>;
 }
 
 
@@ -37,4 +43,23 @@ export default class Helper implements HelperContract {
     const tokenizer = new natural.WordTokenizer();
     return removeStopwords((tokenizer.tokenize(text) || []), stops).join(" ");
   }
+
+  loadInstalledPackageNames(): string[] {
+    const file = fs.readFileSync("package.json");
+    const packageJson: PackageJson = JSON.parse(file.toString());
+    return [
+      ...Object.keys(packageJson.dependencies),
+      ...Object.keys(packageJson.devDependencies ?? {}),
+    ];
+  }
+
+  loadInstalledPackage(): Record<string, string> {
+    const file = fs.readFileSync("package.json");
+    const packageJson: PackageJson = JSON.parse(file.toString());
+    return {
+      ...packageJson.dependencies,
+      ...packageJson.devDependencies ?? {},
+    };
+  }
+
 }
