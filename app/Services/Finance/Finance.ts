@@ -132,6 +132,7 @@ export default class Finance implements FinanceContract {
         Scraper.waitRandom(),
         Scraper.removeGPDR(),
         this.crawlTotalPages(),
+        Scraper.takeScreenshot("yahoo-finance-etfs"),
       ])
       .run<{ total_pages: number }>();
 

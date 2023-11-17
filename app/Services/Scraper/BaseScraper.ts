@@ -15,6 +15,8 @@ export type ScraperRunReturn<T extends ScraperHandlerReturn<any>> = { results: T
 export interface BaseScraperContract {
   run<T extends ScraperHandlerReturn<any>>(): Promise<ScraperRunReturn<T>>;
 
+  openNewPage(): Promise<Page>;
+
   // SETUP
 
   setWithHeadlessChrome(headlessChrome: boolean | string): BaseScraperContract;
@@ -268,6 +270,38 @@ export default class BaseScraper implements BaseScraperContract {
     this.browser = await puppeteer.launch(launchArgs);
     this.context = await this.browser.createIncognitoBrowserContext();
     this.page = await this.browser.newPage();
+
+    if (this.writeOnConsole) {
+      this.page.on('console', async (msg) => {
+        try {
+          const msgArgs = msg.args();
+          for (const element of msgArgs) {
+            Console.log(await element.jsonValue());
+          }
+        } catch (e) {
+
+        }
+      });
+    }
+  }
+
+  async openNewPage(): Promise<Page> {
+    const page = await this.context.newPage();
+
+    if (this.writeOnConsole) {
+      page.on('console', async (msg) => {
+        try {
+          const msgArgs = msg.args();
+          for (const element of msgArgs) {
+            Console.log(await element.jsonValue());
+          }
+        } catch (e) {
+
+        }
+      });
+    }
+
+    return page;
   }
 
   protected async end(): Promise<void> {

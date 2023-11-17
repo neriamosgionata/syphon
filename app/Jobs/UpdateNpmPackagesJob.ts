@@ -15,7 +15,7 @@ const handler = async () => {
   let {npmPackages} = loadData<UpdateNpmPackagesJobParameters>(["npmPackages"]);
 
   for (const npmPackage of npmPackages) {
-    console.log("Updating package '" + npmPackage.name + "' to version ' " + npmPackage.version + " '");
+    Console.log("Updating package '" + npmPackage.name + "' to version ' " + npmPackage.version + " '");
     await updatePackage(npmPackage.name, npmPackage.version);
   }
 };

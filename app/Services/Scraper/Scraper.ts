@@ -6,11 +6,12 @@ import BaseScraper, {
   ScraperRunReturn,
   ScraperTestFunction
 } from "App/Services/Scraper/BaseScraper";
-import Config from "@ioc:Adonis/Core/Config";
 import Drive from "@ioc:Adonis/Core/Drive";
 
 export interface ScraperContract extends BaseScraperContract {
   run<T extends ScraperHandlerReturn<any>>(): Promise<ScraperRunReturn<T>>;
+
+  openNewPage(): Promise<Page>;
 
   //SETUP
 
@@ -179,9 +180,9 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   takeScreenshot(name?: string): ScraperHandlerFunction<void> {
     return async (_browser: Browser, _page: Page) => {
       if (_page) {
-        const path = Config.get("app.storage.data_folder") + "/screenshots";
+        const path = "screenshots";
 
-        const fullPath = path + (name ?? "/screenshot-" + Date.now() + ".png");
+        const fullPath = path + "/" + (name ?? "screenshot-") + Date.now() + ".png";
         const img = await _page.screenshot();
 
         await Drive.put(fullPath, img);

@@ -260,7 +260,3 @@ export const validator: ValidatorConfig = {};
 export const date_formats = {
   default: "YYYY-MM-DDTHH:mm:ss.sss"
 };
-
-export const storage = {
-  data_folder: Env.get("DATA_FOLDER", "storage/data"),
-}
