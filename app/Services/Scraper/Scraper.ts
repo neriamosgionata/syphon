@@ -35,7 +35,7 @@ export interface ScraperContract extends BaseScraperContract {
 
   checkForCaptcha(page: Page): ScraperHandlerFunction<boolean>;
 
-  waitRandom(): ScraperHandlerFunction<void>;
+  waitRandom(enlarge?: boolean): ScraperHandlerFunction<void>;
 
   removeCookiesHref(page: Page): ScraperHandlerFunction<void>;
 
@@ -91,9 +91,9 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  waitRandom(): ScraperHandlerFunction<void> {
+  waitRandom(enlarge: boolean = false): ScraperHandlerFunction<void> {
     return async (_browser: Browser, _page: Page) => {
-      await new Promise((res) => setTimeout(res, 87 + Math.random() * 5000));
+      await new Promise((res) => setTimeout(res, 87 + Math.random() * (enlarge ? 10000 : 3000)));
     }
   }
 
@@ -198,8 +198,8 @@ export default class Scraper extends BaseScraper implements ScraperContract {
       for (const context of _page.frames()) {
         await context.evaluate(() => {
           const acceptTexts = [
-            'accetta', 'accetta tutto', 'accetto', 'accept', 'accept all', 'agree', 'i agree', 'consent', 'ich stimme zu', 'acepto', 'j"accepte',
-            'alle akzeptieren', 'akzeptieren', 'verstanden', 'zustimmen', 'okay', 'ok', 'acconsento'
+            'accetta', 'accetta tutto', 'accetto', 'accept', 'accept all', 'agree', 'i agree', 'consent', 'ich stimme zu', 'acepto', 'j\'accepte',
+            'alle akzeptieren', 'akzeptieren', 'verstanden', 'zustimmen', 'okay', 'ok', 'acconsento', 'accepter tout', 'accepter', 'accept all',
           ];
 
           const acceptREString = (

@@ -3,7 +3,7 @@ import {Quote} from "yahoo-finance2/dist/esm/src/modules/quote";
 import {ChartResultArray} from "yahoo-finance2/dist/esm/src/modules/chart";
 import {QuoteSummaryResult} from "yahoo-finance2/dist/esm/src/modules/quoteSummary-iface";
 import Scraper from "@ioc:Providers/Scraper";
-import {ScraperHandlerFunction} from "App/Services/Scraper/BaseScraper";
+import {ScraperHandlerFunction, ScraperRunReturn} from "App/Services/Scraper/BaseScraper";
 import ProgressBar from "@ioc:Providers/ProgressBar";
 
 export type ChartInterval =
@@ -131,8 +131,8 @@ export default class Finance implements FinanceContract {
         Scraper.goto(`https://finance.yahoo.com/etfs?count=${count}`),
         Scraper.waitRandom(),
         Scraper.removeGPDR(),
+        Scraper.waitRandom(true),
         this.crawlTotalPages(),
-        Scraper.takeScreenshot("yahoo-finance-etfs"),
       ])
       .run<{ total_pages: number }>();
 
@@ -141,23 +141,10 @@ export default class Finance implements FinanceContract {
       "Scraping Yahoo Finance results for ETFs tickers",
     );
 
-    let resTickers = await Scraper
-      .setScraperStatusName("newsletter-get-single-article")
-      .setWithAdblockerPlugin(true)
-      .setWithStealthPlugin(true)
-      .setHandlers([
-        Scraper.goto(`https://finance.yahoo.com/etfs?offset=${offset}&count=${count}`),
-        Scraper.waitRandom(),
-        Scraper.removeGPDR(),
-        this.crawlListOfTickersEtfs(),
-      ])
-      .run<{ tickers: string[] }>();
+    let resTickers: ScraperRunReturn<{ tickers: string[] }>;
 
-    tickersFound.push(...(resTickers.results?.tickers || []));
+    do {
 
-    ProgressBar.increment(pIndex);
-
-    while ((resTickers.results?.tickers || []).length > 0) {
       resTickers = await Scraper
         .setScraperStatusName("newsletter-get-single-article")
         .setWithAdblockerPlugin(true)
@@ -166,6 +153,7 @@ export default class Finance implements FinanceContract {
           Scraper.goto(`https://finance.yahoo.com/etfs?offset=${offset}&count=${count}`),
           Scraper.waitRandom(),
           Scraper.removeGPDR(),
+          Scraper.waitRandom(true),
           this.crawlListOfTickersEtfs(),
         ])
         .run<{ tickers: string[] }>();
@@ -175,7 +163,8 @@ export default class Finance implements FinanceContract {
       offset += count;
 
       ProgressBar.increment(pIndex);
-    }
+
+    } while ((resTickers.results?.tickers || []).length > 0);
 
     ProgressBar.finish(pIndex);
 
