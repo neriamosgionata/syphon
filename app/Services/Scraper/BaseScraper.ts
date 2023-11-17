@@ -55,6 +55,8 @@ export default class BaseScraper implements BaseScraperContract {
   protected browser!: Browser;
   protected page!: Page;
 
+  private extraOpenedPages: Page[] = [];
+
   protected context: BrowserContext;
 
   protected registeredTests: ScraperTestFunction[] = [];
@@ -301,10 +303,22 @@ export default class BaseScraper implements BaseScraperContract {
       });
     }
 
+    this.extraOpenedPages.push(page);
+
     return page;
   }
 
   protected async end(): Promise<void> {
+    if (this.page && this.page.close) {
+      await this.page.close();
+    }
+
+    for (const page of this.extraOpenedPages) {
+      if (page && page.close) {
+        await page.close();
+      }
+    }
+
     if (this.context && this.context.close) {
       await this.context.close();
     }
@@ -317,7 +331,7 @@ export default class BaseScraper implements BaseScraperContract {
       this.writeLog('error', '\n\r');
       this.writeLog('error', 'Errors count: ' + this.errors.length);
       this.writeLog('error', 'List:');
-      this.writeTableLog(['ERRORS', ...this.errors.map((e) => e.message)]);
+      this.writeTableLog([...this.errors.map((e) => e.message)]);
     }
 
     this.registeredHandlers = [];
