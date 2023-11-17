@@ -195,31 +195,32 @@ export default class Jobs implements JobContract {
       }
     );
 
-    worker.on("online", () => {
+    const onlineListener = () => {
       Logger.info("Job started", id, tags);
-    });
+    };
 
-    worker.on("message", (message: JobMessage) => {
+    const messageListener = (message: JobMessage) => {
       this.defaultCallback(message, payloadCallback);
-    });
+    };
 
-    worker.on("error", (err: Error) => {
+    const errorListener = (err: Error) => {
       this.defaultErrorCallback(err, id, tags, errorCallback);
-    });
+    };
+
+    const exitListener = () => {
+      worker.removeAllListeners();
+      Logger.info("Job finished", id, tags);
+    };
+
+    worker.on("online", onlineListener);
+    worker.on("message", messageListener);
+    worker.on("error", errorListener);
+    worker.on("exit", exitListener);
 
     return {
       id,
       tags
     };
-  }
-
-  async retryFailed(job: Job): Promise<{ id: string, tags: string[] }> {
-    if (job.status !== JobMessageEnum.FAILED) {
-      throw new Error("Job is not failed");
-    }
-    const parameters = JSON.parse(job.parameters || "{}");
-    const tags = job.tags?.split(",") || [];
-    return this.dispatch(job.name, parameters, tags);
   }
 
   async runWithoutDispatch<T extends JobParameters>(
@@ -258,24 +259,34 @@ export default class Jobs implements JobContract {
       }
     );
 
-    worker.on("online", () => {
+    const onlineListener = () => {
       Logger.info("Job started", id, tags);
-    });
+    };
 
-    worker.on("message", (message: JobMessage) => {
+    const messageListener = (message: JobMessage) => {
       if (message.status === JobMessageEnum.COMPLETED || message.status === JobMessageEnum.FAILED) {
         resolver(undefined);
         return;
       }
 
       payloadCallback && payloadCallback(message);
-    });
+    };
 
-    worker.on("error", (err: Error) => {
+    const errorListener = (err: Error) => {
       resolver(err);
 
       errorCallback && errorCallback(err, actualId, tags)
-    });
+    };
+
+    const exitListener = () => {
+      worker.removeAllListeners();
+      Logger.info("Job finished", id, tags);
+    };
+
+    worker.on("online", onlineListener);
+    worker.on("message", messageListener);
+    worker.on("error", errorListener);
+    worker.on("exit", exitListener);
 
     const err = await promise;
 
@@ -345,5 +356,14 @@ export default class Jobs implements JobContract {
     }
 
     return statuses;
+  }
+
+  async retryFailed(job: Job): Promise<{ id: string, tags: string[] }> {
+    if (job.status !== JobMessageEnum.FAILED) {
+      throw new Error("Job is not failed");
+    }
+    const parameters = JSON.parse(job.parameters || "{}");
+    const tags = job.tags?.split(",") || [];
+    return this.dispatch(job.name, parameters, tags);
   }
 }
