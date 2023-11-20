@@ -171,8 +171,8 @@ export default class Scraper extends BaseScraper implements ScraperContract {
 
   searchAndEnter(inputSelector: string, searchQuery: string): ScraperHandlerFunction<void>[] {
     return [
-      this.typeIn(inputSelector, searchQuery, {delay: 33}),
-      this.keyEnter(inputSelector, {delay: 37}),
+      this.typeIn(inputSelector, searchQuery, {delay: 33 + Math.random() * 137}),
+      this.keyEnter(inputSelector, {delay: 37 + Math.random() * 137}),
       this.waitRandom(),
     ];
   }

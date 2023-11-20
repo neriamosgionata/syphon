@@ -71,18 +71,16 @@ export default class Newsletter implements NewsletterContract {
     });
   }
 
-  private searchForQuery(searchQuery: string): ScraperHandlerFunction<void>[] {
-    return Scraper.searchAndEnter("input:not([aria-hidden=\"true\"])", searchQuery);
-  }
-
   async getGoogleNewsArticlesFor(searchQuery: string): Promise<ScraperRunReturn<{ articlesUrl: string[] }>> {
     const scraper = Scraper
       .setWithAdblockerPlugin(true)
       .setWithStealthPlugin(true)
       .setHandlers([
         this.goToGoogleNews(),
+        Scraper.waitRandom(),
         Scraper.removeGPDR(),
-        ...this.searchForQuery(searchQuery),
+        Scraper.waitRandom(),
+        ...Scraper.searchAndEnter("input:not([aria-hidden=\"true\"])", searchQuery),
         this.getArticlesUrls(searchQuery),
       ]);
 
