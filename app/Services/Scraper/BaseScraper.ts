@@ -1,4 +1,4 @@
-import {Browser, BrowserContext, executablePath, Page} from "puppeteer";
+import {Browser, executablePath, Page} from "puppeteer";
 import {LoggerContract} from "App/Services/Logger/Logger";
 import Logger from "@ioc:Providers/Logger";
 import ScraperStatus from "App/Models/ScraperStatus";
@@ -58,8 +58,6 @@ export default class BaseScraper implements BaseScraperContract {
   protected page!: Page;
 
   private extraOpenedPages: Page[] = [];
-
-  protected context: BrowserContext;
 
   protected registeredTests: ScraperTestFunction[] = [];
   protected registeredHandlers: ScraperHandlerFunction<any>[] = [];
@@ -186,23 +184,37 @@ export default class BaseScraper implements BaseScraperContract {
   //HANDLER
 
   async run<T extends ScraperHandlerReturn<any>>(): Promise<ScraperRunReturn<T>> {
-    await this.start();
+    try {
+      await this.start();
+    } catch (e) {
+      await this.registerError(e, "Start");
+      await this.end();
+      return {results: {} as T, errors: this.errors};
+    }
 
-    if (!(await this.test())) {
-      await this.registerError(new Error('Initial test was not successful, skipping task'), "Tests");
-      return {results: null as T, errors: this.errors};
+    try {
+      if (!(await this.test())) {
+        await this.registerError(new Error('Initial test was not successful, skipping task'), "Tests");
+        await this.end();
+        return {results: {} as T, errors: this.errors};
+      }
+    } catch (e) {
+      await this.registerError(e, "Start");
+      await this.end();
+      return {results: {} as T, errors: this.errors};
     }
 
     let result: any = {};
+
     try {
       result = await this.handle<T>();
     } catch (err) {
       await this.registerError(err, "Generic");
+    } finally {
+      await this.end();
     }
 
-    await this.end();
-
-    return {results: result, errors: this.errors};
+    return {results: result, errors: this.getErrors()};
   }
 
   protected async start() {
@@ -277,7 +289,6 @@ export default class BaseScraper implements BaseScraperContract {
 
     // @ts-ignore
     this.browser = await puppeteer.launch(launchArgs);
-    this.context = await this.browser.createIncognitoBrowserContext();
     this.page = await this.browser.newPage();
 
     if (this.writeOnConsole) {
@@ -295,7 +306,7 @@ export default class BaseScraper implements BaseScraperContract {
   }
 
   async openNewPage(): Promise<Page> {
-    const page = await this.context.newPage();
+    const page = await this.browser.newPage();
 
     if (this.writeOnConsole) {
       page.on('console', async (msg) => {
@@ -316,21 +327,17 @@ export default class BaseScraper implements BaseScraperContract {
   }
 
   protected async end(): Promise<void> {
-    if (this.page && this.page.close) {
+    if (this.page && this.page.close && !this.page.isClosed()) {
       await this.page.close();
     }
 
     for (const page of this.extraOpenedPages) {
-      if (page && page.close) {
+      if (page && page.close && !page.isClosed()) {
         await page.close();
       }
     }
 
-    if (this.context && this.context.close) {
-      await this.context.close();
-    }
-
-    if (this.browser && this.browser.close) {
+    if (this.browser && this.browser.close && this.browser.connected) {
       await this.browser.close();
     }
 
