@@ -41,6 +41,7 @@
     "anglicize": "1.0.0",
     "apos-to-lex-form": "1.0.5",
     "axios": "^1.6.2",
+    "cld": "^2.9.1",
     "cli-progress": "3.12.0",
     "csv-parser": "3.0.0",
     "email-regex": "5.0.0",

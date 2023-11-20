@@ -5,12 +5,11 @@ import ProgressBar from "@ioc:Providers/ProgressBar";
 import {ScrapeNewsArticleJobParameters} from "App/Jobs/ScrapeNewsArticleJob";
 import Helper from "@ioc:Providers/Helper";
 import Jobs from "@ioc:Providers/Jobs";
-import {PorterStemmer} from "natural";
 import Console from "@ioc:Providers/Console";
 
 const handler = async () => {
   let data = loadData<AnalyzeNewsletterForTickerJobParameters>(["ticker"]);
-  let articleUrls: string[] = [];
+  const articleUrls: string[] = [];
 
   //RUN GOOGLE NEWS SCRAPING
 
@@ -28,7 +27,7 @@ const handler = async () => {
 
   //RUN ARTICLE SCRAPING
 
-  let articleData: Map<string, { title?: string; content?: string }> = new Map();
+  const articleData: Map<string, { title?: string; content?: string }> = new Map();
   let chunk: (() => Promise<{ id: string; tags: string[]; error?: Error | undefined; }>)[] = [];
   let index = ProgressBar.newBar(articleUrls.length, "Scraping articles");
 
@@ -61,12 +60,12 @@ const handler = async () => {
 
   ProgressBar.finish(index);
 
-  let toLoad: string[][] = [];
+  const cleanedArticles: string[][] = [];
 
   index = ProgressBar.newBar(articleData.size, "Cleaning articles");
 
   for (const article of articleData.entries()) {
-    toLoad.push(
+    cleanedArticles.push(
       Helper.removeStopwords(
         Helper.cleanText(article[1]?.content || ""),
       )
@@ -77,7 +76,13 @@ const handler = async () => {
 
   ProgressBar.finish(index);
 
-  let loadedSentiments = toLoad.map((splitted) => Helper.analyzeSentiment(splitted, "Italian", PorterStemmer, "pattern"));
+  const loadedSentiments: number[] = [];
+
+  for (const articleToAnalyze of cleanedArticles) {
+    loadedSentiments.push(
+      await Helper.analyzeUnknownTextSentiment(articleToAnalyze)
+    );
+  }
 
   Console.log(loadedSentiments);
 };
