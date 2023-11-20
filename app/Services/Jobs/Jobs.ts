@@ -265,7 +265,7 @@ export default class Jobs implements JobContract {
 
     const messageListener = (message: JobMessage) => {
       if (message.status === JobMessageEnum.COMPLETED || message.status === JobMessageEnum.FAILED) {
-        resolver(undefined);
+        resolver();
         return;
       }
 
@@ -276,7 +276,10 @@ export default class Jobs implements JobContract {
 
     const errorListener = (err: Error) => {
       resolver(err);
-      errorCallback && errorCallback(err, actualId, tags)
+
+      if (errorCallback) {
+        errorCallback(err, actualId, tags)
+      }
     };
 
     const exitListener = () => {

@@ -60,14 +60,13 @@ export default class TestNewsletter extends BaseCommand {
     //RUN ARTICLE SCRAPING
 
     let articleData: Map<string, ScraperRunReturn<{ title?: string; content?: string }>> = new Map();
-
     let chunk: (() => Promise<{ id: string; tags: string[]; error?: Error | undefined; }>)[] = [];
-    let CHUNK_LENGTH = 4;
-
     let index = ProgressBar.newBar(articleUrls.length, "Scraping articles");
 
-    for (const articleUrl of articleUrls.splice(0, 10)) {
-      chunk.push(
+    do {
+      let articles: string[] = articleUrls.splice(0, 4);
+
+      chunk = articles.map((articleUrl) =>
         () => Jobs.runWithoutDispatch<ScrapeNewsArticleJobParameters>(
           "ScrapeNewsArticleJob",
           {
@@ -80,22 +79,13 @@ export default class TestNewsletter extends BaseCommand {
               jobMessage.payload.results
             );
           }
-        )
-      );
+        ));
 
-      if (chunk.length === CHUNK_LENGTH) {
-        await Promise.all(chunk.map(p => p()));
-        chunk = [];
+      await Promise.all(chunk.map((job) => job()));
 
-        ProgressBar.increment(index, CHUNK_LENGTH);
-      }
-    }
+      ProgressBar.increment(index, articles.length);
 
-    if (chunk.length > 0) {
-      await Promise.all(chunk.map(p => p()));
-
-      ProgressBar.increment(index, chunk.length);
-    }
+    } while (articleUrls.length > 0);
 
     let toLoad: string[] = [];
 
@@ -103,11 +93,18 @@ export default class TestNewsletter extends BaseCommand {
 
     for (const article of articleData.entries()) {
 
+      console.log(
+        article[1]?.results?.content || "",
+        Helper.cleanText(
+          article[1]?.results?.content || ""
+        )
+      );
+
+      break;
+
       toLoad.push(
-        Helper.removeStopwords(
-          Helper.cleanText(
-            article[1]?.results?.content || ""
-          )
+        Helper.cleanText(
+          article[1]?.results?.content || ""
         )
       );
 
