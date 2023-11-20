@@ -10,9 +10,6 @@ export interface NewsletterContract {
 }
 
 export default class Newsletter implements NewsletterContract {
-  private goToGoogleNews(): ScraperHandlerFunction<void> {
-    return Scraper.goto("https://news.google.com/");
-  }
 
   private getArticlesUrls(searchQuery: string): ScraperHandlerFunction<{ articlesUrl: string[] }> {
     return Scraper.evaluate((sQ: string) => {
@@ -32,18 +29,14 @@ export default class Newsletter implements NewsletterContract {
     }, searchQuery);
   }
 
-  private goToArticleUrl(articleUrl: string): ScraperHandlerFunction<void> {
-    return Scraper.goto(articleUrl);
-  }
-
   private getArticleContent(): ScraperHandlerFunction<{ title?: string, content?: string }> {
     return Scraper.evaluate(() => {
       const title = (document.querySelector("h1") || document.querySelector("h2"))?.innerText;
 
       const articleBodySelectors = [
-        'div[class*="articleBody" i]',
-        'div[class*="article-body" i]',
-        'div[class*="description" i]',
+        '*[class*="articleBody" i]',
+        '*[class*="article-body" i]',
+        '*[class*="description" i]',
         'article > p',
         'article > div',
       ]
@@ -76,11 +69,14 @@ export default class Newsletter implements NewsletterContract {
       .setWithAdblockerPlugin(true)
       .setWithStealthPlugin(true)
       .setHandlers([
-        this.goToGoogleNews(),
+        Scraper.goto("https://news.google.com/"),
         Scraper.waitRandom(),
         Scraper.removeGPDR(),
         Scraper.waitRandom(),
         ...Scraper.searchAndEnter("input:not([aria-hidden=\"true\"])", searchQuery),
+        Scraper.waitRandom(),
+        Scraper.autoScroll(50),
+        Scraper.waitRandom(),
         this.getArticlesUrls(searchQuery),
       ]);
 
@@ -101,7 +97,7 @@ export default class Newsletter implements NewsletterContract {
         .setWithAdblockerPlugin(true)
         .setWithStealthPlugin(true)
         .setHandlers([
-          this.goToArticleUrl(articleUrl),
+          Scraper.goto(articleUrl),
           Scraper.waitRandom(),
           Scraper.removeGPDR(),
           Scraper.waitRandom(),
@@ -125,7 +121,7 @@ export default class Newsletter implements NewsletterContract {
       .setWithAdblockerPlugin(true)
       .setWithStealthPlugin(true)
       .setHandlers([
-        this.goToArticleUrl(articleUrl),
+        Scraper.goto(articleUrl),
         Scraper.waitRandom(),
         Scraper.removeGPDR(),
         Scraper.waitRandom(),
