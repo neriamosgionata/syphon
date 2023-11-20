@@ -2,7 +2,8 @@ import anglicize from "anglicize";
 import ent from "ent";
 import phoneRegex from "phone-regex";
 import stopword from "stopword";
-
+import aposToLexForm from "apos-to-lex-form";
+import spellingCorrector from "spelling-corrector";
 
 export interface StringCleanerContract {
   valueOf(): string;
@@ -46,6 +47,10 @@ export interface StringCleanerContract {
   removeDashes(): StringCleanerContract;
 
   setString(s: string): StringCleanerContract;
+
+  aposToLexForm(): StringCleanerContract;
+
+  fixSpellingErrors(): StringCleanerContract;
 }
 
 export default class StringCleaner implements StringCleanerContract {
@@ -183,6 +188,16 @@ export default class StringCleaner implements StringCleanerContract {
       match = re.exec(this.s);
     }
 
+    return this;
+  }
+
+  aposToLexForm(): StringCleanerContract {
+    this.s = aposToLexForm(this.s);
+    return this;
+  }
+
+  fixSpellingErrors(): StringCleanerContract {
+    this.s = spellingCorrector(this.s);
     return this;
   }
 }

@@ -13,7 +13,7 @@ export interface ScraperContract extends BaseScraperContract {
 
   openNewPage(): Promise<Page>;
 
-  //SETUP
+  // SETUP
 
   setWithHeadlessChrome(headlessChrome: boolean | string): ScraperContract;
 
@@ -23,11 +23,25 @@ export interface ScraperContract extends BaseScraperContract {
 
   setLoggerChannel(logChannel: string, writeOnConsole: boolean): ScraperContract;
 
+  setPrintInConsole(writeOnConsole: boolean): ScraperContract;
+
   setTests(testsFunctions: ScraperTestFunction[]): ScraperContract;
 
   setHandlers(handlersFunctions: ScraperHandlerFunction<any>[]): ScraperContract;
 
   setScraperStatusName(name: string): ScraperContract;
+
+  getErrors(): Error[];
+
+  resetScraperStatus(): Promise<void>;
+
+  updateScraperStatus(status: object | any): Promise<void>;
+
+  registerError(error: Error | any, key: string): Promise<void>;
+
+  writeTableLog(table: any[]): void;
+
+  writeLog(level: string, message: string, ...values: unknown[]): void;
 
   //HELPERS
 

@@ -1,5 +1,25 @@
 {
   "commands": {
+    "analyze:ticker_newsletter": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/AnalyzeTickerNewsletter",
+      "commandName": "analyze:ticker_newsletter",
+      "description": "",
+      "args": [
+        {
+          "type": "string",
+          "propertyName": "ticker",
+          "name": "ticker",
+          "required": true,
+          "description": "Ticker"
+        }
+      ],
+      "aliases": [],
+      "flags": []
+    },
     "check:packages": {
       "settings": {
         "loadApp": true,
@@ -172,26 +192,6 @@
           "name": "ticker",
           "required": true,
           "description": "Ticker"
-        }
-      ],
-      "aliases": [],
-      "flags": []
-    },
-    "test:newsletter": {
-      "settings": {
-        "loadApp": true,
-        "stayAlive": false
-      },
-      "commandPath": "./commands/TestNewsletter",
-      "commandName": "test:newsletter",
-      "description": "",
-      "args": [
-        {
-          "type": "string",
-          "propertyName": "query",
-          "name": "query",
-          "required": true,
-          "description": "Query"
         }
       ],
       "aliases": [],

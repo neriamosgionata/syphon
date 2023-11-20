@@ -1,21 +1,25 @@
-import {deu, eng, eus, fra, ita, removeStopwords, spa} from "stopword";
-import natural from "natural";
+import {deu, eng, eus, fra, ita, LanguageCode, removeStopwords, spa} from "stopword";
+import natural, {AfinnLanguage, AfinnLanguageType, PatternLanguageType, SentimentAnalyzer, Stemmer} from "natural";
 import StringCleaner from "@ioc:Providers/StringCleaner";
 import fs from "fs";
 import PackageJson from "App/Models/PackageJson";
+import {PatternLanguage} from "natural/lib/natural/sentiment";
 
 export interface HelperContract {
   pythonSerializedToJson(pythonObj: string): string;
 
   cleanText(text: string): string;
 
-  removeStopwords(text: string, customStops?: string[]): string;
+  removeStopwordsJoined(text: string, customStops?: string[]): string;
+
+  removeStopwords(text: string, customStops?: string[]): string[];
 
   loadInstalledPackageNames(): string[];
 
   loadInstalledPackage(): Record<string, string>;
-}
 
+  analyzeSentiment(text: string[], lang: AfinnLanguage | PatternLanguage, stemmer: Stemmer, type: AfinnLanguageType | PatternLanguageType): number;
+}
 
 export default class Helper implements HelperContract {
   pythonSerializedToJson(pythonObj: string): string {
@@ -34,14 +38,21 @@ export default class Helper implements HelperContract {
       .stripHtml()
       .removeHtmlEntities()
       .removeDashes()
+      .aposToLexForm()
+      .replace(/[^a-zA-Z\s]+/g, "")
+      .fixSpellingErrors()
       .toLowerCase()
       .valueOf()
   }
 
-  removeStopwords(text: string, customStops?: string[]): string {
-    const stops: string[] = customStops || [...ita, ...eng, ...deu, ...spa, ...fra, ...eus];
+  removeStopwordsJoined(text: string, customStops?: LanguageCode[]): string {
+    return this.removeStopwords(text, customStops).join(" ");
+  }
+
+  removeStopwords(text: string, customStops?: LanguageCode[]): string[] {
+    const stops: LanguageCode[] = customStops || [...ita, ...eng, ...deu, ...spa, ...fra, ...eus] as unknown as LanguageCode[];
     const tokenizer = new natural.WordTokenizer();
-    return removeStopwords((tokenizer.tokenize(text) || []), stops).join(" ");
+    return removeStopwords((tokenizer.tokenize(text) || []), stops);
   }
 
   loadInstalledPackageNames(): string[] {
@@ -60,6 +71,12 @@ export default class Helper implements HelperContract {
       ...packageJson.dependencies,
       ...packageJson.devDependencies ?? {},
     };
+  }
+
+  analyzeSentiment(text: string[], lang: AfinnLanguage | PatternLanguage, stemmer: Stemmer, type: AfinnLanguageType | PatternLanguageType): number {
+    //@ts-ignore
+    const analyzer = new SentimentAnalyzer(lang, stemmer, type);
+    return analyzer.getSentiment(text);
   }
 
 }

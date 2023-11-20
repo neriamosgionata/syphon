@@ -34,28 +34,20 @@ export default class Newsletter implements NewsletterContract {
       const title = (document.querySelector("h1") || document.querySelector("h2"))?.innerText;
 
       const articleBodySelectors = [
-        '*[class*="articleBody" i]',
-        '*[class*="article-body" i]',
-        '*[class*="description" i]',
-        'article > p',
-        'article > div',
-      ]
+        'article > *[class*=body]',
+        'article > *[class*=content]',
+        'article',
+        '*[class*="article" i]',
+        '*[class*="content" i]',
+      ];
 
       let content = "";
 
       for (const articleBodySelector of articleBodySelectors) {
-        const allElements = [
-          ...document.querySelectorAll(articleBodySelector)
-        ] as HTMLElement[];
+        const element = document.querySelector(articleBodySelector) as HTMLElement | null;
 
-        if (allElements.length === 0) {
-          continue;
-        }
-
-        const tmpContent = allElements.map(el => el.innerText).join("\n");
-
-        if (tmpContent) {
-          content = tmpContent;
+        if (element?.innerText) {
+          content = element.innerText;
           break;
         }
       }

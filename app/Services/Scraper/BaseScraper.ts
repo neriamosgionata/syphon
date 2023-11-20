@@ -27,6 +27,8 @@ export interface BaseScraperContract {
 
   setLoggerChannel(logChannel: string, writeOnConsole: boolean): BaseScraperContract;
 
+  setPrintInConsole(writeOnConsole: boolean): BaseScraperContract;
+
   setTests(testsFunctions: ScraperTestFunction[]): BaseScraperContract;
 
   setHandlers(handlersFunctions: ScraperHandlerFunction<any>[]): BaseScraperContract;
@@ -75,6 +77,8 @@ export default class BaseScraper implements BaseScraperContract {
     this.logger = Logger.logger(logChannel, "scraper", writeOnConsole);
   }
 
+  // SETUP
+
   setWithHeadlessChrome(headlessChrome: boolean | string): this {
     this.withHeadlessChrome = headlessChrome;
     return this;
@@ -90,7 +94,10 @@ export default class BaseScraper implements BaseScraperContract {
     return this;
   }
 
-  // SETUP
+  setPrintInConsole(writeOnConsole: boolean): this {
+    this.writeOnConsole = writeOnConsole;
+    return this;
+  }
 
   setLoggerChannel(logChannel: string, writeOnConsole: boolean = false): this {
     this.logger = Logger.logger(logChannel, "scraper", writeOnConsole);
