@@ -65,6 +65,7 @@ const scrapeNpmPackage = async (packageName: string) => {
       Scraper.goto(`https://www.npmjs.com/package/${packageName}`),
       Scraper.waitRandom(),
       Scraper.removeGPDR(),
+      Scraper.waitRandom(),
       Scraper.evaluate(evalFunction),
     ])
     .run<{ packageVersion: string | null }>();

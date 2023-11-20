@@ -102,7 +102,9 @@ export default class Newsletter implements NewsletterContract {
         .setWithStealthPlugin(true)
         .setHandlers([
           this.goToArticleUrl(articleUrl),
+          Scraper.waitRandom(),
           Scraper.removeGPDR(),
+          Scraper.waitRandom(),
           this.getArticleContent(),
         ]);
 
@@ -124,7 +126,9 @@ export default class Newsletter implements NewsletterContract {
       .setWithStealthPlugin(true)
       .setHandlers([
         this.goToArticleUrl(articleUrl),
+        Scraper.waitRandom(),
         Scraper.removeGPDR(),
+        Scraper.waitRandom(),
         this.getArticleContent(),
       ]);
 

@@ -269,18 +269,19 @@ export default class Jobs implements JobContract {
         return;
       }
 
-      payloadCallback && payloadCallback(message);
+      if (message.status === JobMessageEnum.MESSAGE && payloadCallback) {
+        payloadCallback(message);
+      }
     };
 
     const errorListener = (err: Error) => {
       resolver(err);
-
       errorCallback && errorCallback(err, actualId, tags)
     };
 
     const exitListener = () => {
       worker.removeAllListeners();
-      Logger.info("Job finished", id, tags);
+      Logger.info("Job finished", actualId, tags);
     };
 
     worker.on("online", onlineListener);
@@ -289,8 +290,6 @@ export default class Jobs implements JobContract {
     worker.on("exit", exitListener);
 
     const err = await promise;
-
-    Logger.info("Job finished", actualId, tags);
 
     return {
       id: actualId,
