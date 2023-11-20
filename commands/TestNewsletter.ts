@@ -99,31 +99,24 @@ export default class TestNewsletter extends BaseCommand {
 
     let toLoad: string[] = [];
 
-    let found = 0;
-
     index = ProgressBar.newBar(articleData.size, "Cleaning articles");
 
     for (const article of articleData.entries()) {
-      if (article[1]?.results?.content) {
 
-        found++;
-
-        toLoad.push(
-          Helper.removeStopwords(
-            Helper.cleanText(
-              article[1].results.content
-            )
+      toLoad.push(
+        Helper.removeStopwords(
+          Helper.cleanText(
+            article[1]?.results?.content || ""
           )
-        );
-
-      }
+        )
+      );
 
       ProgressBar.increment(index);
     }
 
     ProgressBar.finishAll();
 
-    Console.log(`Found ${found} articles, ${toLoad.length} are valid`);
+    Console.log(`To load: ${toLoad.length}`);
 
     // Console.log(toLoad);
 
