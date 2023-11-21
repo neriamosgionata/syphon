@@ -28,15 +28,15 @@ export interface LoggerContract {
 
   getCurrentChannelName(): string;
 
-  debug(message?: string, ...values: unknown[]): true | Error;
+  debug(message: string, ...parameters: unknown[]): true | Error;
 
-  info(message?: string, ...values: unknown[]): true | Error;
+  info(message: string, ...parameters: unknown[]): true | Error;
 
-  warn(message?: string, ...values: unknown[]): true | Error;
+  warn(message: string, ...parameters: unknown[]): true | Error;
 
-  error(message?: string, ...values: unknown[]): true | Error;
+  error(message: string, ...parameters: unknown[]): true | Error;
 
-  fatal(message?: string, ...values: unknown[]): true | Error;
+  fatal(message: string, ...parameters: unknown[]): true | Error;
 
   table(table: any[], columnNames?: string[]): true | Error;
 }
@@ -120,32 +120,62 @@ export default class Logger implements LoggerContract {
     return this.logChannelName;
   }
 
-  debug(message?: string, ...values: unknown[]): true | Error {
-    const logLine = this.attachParametersToMessage(message, values);
+  debug(message: string, ...parameters: unknown[]): true | Error {
+    if (!isMainThread) {
+      logMessage(message, parameters, "debug");
+      return true;
+    }
+
+    const logLine = this.attachParametersToMessage(message, parameters);
     return this.writeLine(LogLevelEnum.DEBUG, logLine);
   }
 
-  info(message?: string, ...values: unknown[]): true | Error {
-    const logLine = this.attachParametersToMessage(message, values);
+  info(message: string, ...parameters: unknown[]): true | Error {
+    if (!isMainThread) {
+      logMessage(message, parameters, "info");
+      return true;
+    }
+
+    const logLine = this.attachParametersToMessage(message, parameters);
     return this.writeLine(LogLevelEnum.INFO, logLine);
   }
 
-  warn(message?: string, ...values: unknown[]): true | Error {
-    const logLine = this.attachParametersToMessage(message, values);
+  warn(message: string, ...parameters: unknown[]): true | Error {
+    if (!isMainThread) {
+      logMessage(message, parameters, "warn");
+      return true;
+    }
+
+    const logLine = this.attachParametersToMessage(message, parameters);
     return this.writeLine(LogLevelEnum.WARN, logLine);
   }
 
-  error(message?: string, ...values: unknown[]): true | Error {
-    const logLine = this.attachParametersToMessage(message, values);
+  error(message: string, ...parameters: unknown[]): true | Error {
+    if (!isMainThread) {
+      logMessage(message, parameters, "error");
+      return true;
+    }
+
+    const logLine = this.attachParametersToMessage(message, parameters);
     return this.writeLine(LogLevelEnum.ERROR, logLine);
   }
 
-  fatal(message?: string, ...values: unknown[]): true | Error {
-    const logLine = this.attachParametersToMessage(message, values);
+  fatal(message: string, ...parameters: unknown[]): true | Error {
+    if (!isMainThread) {
+      logMessage(message, parameters, "fatal");
+      return true;
+    }
+
+    const logLine = this.attachParametersToMessage(message, parameters);
     return this.writeLine(LogLevelEnum.FATAL, logLine);
   }
 
   table(table: any[], columnNames: string[] = []): true | Error {
+    if (!isMainThread) {
+      logMessage("", [], "table", table, columnNames);
+      return true;
+    }
+
     const logLine = this.createTableLog(table, columnNames);
     return this.writeLine(LogLevelEnum.INFO, logLine);
   }
@@ -195,10 +225,6 @@ export default class Logger implements LoggerContract {
   }
 
   private writeLine(level: LogLevelEnum, logLine: string): true | Error {
-    if (!isMainThread) {
-      logMessage(logLine, level);
-      return true;
-    }
 
     const logFileName = this.getLogFileName(level);
     const logLineWithAnnotation = this.getLogLine(level, logLine);
@@ -210,10 +236,11 @@ export default class Logger implements LoggerContract {
     return this.saveLog(logFileName, logLineWithAnnotation);
   }
 
-  private attachParametersToMessage(message?: string, values?: unknown[]): string {
-    let logLine = message || "";
-    if (values?.length) {
-      logLine += ", parameters: " + JSON.stringify(values);
+  private attachParametersToMessage(message: string, parameters?: unknown[]): string {
+    let logLine = "" + message;
+    if (parameters?.length) {
+      parameters = parameters.filter((value) => value !== undefined && value !== null);
+      logLine += " - parameters: " + JSON.stringify(parameters);
     }
     return logLine;
   }

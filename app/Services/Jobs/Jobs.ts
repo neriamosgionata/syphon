@@ -45,10 +45,13 @@ export interface JobMessage {
   status: JobMessageEnum;
   id: string;
   tags: string[];
-  error?: Error;
-  log?: string;
-  logLevel?: string;
   payload?: any;
+  error?: Error;
+  logLine?: string;
+  logLevel?: string;
+  logParameters?: any[];
+  logTable?: any[];
+  logTableColumnNames?: string[];
 }
 
 export interface JobRunInfo {
@@ -108,7 +111,18 @@ export default class Jobs implements JobContract {
     }
 
     if (message.status === JobMessageEnum.LOGGING) {
-      Logger[message.logLevel || "info"](message.log, message.id, message.tags);
+      const logMessage = message.logLine || message.logTable;
+
+      const parameters = [
+        ...(message.logParameters || []),
+        message.id || message.logTableColumnNames,
+        message.tags
+      ];
+
+      Logger[message.logLevel || "info"](
+        logMessage,
+        ...parameters,
+      );
       return;
     }
 
