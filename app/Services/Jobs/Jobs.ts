@@ -49,6 +49,13 @@ export interface JobMessage {
   payload?: any;
 }
 
+export interface JobRunInfo {
+  jobName: string;
+  id: string;
+  tags: string[];
+  error?: Error;
+}
+
 export default class Jobs implements JobContract {
 
   private async catchJobMessage(message: JobMessage) {
@@ -149,7 +156,7 @@ export default class Jobs implements JobContract {
     tags: string[] = [],
     payloadCallback?: Callback,
     errorCallback?: ErrorCallback,
-  ): Promise<{ id: string, tags: string[] }> {
+  ): Promise<JobRunInfo> {
 
     if (!await this.jobIsRegistered(jobName)) {
       throw new Error("Job not registered");
@@ -196,7 +203,7 @@ export default class Jobs implements JobContract {
     );
 
     const onlineListener = () => {
-      Logger.info("Job started", id, tags);
+      Logger.info("Job started", jobName, id, tags);
     };
 
     const messageListener = (message: JobMessage) => {
@@ -209,7 +216,7 @@ export default class Jobs implements JobContract {
 
     const exitListener = () => {
       worker.removeAllListeners();
-      Logger.info("Job finished", id, tags);
+      Logger.info("Job finished", jobName, id, tags);
     };
 
     worker.on("online", onlineListener);
@@ -219,6 +226,7 @@ export default class Jobs implements JobContract {
 
     return {
       id,
+      jobName,
       tags
     };
   }
@@ -229,8 +237,8 @@ export default class Jobs implements JobContract {
     tags: string[] = [],
     payloadCallback?: Callback,
     errorCallback?: ErrorCallback,
-    id?: string
-  ): Promise<{ id: string, tags: string[], error?: Error }> {
+    id?: string,
+  ): Promise<JobRunInfo> {
 
     if (!await this.jobIsRegistered(jobName)) {
       throw new Error("Job not registered");
@@ -260,7 +268,7 @@ export default class Jobs implements JobContract {
     );
 
     const onlineListener = () => {
-      Logger.info("Job started", id, tags);
+      Logger.info("Job started", jobName, id, tags);
     };
 
     const messageListener = (message: JobMessage) => {
@@ -284,7 +292,7 @@ export default class Jobs implements JobContract {
 
     const exitListener = () => {
       worker.removeAllListeners();
-      Logger.info("Job finished", actualId, tags);
+      Logger.info("Job finished", jobName, actualId, tags);
     };
 
     worker.on("online", onlineListener);
@@ -296,13 +304,14 @@ export default class Jobs implements JobContract {
 
     return {
       id: actualId,
+      jobName,
       tags,
       error: err
     };
   }
 
-  async waitUntilDone(obj: { id: string, tags: string[] }): Promise<JobMessageEnum> {
-    Logger.info("Waiting for job to finish", obj.id);
+  async waitUntilDone(obj: JobRunInfo): Promise<JobMessageEnum> {
+    Logger.info("Waiting for job to finish", obj.jobName, obj.id, obj.tags);
 
     let foundStatus = 0;
 
@@ -322,17 +331,17 @@ export default class Jobs implements JobContract {
       }
     }
 
-    Logger.info("Job finished", obj.id);
+    Logger.info("Job finished", obj.jobName, obj.id, obj.tags);
 
     return foundStatus;
   }
 
-  async waitUntilAllDone(objArray: { id: string, tags: string[] }[]): Promise<JobMessageEnum[]> {
+  async waitUntilAllDone(objArray: JobRunInfo[]): Promise<JobMessageEnum[]> {
     let statuses: JobMessageEnum[] = [];
 
     for (const objIndex in objArray) {
       const obj = objArray[objIndex];
-      Logger.info("Waiting for job to finish", obj.id);
+      Logger.info("Waiting for job to finish", obj.jobName, obj.id, obj.tags);
 
       let foundStatus = 0;
 
@@ -354,13 +363,13 @@ export default class Jobs implements JobContract {
 
       statuses[objIndex] = foundStatus;
 
-      Logger.info("Job finished", obj.id);
+      Logger.info("Job finished", obj.jobName, obj.id, obj.tags);
     }
 
     return statuses;
   }
 
-  async retryFailed(job: Job): Promise<{ id: string, tags: string[] }> {
+  async retryFailed(job: Job): Promise<JobRunInfo> {
     if (job.status !== JobMessageEnum.FAILED) {
       throw new Error("Job is not failed");
     }
