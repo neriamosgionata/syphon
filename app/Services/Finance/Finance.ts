@@ -131,7 +131,6 @@ export default class Finance implements FinanceContract {
         Scraper.goto(`https://finance.yahoo.com/etfs?count=${count}`),
         Scraper.waitRandom(),
         Scraper.removeGPDR(),
-        Scraper.waitRandom(),
         this.crawlTotalPages(),
       ])
       .run<{ total_pages: number }>();
@@ -153,7 +152,6 @@ export default class Finance implements FinanceContract {
           Scraper.goto(`https://finance.yahoo.com/etfs?offset=${offset}&count=${count}`),
           Scraper.waitRandom(),
           Scraper.removeGPDR(),
-          Scraper.waitRandom(),
           this.crawlListOfTickersEtfs(),
         ])
         .run<{ tickers: string[] }>();

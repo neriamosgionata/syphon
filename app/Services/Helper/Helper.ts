@@ -32,6 +32,8 @@ export interface HelperContract {
   analyzeUnknownTextSentiment(text: string[] | string): Promise<number>;
 
   detectLanguage(text: string | string[]): Promise<Language | null>;
+
+  isNotFalsy<T>(value: T | any): boolean;
 }
 
 export default class Helper implements HelperContract {
@@ -121,6 +123,10 @@ export default class Helper implements HelperContract {
     const result = await cld.detect(text);
 
     return result.languages.length > 0 ? result.languages[0] : null;
+  }
+
+  isNotFalsy<T>(value: T | any): boolean {
+    return !(value === null || value === undefined || value === "" || isNaN(value));
   }
 
 }

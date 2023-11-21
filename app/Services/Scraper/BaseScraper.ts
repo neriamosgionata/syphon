@@ -1,4 +1,4 @@
-import {Browser, CDPSession, executablePath, Page} from "puppeteer";
+import {Browser, CDPSession, defaultArgs, executablePath, Page} from "puppeteer";
 import {LoggerContract} from "App/Services/Logger/Logger";
 import Logger from "@ioc:Providers/Logger";
 import ScraperStatus from "App/Models/ScraperStatus";
@@ -40,6 +40,8 @@ export interface BaseScraperContract {
 
   setHandlers(handlersFunctions: ScraperHandlerFunction<any>[]): BaseScraperContract;
 
+  addHandler(handlerFunction: ScraperHandlerFunction<any>): BaseScraperContract;
+
   setScraperStatusName(name: string): BaseScraperContract;
 
   resetScraperStatus(): Promise<void>;
@@ -73,7 +75,7 @@ export default class BaseScraper implements BaseScraperContract {
   protected logger: LoggerContract;
 
   constructor(
-    protected withHeadlessChrome: boolean | string = true,
+    protected withHeadlessChrome: boolean | "new" = true,
     protected writeOnConsole: boolean = false,
     protected debugConsole: boolean = false,
     protected withAdblockerPlugin: boolean = false,
@@ -86,7 +88,7 @@ export default class BaseScraper implements BaseScraperContract {
 
   // SETUP
 
-  setWithHeadlessChrome(headlessChrome: boolean | string): this {
+  setWithHeadlessChrome(headlessChrome: boolean | "new"): this {
     this.withHeadlessChrome = headlessChrome;
     return this;
   }
@@ -128,6 +130,11 @@ export default class BaseScraper implements BaseScraperContract {
 
   setHandlers(handlersFunctions: ScraperHandlerFunction<any>[]): this {
     this.registeredHandlers = handlersFunctions;
+    return this;
+  }
+
+  addHandler(handlerFunction: ScraperHandlerFunction<any>): this {
+    this.registeredHandlers.push(handlerFunction);
     return this;
   }
 
@@ -292,43 +299,47 @@ export default class BaseScraper implements BaseScraperContract {
     this.results = {};
     this.errors = [];
 
-    const args = [...new Set([
-      "--single-process",
-      "--allow-running-insecure-content",
-      "--autoplay-policy=user-gesture-required",
-      "--disable-background-timer-throttling",
-      "--disable-component-update",
-      "--disable-domain-reliability",
-      "--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process",
-      "--disable-ipc-flooding-protection",
-      "--disable-print-preview",
-      "--disable-dev-shm-usage",
-      "--disable-setuid-sandbox",
-      "--disable-site-isolation-trials",
-      "--disable-speech-api",
-      "--disable-web-security",
-      "--disk-cache-size=1073741824",
-      "--enable-features",
-      "--enable-features=SharedArrayBuffer,NetworkService,NetworkServiceInProcess",
-      "--hide-scrollbars",
-      "--ignore-gpu-blocklist",
-      "--in-process-gpu",
-      "--mute-audio",
-      "--no-default-browser-check",
-      "--no-first-run",
-      "--no-pings",
-      "--no-sandbox",
-      "--no-zygote",
-      "--use-gl=angle",
-      "--use-angle=swiftshader",
-      "--window-size=1920,1080",
-      "--disable-gpu",
-      "--ignore-certificate-errors",
-      "--lang=\"en-US\"",
-      "--enable-automation",
-      "--no-default-browser-check",
-      "--force-dev-mode-highlighting",
-    ])];
+    const args = [
+      ...new Set([
+        ...defaultArgs({
+          // @ts-ignore
+          headless: this.withHeadlessChrome,
+          args: [
+            "--single-process",
+            "--allow-running-insecure-content",
+            "--autoplay-policy=user-gesture-required",
+            "--disable-background-timer-throttling",
+            "--disable-component-update",
+            "--disable-domain-reliability",
+            "--disable-ipc-flooding-protection",
+            "--disable-print-preview",
+            "--disable-dev-shm-usage",
+            "--disable-setuid-sandbox",
+            "--disable-site-isolation-trials",
+            "--disable-speech-api",
+            "--disable-web-security",
+            "--disk-cache-size=1073741824",
+            "--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process",
+            "--enable-features=SharedArrayBuffer,NetworkService,NetworkServiceInProcess",
+            "--hide-scrollbars",
+            "--ignore-gpu-blocklist",
+            "--mute-audio",
+            "--no-default-browser-check",
+            "--no-first-run",
+            "--no-pings",
+            "--no-sandbox",
+            "--no-zygote",
+            "--window-size=1920,1080",
+            "--disable-gpu",
+            "--ignore-certificate-errors",
+            "--lang=\"en-US\"",
+            "--enable-automation",
+            "--no-default-browser-check",
+          ]
+        }),
+
+      ])
+    ];
 
     const launchArgs = {
       executablePath: executablePath(),
@@ -409,8 +420,8 @@ export default class BaseScraper implements BaseScraperContract {
     }
 
     if (this.errors.length > 0) {
-      this.writeLog(LogLevelEnum.ERROR, 'Errors during execution: \n\r');
-      this.writeTableLog(this.errors, LogLevelEnum.ERROR);
+      this.writeLog(LogLevelEnum.ERROR, "Errors during execution:");
+      this.writeTableLog(this.errors.map((e) => e.toString()), LogLevelEnum.ERROR);
     }
 
     this.registeredHandlers = [];

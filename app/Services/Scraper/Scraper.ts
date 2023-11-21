@@ -33,6 +33,8 @@ export interface ScraperContract extends BaseScraperContract {
 
   setHandlers(handlersFunctions: ScraperHandlerFunction<any>[]): ScraperContract;
 
+  addHandler(handlerFunction: ScraperHandlerFunction<any>): ScraperContract;
+
   setScraperStatusName(name: string): ScraperContract;
 
   resetScraperStatus(): Promise<void>;
@@ -74,11 +76,13 @@ export interface ScraperContract extends BaseScraperContract {
   repeat(fn: () => ScraperHandlerFunction<any>, times: number, timeoutBetweenRepetition?: number): ScraperHandlerFunction<any>;
 
   autoScroll(maxScrolls?: number): ScraperHandlerFunction<void>;
+
+  waitForNavigation(timeout?: number): ScraperHandlerFunction<void>;
 }
 
 export default class Scraper extends BaseScraper implements ScraperContract {
   constructor(
-    protected withHeadlessChrome: boolean | string = "new",
+    protected withHeadlessChrome: boolean | "new" = "new",
     protected writeOnConsole: boolean = false,
     protected debugConsole: boolean = false,
     protected withAdblockerPlugin: boolean = false,
@@ -305,6 +309,16 @@ export default class Scraper extends BaseScraper implements ScraperContract {
       }
 
       return totalResult;
+    }
+  }
+
+  waitForNavigation(timeout: number = 10000): ScraperHandlerFunction<void> {
+    return async (_browser: Browser, _page: Page) => {
+      try {
+        await _page.waitForNavigation({timeout});
+      } catch (e) {
+
+      }
     }
   }
 

@@ -31,7 +31,7 @@ const handler = async () => {
 
   //RUN ARTICLE SCRAPING
 
-  const articleData: Map<string, { title?: string; content?: string }> = new Map();
+  const articleData: Map<string, { title: string; content: string }> = new Map();
   let chunk: (() => Promise<JobMessageEnum>)[] = [];
   let index = ProgressBar.newBar(articleUrls.length, "Scraping articles");
 
@@ -47,10 +47,10 @@ const handler = async () => {
           },
           [],
           (jobMessage) => {
-            if (jobMessage.payload.results.title && jobMessage.payload.results.content) {
+            if (Helper.isNotFalsy(jobMessage.payload.results.title) && Helper.isNotFalsy(jobMessage.payload.results.content)) {
               articleData.set(
                 articleUrl,
-                jobMessage.payload.results as { title?: string; content?: string },
+                jobMessage.payload.results as { title: string; content: string },
               );
             }
           }
@@ -64,33 +64,38 @@ const handler = async () => {
 
   } while (articleUrls.length > 0);
 
-  ProgressBar.finish(index);
+  ProgressBar.finishAll();
 
-  const cleanedArticles: string[][] = [];
+  try {
 
-  index = ProgressBar.newBar(articleData.size, "Cleaning articles");
+    const cleanedArticles: string[][] = [];
 
-  for (const article of articleData.entries()) {
-    cleanedArticles.push(
-      Helper.removeStopwords(
-        Helper.cleanText(article[1].content as string)
-      )
-    );
+    for (const article of articleData.entries()) {
+      cleanedArticles.push(
+        Helper.removeStopwords(
+          Helper.cleanText(article[1].content)
+        )
+      );
+    }
 
-    ProgressBar.increment(index);
+    Console.log("Articles cleaned.");
+
+    const loadedSentiments: number[] = [];
+
+    for (const articleToAnalyze of cleanedArticles) {
+      loadedSentiments.push(
+        await Helper.analyzeUnknownTextSentiment(articleToAnalyze)
+      );
+    }
+
+    Console.log("Sentiments calculated: ");
+
+    Console.log(loadedSentiments);
+
+  } catch (e) {
+    Console.error(e);
   }
 
-  ProgressBar.finish(index);
-
-  const loadedSentiments: number[] = [];
-
-  for (const articleToAnalyze of cleanedArticles) {
-    loadedSentiments.push(
-      await Helper.analyzeUnknownTextSentiment(articleToAnalyze)
-    );
-  }
-
-  Console.log(loadedSentiments);
 };
 
 export interface AnalyzeNewsletterForTickerJobParameters extends BaseJobParameters {

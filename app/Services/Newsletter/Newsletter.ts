@@ -29,68 +29,65 @@ export default class Newsletter implements NewsletterContract {
 
   private getArticleContent(): ScraperHandlerFunction<{ title?: string, content?: string }> {
     return Scraper.evaluate(() => {
-      const title = (document.querySelector("h1") || document.querySelector("h2"))?.innerText;
+      try {
+        const title = (document.querySelector("h1") || document.querySelector("h2"))?.innerText;
 
-      const articleBodySelectors = [
-        'article > *[class*=body]',
-        'article > *[class*=content]',
-        'article',
-        '*[class*="article" i]',
-        '*[class*="content" i]',
-      ];
+        for (const articleBodySelector of [
+          'article > *[class*=body]',
+          'article > *[class*=content]',
+          'article',
+          '*[class*="article" i]',
+          '*[class*="content" i]',
+        ]) {
+          const element = document.querySelector(articleBodySelector) as HTMLElement | null;
 
-      let content = "";
-
-      for (const articleBodySelector of articleBodySelectors) {
-        const element = document.querySelector(articleBodySelector) as HTMLElement | null;
-
-        if (element?.innerText) {
-          content = element.innerText;
-          break;
+          if (element?.innerText) {
+            return {title, content: element.innerText};
+          }
         }
+
+        return {title, content: ""};
+
+      } catch (e) {
+
       }
 
-      return {title, content};
+      return {title: "", content: ""};
     });
   }
 
   async getGoogleNewsArticlesFor(searchQuery: string): Promise<ScraperRunReturn<{ articlesUrl: string[] }>> {
-    const scraper = Scraper
+    return await Scraper
       .setWithAdblockerPlugin(true)
       .setWithStealthPlugin(true)
       .setHandlers([
         Scraper.goto("https://news.google.com/"),
         Scraper.waitRandom(),
         Scraper.removeGPDR(),
-        Scraper.waitRandom(),
         ...Scraper.searchAndEnter("input:not([aria-hidden=\"true\"])", searchQuery),
-        Scraper.waitRandom(),
         Scraper.autoScroll(50),
-        Scraper.waitRandom(),
         this.getArticlesUrls(searchQuery),
-      ]);
-
-    return await scraper.run<{
-      articlesUrl: string[]
-    }>();
+      ])
+      .run<{
+        articlesUrl: string[],
+      }>();
   }
 
   async getArticle(articleUrl: string): Promise<ScraperRunReturn<{ title?: string, content?: string }>> {
-    const scraper = Scraper
+    return await Scraper
       .setScraperStatusName("newsletter-get-single-article")
       .setWithAdblockerPlugin(true)
       .setWithStealthPlugin(true)
       .setHandlers([
         Scraper.goto(articleUrl),
-        Scraper.waitRandom(),
         Scraper.removeGPDR(),
+        Scraper.waitForNavigation(),
         Scraper.waitRandom(),
         this.getArticleContent(),
-      ]);
-
-    return await scraper.run<{
-      title?: string,
-      content?: string
-    }>();
+      ])
+      .run<{
+        title?: string,
+        content?: string,
+      }>();
   }
 }
