@@ -111,17 +111,14 @@ export default class Jobs implements JobContract {
     }
 
     if (message.status === JobMessageEnum.LOGGING) {
-      const logMessage = message.logLine || message.logTable;
+      if (message.logLevel === "table") {
+        Logger.table(message.logTable as any[], message.logTableColumnNames);
+        return;
+      }
 
-      const parameters = [
-        ...(message.logParameters || []),
-        message.id || message.logTableColumnNames,
-        message.tags
-      ];
-
-      Logger[message.logLevel || "info"](
-        logMessage,
-        ...parameters,
+      Logger[message.logLevel ?? "info"](
+        message.logLine,
+        ...(message.logParameters ?? [])
       );
       return;
     }

@@ -4,8 +4,6 @@ import {ScraperHandlerFunction, ScraperRunReturn} from "App/Services/Scraper/Bas
 export interface NewsletterContract {
   getGoogleNewsArticlesFor(searchQuery: string): Promise<ScraperRunReturn<{ articlesUrl: string[] }>>;
 
-  getArticles(articleUrls: string[]): Promise<Map<string, ScraperRunReturn<{ title?: string; content?: string }>>>;
-
   getArticle(articleUrl: string): Promise<ScraperRunReturn<{ title?: string, content?: string }>>;
 }
 
@@ -75,36 +73,6 @@ export default class Newsletter implements NewsletterContract {
     return await scraper.run<{
       articlesUrl: string[]
     }>();
-  }
-
-  async getArticles(articleUrls: string[]): Promise<Map<string, ScraperRunReturn<{
-    title?: string;
-    content?: string
-  }>>> {
-    const map = new Map<string, ScraperRunReturn<{ title?: string; content?: string }>>();
-
-    for (let articleUrl of articleUrls) {
-      const scraper = Scraper
-        .setScraperStatusName("newsletter-get-articles")
-        .setWithAdblockerPlugin(true)
-        .setWithStealthPlugin(true)
-        .setHandlers([
-          Scraper.goto(articleUrl),
-          Scraper.waitRandom(),
-          Scraper.removeGPDR(),
-          Scraper.waitRandom(),
-          this.getArticleContent(),
-        ]);
-
-      const res = await scraper.run<{
-        title?: string,
-        content?: string
-      }>();
-
-      map.set(articleUrl, res);
-    }
-
-    return map;
   }
 
   async getArticle(articleUrl: string): Promise<ScraperRunReturn<{ title?: string, content?: string }>> {

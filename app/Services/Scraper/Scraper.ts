@@ -13,6 +13,8 @@ export interface ScraperContract extends BaseScraperContract {
 
   openNewPage(): Promise<Page>;
 
+  getRunResult<T>(): ScraperRunReturn<T>;
+
   // SETUP
 
   setWithHeadlessChrome(headlessChrome: boolean | string): ScraperContract;
@@ -25,13 +27,13 @@ export interface ScraperContract extends BaseScraperContract {
 
   setPrintInConsole(writeOnConsole: boolean): ScraperContract;
 
+  setDebugConsole(debugConsole: boolean): ScraperContract;
+
   setTests(testsFunctions: ScraperTestFunction[]): ScraperContract;
 
   setHandlers(handlersFunctions: ScraperHandlerFunction<any>[]): ScraperContract;
 
   setScraperStatusName(name: string): ScraperContract;
-
-  getErrors(): Error[];
 
   resetScraperStatus(): Promise<void>;
 
@@ -76,11 +78,23 @@ export interface ScraperContract extends BaseScraperContract {
 
 export default class Scraper extends BaseScraper implements ScraperContract {
   constructor(
-    protected headlessChrome: boolean | string = true,
+    protected withHeadlessChrome: boolean | string = "new",
     protected writeOnConsole: boolean = false,
-    protected logChannel: string = "default",
+    protected debugConsole: boolean = false,
+    protected withAdblockerPlugin: boolean = false,
+    protected withStealthPlugin: boolean = false,
+    protected removeUserDataOnExit: boolean = true,
+    protected logChannel: string = "scraper",
   ) {
-    super(headlessChrome, writeOnConsole, logChannel);
+    super(
+      withHeadlessChrome,
+      writeOnConsole,
+      debugConsole,
+      withAdblockerPlugin,
+      withStealthPlugin,
+      removeUserDataOnExit,
+      logChannel,
+    );
   }
 
   //HELPERS

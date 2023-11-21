@@ -272,26 +272,28 @@ export default class Logger implements LoggerContract {
   }
 
   private createTableLog(table: any[], columnNames: string[] = []): string {
-    let logLine = "\n";
+    let eachLineStartSpaces: string = "\t\t\t\t\t";
 
-    if (columnNames.length) {
-      logLine += columnNames.join("\t|") + "\n";
+    let logLine = eachLineStartSpaces + "\n";
+
+    if (columnNames?.length > 0) {
+      logLine += eachLineStartSpaces + columnNames.join("\t|") + "\n";
     }
 
     table.forEach((row) => {
-      logLine += "|\t";
+      logLine += eachLineStartSpaces + "|\t";
 
       if (Array.isArray(row)) {
-        logLine += this.recursiveObjectToString(row);
+        logLine += eachLineStartSpaces + this.recursiveObjectToString(row);
       } else if (row instanceof Date) {
-        logLine += row.toISOString();
+        logLine += eachLineStartSpaces + row.toISOString();
       } else if (typeof row === "object") {
-        logLine += Object.entries(row).map(([key, value]) => key + ":" + value).join("|\t");
+        logLine += eachLineStartSpaces + Object.entries(row).map(([key, value]) => key + ":" + value).join("|\t");
       } else {
-        logLine += row;
+        logLine += eachLineStartSpaces + row;
       }
 
-      logLine += "\t|\n";
+      logLine += eachLineStartSpaces + "\t|\n";
     });
 
     return logLine;
