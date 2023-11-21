@@ -6,6 +6,7 @@ import {ScrapeNewsArticleJobParameters} from "App/Jobs/ScrapeNewsArticleJob";
 import Helper from "@ioc:Providers/Helper";
 import Jobs from "@ioc:Providers/Jobs";
 import Console from "@ioc:Providers/Console";
+import {JobMessageEnum} from "App/Enums/JobMessageEnum";
 
 const handler = async () => {
   let data = loadData<AnalyzeNewsletterForTickerJobParameters>(["ticker"]);
@@ -13,42 +14,46 @@ const handler = async () => {
 
   //RUN GOOGLE NEWS SCRAPING
 
-  await Jobs.runWithoutDispatch<ScrapeGoogleNewsJobParameters>(
-    "ScrapeGoogleNewsJob",
-    {
-      searchQuery: data.ticker,
-    },
-    [],
-    (jobMessage) => {
-      const payload = jobMessage.payload as ScraperRunReturn<{ articlesUrl: string[] }>;
-      articleUrls.push(...payload.results.articlesUrl);
-    }
+  await Jobs.waitUntilDone(
+    await Jobs.dispatch<ScrapeGoogleNewsJobParameters>(
+      "ScrapeGoogleNewsJob",
+      {
+        searchQuery: data.ticker,
+      },
+      [],
+      (jobMessage) => {
+        const payload = jobMessage.payload as ScraperRunReturn<{ articlesUrl: string[] }>;
+        articleUrls.push(...payload.results.articlesUrl);
+      }
+    )
   );
 
   //RUN ARTICLE SCRAPING
 
   const articleData: Map<string, { title?: string; content?: string }> = new Map();
-  let chunk: (() => Promise<{ id: string; tags: string[]; error?: Error | undefined; }>)[] = [];
+  let chunk: (() => Promise<JobMessageEnum>)[] = [];
   let index = ProgressBar.newBar(articleUrls.length, "Scraping articles");
 
   do {
     let articles: string[] = articleUrls.splice(0, 4);
 
     chunk = articles.map((articleUrl) =>
-      () => Jobs.runWithoutDispatch<ScrapeNewsArticleJobParameters>(
-        "ScrapeNewsArticleJob",
-        {
-          articleUrl,
-        },
-        [],
-        (jobMessage) => {
-          if (jobMessage.payload.results.title && jobMessage.payload.results.content) {
-            articleData.set(
-              articleUrl,
-              jobMessage.payload.results as { title?: string; content?: string },
-            );
+      async () => await Jobs.waitUntilDone(
+        await Jobs.dispatch<ScrapeNewsArticleJobParameters>(
+          "ScrapeNewsArticleJob",
+          {
+            articleUrl,
+          },
+          [],
+          (jobMessage) => {
+            if (jobMessage.payload.results.title && jobMessage.payload.results.content) {
+              articleData.set(
+                articleUrl,
+                jobMessage.payload.results as { title?: string; content?: string },
+              );
+            }
           }
-        }
+        )
       )
     );
 
@@ -67,7 +72,7 @@ const handler = async () => {
   for (const article of articleData.entries()) {
     cleanedArticles.push(
       Helper.removeStopwords(
-        Helper.cleanText(article[1]?.content || ""),
+        Helper.cleanText(article[1].content as string)
       )
     );
 

@@ -345,7 +345,7 @@ export default class BaseScraper implements BaseScraperContract {
       this.writeLog('error', '\n\r');
       this.writeLog('error', 'Errors count: ' + this.errors.length);
       this.writeLog('error', 'List:');
-      this.writeTableLog([...this.errors.map((e) => e.message)]);
+      this.writeTableLog([...this.errors]);
     }
 
     this.registeredHandlers = [];

@@ -244,7 +244,7 @@ export default class Jobs implements JobContract {
       throw new Error("Job not registered");
     }
 
-    Logger.info("Running job", jobName, tags, id);
+    Logger.info("Running job", jobName, id, tags);
 
     let resolver: (value?: Error) => void;
 
