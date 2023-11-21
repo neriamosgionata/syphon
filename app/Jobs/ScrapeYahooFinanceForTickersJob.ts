@@ -1,4 +1,4 @@
-import {BaseJobParameters, configureJob} from "App/Services/Jobs/JobHelpers";
+import {configureJob} from "App/Services/Jobs/JobHelpers";
 import Finance from "@ioc:Providers/Finance";
 import Jobs from "@ioc:Providers/Jobs";
 import {ImportProfileDataJobParameters} from "App/Jobs/ImportProfileDataJob";
@@ -6,6 +6,7 @@ import {ImportChartDataJobParameters} from "App/Jobs/ImportChartDataJob";
 import {DateTime} from "luxon";
 import Logger from "@ioc:Providers/Logger";
 import ProgressBar from "@ioc:Providers/ProgressBar";
+import {BaseJobParameters} from "App/Services/Jobs/Jobs";
 
 let progressBarIndex1: number = 0;
 let progressBarIndex2: number = 1;

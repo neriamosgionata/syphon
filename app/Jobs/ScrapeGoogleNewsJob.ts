@@ -1,12 +1,13 @@
-import {BaseJobParameters, loadData, messageToParent, configureJob} from "App/Services/Jobs/JobHelpers";
+import {loadJobParameters, messageToParent, configureJob} from "App/Services/Jobs/JobHelpers";
 import Newsletter from "@ioc:Providers/Newsletter";
+import {BaseJobParameters} from "App/Services/Jobs/Jobs";
 
 const scraperGoogleNews = async (searchQuery: string) => {
   return await Newsletter.getGoogleNewsArticlesFor(searchQuery);
 }
 
 const handler = async () => {
-  const parameters = loadData<ScrapeGoogleNewsJobParameters>(["searchQuery"]);
+  const parameters = loadJobParameters<ScrapeGoogleNewsJobParameters>();
 
   const res = await scraperGoogleNews(parameters.searchQuery);
 

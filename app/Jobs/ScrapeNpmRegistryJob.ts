@@ -1,10 +1,11 @@
-import {BaseJobParameters, configureJob} from "App/Services/Jobs/JobHelpers";
+import {configureJob} from "App/Services/Jobs/JobHelpers";
 import Logger from "@ioc:Providers/Logger";
 import Scraper from "@ioc:Providers/Scraper";
 import NpmPackage from "App/Models/NpmPackage";
 import ProgressBar from "@ioc:Providers/ProgressBar";
 import {DateTime} from "luxon";
 import Helper from "@ioc:Providers/Helper";
+import {BaseJobParameters} from "App/Services/Jobs/Jobs";
 
 
 const upsertNpmPackageVersion = async (packageName: string, packageVersion: string | null) => {

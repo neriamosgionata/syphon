@@ -1,4 +1,4 @@
-import {BaseJobParameters, configureJob, loadData} from "App/Services/Jobs/JobHelpers";
+import {configureJob, loadJobParameters} from "App/Services/Jobs/JobHelpers";
 import {ScrapeGoogleNewsJobParameters} from "App/Jobs/ScrapeGoogleNewsJob";
 import {ScraperRunReturn} from "App/Services/Scraper/BaseScraper";
 import ProgressBar from "@ioc:Providers/ProgressBar";
@@ -7,9 +7,10 @@ import Helper from "@ioc:Providers/Helper";
 import Jobs from "@ioc:Providers/Jobs";
 import Console from "@ioc:Providers/Console";
 import {JobMessageEnum} from "App/Enums/JobMessageEnum";
+import {BaseJobParameters} from "App/Services/Jobs/Jobs";
 
 const handler = async () => {
-  let data = loadData<AnalyzeNewsletterForTickerJobParameters>(["ticker"]);
+  let data = loadJobParameters<AnalyzeNewsletterForTickerJobParameters>();
   const articleUrls: string[] = [];
 
   //RUN GOOGLE NEWS SCRAPING

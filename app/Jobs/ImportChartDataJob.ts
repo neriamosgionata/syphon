@@ -2,10 +2,11 @@ import Finance from "@ioc:Providers/Finance";
 import Config from "@ioc:Adonis/Core/Config";
 import TickerChart from "App/Models/TickerChart";
 import {ChartResultArray, ChartResultArrayQuote} from "yahoo-finance2/dist/esm/src/modules/chart";
-import {BaseJobParameters, configureJob, loadData} from "App/Services/Jobs/JobHelpers";
+import {configureJob, loadJobParameters} from "App/Services/Jobs/JobHelpers";
 import {ChartInterval} from "App/Services/Finance/Finance";
 import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
 import Logger from "@ioc:Providers/Logger";
+import {BaseJobParameters} from "App/Services/Jobs/Jobs";
 
 const createChartEntry = async (
   ticker: string,
@@ -61,7 +62,7 @@ const importElementsFromFinance = async (ticker: string, chart: ChartResultArray
 };
 
 const handler = async () => {
-  const parameters = loadData<ImportChartDataJobParameters>(["ticker", "fromDate", "interval"]);
+  const parameters = loadJobParameters<ImportChartDataJobParameters>();
 
   if (!Array.isArray(parameters.ticker)) {
     parameters.ticker = [parameters.ticker];

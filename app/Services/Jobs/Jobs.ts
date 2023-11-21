@@ -10,7 +10,7 @@ import {DateTime} from "luxon";
 import Console from "@ioc:Providers/Console";
 
 export interface JobContract {
-  dispatch<T extends JobParameters>(
+  dispatch<T extends BaseJobParameters>(
     jobName: string,
     parameters: T,
     tags?: string[],
@@ -18,7 +18,7 @@ export interface JobContract {
     errorCallback?: (error: Error, id: string, tags: string[]) => void
   ): Promise<{ id: string, tags: string[] }>;
 
-  runWithoutDispatch<T extends JobParameters>(
+  runWithoutDispatch<T extends BaseJobParameters>(
     jobName: string,
     parameters: T,
     tags?: string[],
@@ -34,7 +34,9 @@ export interface JobContract {
   waitUntilAllDone(toWait: { id: string; tags: string[] }[]): Promise<JobMessageEnum[]>;
 }
 
-export type JobParameters = { [p: string | number]: any };
+export type BaseJobParameters = {
+  [p: string | number]: any
+};
 
 export type Callback = (message: JobMessage) => Promise<void> | void;
 export type ErrorCallback = (error: Error, id: string, tags: string[]) => Promise<void> | void;
@@ -55,6 +57,15 @@ export interface JobRunInfo {
   tags: string[];
   error?: Error;
 }
+
+export type JobWorkerData<T extends BaseJobParameters> = {
+  [p in keyof T]: any;
+} & {
+  jobName: string;
+  id: string;
+  tags: string[];
+  jobPath: string;
+};
 
 export default class Jobs implements JobContract {
 
@@ -150,7 +161,7 @@ export default class Jobs implements JobContract {
     }
   }
 
-  async dispatch<T extends JobParameters>(
+  async dispatch<T extends BaseJobParameters>(
     jobName: string,
     parameters: T,
     tags: string[] = [],
@@ -198,7 +209,7 @@ export default class Jobs implements JobContract {
           tags,
           jobPath: this.getJobPath(jobName),
           ...parameters
-        }
+        } as JobWorkerData<any>
       }
     );
 
@@ -231,7 +242,7 @@ export default class Jobs implements JobContract {
     };
   }
 
-  async runWithoutDispatch<T extends JobParameters>(
+  async runWithoutDispatch<T extends BaseJobParameters>(
     jobName: string,
     parameters: T,
     tags: string[] = [],
@@ -263,7 +274,7 @@ export default class Jobs implements JobContract {
           tags,
           jobPath: this.getJobPath(jobName),
           ...parameters
-        }
+        } as JobWorkerData<any>
       }
     );
 

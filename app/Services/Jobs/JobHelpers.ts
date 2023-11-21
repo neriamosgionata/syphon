@@ -1,24 +1,22 @@
 import {JobMessageEnum} from "App/Enums/JobMessageEnum";
-import {JobMessage} from "App/Services/Jobs/Jobs";
+import {BaseJobParameters, JobMessage, JobWorkerData} from "App/Services/Jobs/Jobs";
+import type {MessagePort} from "worker_threads";
 
-export interface BaseJobParameters {
-  id?: string,
-  tags?: string[],
-  progressBarIndex?: number,
-}
-
-export const retriveWorkerThreadsData = () => {
+export const retriveWorkerThreadsData = <T extends BaseJobParameters>(): {
+  parentPort: MessagePort,
+  workerData: JobWorkerData<T>
+} => {
   const {parentPort, workerData} = require("worker_threads");
   return {parentPort, workerData};
 };
 
-export const isRunning = () => {
-  const {parentPort, workerData} = retriveWorkerThreadsData();
+export const isRunning = <T extends BaseJobParameters>() => {
+  const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({status: JobMessageEnum.RUNNING, id: workerData.id, tags: workerData.tags} as JobMessage);
 };
 
-export const isFailed = (err: Error) => {
-  const {parentPort, workerData} = retriveWorkerThreadsData();
+export const isFailed = <T extends BaseJobParameters>(err: Error) => {
+  const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({
     status: JobMessageEnum.FAILED,
     id: workerData.id,
@@ -27,24 +25,18 @@ export const isFailed = (err: Error) => {
   } as JobMessage);
 };
 
-export const isCompleted = () => {
-  const {parentPort, workerData} = retriveWorkerThreadsData();
+export const isCompleted = <T extends BaseJobParameters>() => {
+  const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({status: JobMessageEnum.COMPLETED, id: workerData.id, tags: workerData.tags} as JobMessage);
 };
 
-export const loadData = <T extends BaseJobParameters>(keys: string[]): T => {
-  const {workerData} = retriveWorkerThreadsData();
-  const data: T = {} as T;
-
-  for (const key of keys) {
-    data[key as any] = workerData[key];
-  }
-
-  return data;
+export const loadJobParameters = <T extends BaseJobParameters>(): T => {
+  const {workerData} = retriveWorkerThreadsData<T>();
+  return workerData as T;
 };
 
-export const logMessage = (log: string, logLevel: string = "info") => {
-  const {parentPort, workerData} = retriveWorkerThreadsData();
+export const logMessage = <T extends BaseJobParameters>(log: string, logLevel: string = "info") => {
+  const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({
     status: JobMessageEnum.LOGGING,
     id: workerData.id,
@@ -54,8 +46,8 @@ export const logMessage = (log: string, logLevel: string = "info") => {
   } as JobMessage);
 };
 
-export const messageToParent = (payload: any) => {
-  const {parentPort, workerData} = retriveWorkerThreadsData();
+export const messageToParent = <T extends BaseJobParameters>(payload: any) => {
+  const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({
     status: JobMessageEnum.MESSAGE,
     id: workerData.id,
@@ -77,8 +69,8 @@ export const configureJob = (mainHandler: () => void | Promise<void>): RunJobFun
   };
 };
 
-export const progressBarOn = (progressBarIndex: number, total: number, title?: string) => {
-  const {parentPort, workerData} = retriveWorkerThreadsData();
+export const progressBarOn = <T extends BaseJobParameters>(progressBarIndex: number, total: number, title?: string) => {
+  const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({
     status: JobMessageEnum.PROGRESS_BAR_ON,
     id: workerData.id,
@@ -91,8 +83,8 @@ export const progressBarOn = (progressBarIndex: number, total: number, title?: s
   } as JobMessage);
 }
 
-export const progressBarUpdate = (progressBarIndex: number, current: number) => {
-  const {parentPort, workerData} = retriveWorkerThreadsData();
+export const progressBarUpdate = <T extends BaseJobParameters>(progressBarIndex: number, current: number) => {
+  const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({
     status: JobMessageEnum.PROGRESS_BAR_UPDATE,
     id: workerData.id,
@@ -104,8 +96,8 @@ export const progressBarUpdate = (progressBarIndex: number, current: number) => 
   } as JobMessage);
 }
 
-export const progressBarOff = (progressBarIndex: number) => {
-  const {parentPort, workerData} = retriveWorkerThreadsData();
+export const progressBarOff = <T extends BaseJobParameters>(progressBarIndex: number) => {
+  const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({
     status: JobMessageEnum.PROGRESS_BAR_OFF,
     id: workerData.id,
@@ -116,8 +108,8 @@ export const progressBarOff = (progressBarIndex: number) => {
   } as JobMessage);
 }
 
-export const progressBarOffAll = () => {
-  const {parentPort, workerData} = retriveWorkerThreadsData();
+export const progressBarOffAll = <T extends BaseJobParameters>() => {
+  const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({
     status: JobMessageEnum.PROGRESS_BAR_OFF_ALL,
     id: workerData.id,
@@ -126,8 +118,8 @@ export const progressBarOffAll = () => {
   } as JobMessage);
 }
 
-export const registerCallbackToParentMessage = (callback: (parentMessage: JobMessage) => void) => {
-  const {parentPort} = retriveWorkerThreadsData();
+export const registerCallbackToParentMessage = <T extends BaseJobParameters>(callback: (parentMessage: JobMessage) => void) => {
+  const {parentPort} = retriveWorkerThreadsData<T>();
   parentPort?.on("message", callback);
 }
 
@@ -140,8 +132,8 @@ export const sendToWorker = (worker: any, status: JobMessageEnum, payload: any) 
   );
 }
 
-export const consoleLog = (logLevel: string = "info", ...args: any[]) => {
-  const {parentPort, workerData} = retriveWorkerThreadsData();
+export const consoleLog = <T extends BaseJobParameters>(logLevel: string = "info", ...args: any[]) => {
+  const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({
     status: JobMessageEnum.CONSOLE_LOG,
     id: workerData.id,
