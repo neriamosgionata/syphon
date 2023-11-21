@@ -1,6 +1,7 @@
 import {JobMessageEnum} from "App/Enums/JobMessageEnum";
 import {BaseJobParameters, JobMessage, JobWorkerData} from "App/Services/Jobs/Jobs";
 import type {MessagePort} from "worker_threads";
+import {LogLevelEnum} from "App/Enums/LogLevelEnum";
 
 export const retriveWorkerThreadsData = <T extends BaseJobParameters>(): {
   parentPort: MessagePort,
@@ -38,9 +39,10 @@ export const loadJobParameters = <T extends BaseJobParameters>(): T => {
 export const logMessage = <T extends BaseJobParameters>(
   logLine: string,
   logParameters: any[],
-  logLevel: string = "info",
+  logLevel: LogLevelEnum = LogLevelEnum.INFO,
   logTable?: any[],
   logTableColumnNames?: string[],
+  logLevelWriteTo: LogLevelEnum = LogLevelEnum.INFO,
 ) => {
   const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({
@@ -51,7 +53,8 @@ export const logMessage = <T extends BaseJobParameters>(
     logParameters,
     logLevel,
     logTable,
-    logTableColumnNames
+    logTableColumnNames,
+    logLevelWriteTo
   } as JobMessage);
 };
 
@@ -141,7 +144,7 @@ export const sendToWorker = (worker: any, status: JobMessageEnum, payload: any) 
   );
 }
 
-export const consoleLog = <T extends BaseJobParameters>(logLevel: string = "info", ...args: any[]) => {
+export const consoleLog = <T extends BaseJobParameters>(logLevel: LogLevelEnum = LogLevelEnum.INFO, ...args: any[]) => {
   const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({
     status: JobMessageEnum.CONSOLE_LOG,

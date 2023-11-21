@@ -38,7 +38,9 @@ export interface LoggerContract {
 
   fatal(message: string, ...parameters: unknown[]): true | Error;
 
-  table(table: any[], columnNames?: string[]): true | Error;
+  log(message: string, ...parameters: unknown[]): true | Error;
+
+  table(table: any[], columnNames?: string[], logLevelTo?: LogLevelEnum): true | Error;
 }
 
 export default class Logger implements LoggerContract {
@@ -122,7 +124,7 @@ export default class Logger implements LoggerContract {
 
   debug(message: string, ...parameters: unknown[]): true | Error {
     if (!isMainThread) {
-      logMessage(message, parameters, "debug");
+      logMessage(message, parameters, LogLevelEnum.DEBUG);
       return true;
     }
 
@@ -132,7 +134,7 @@ export default class Logger implements LoggerContract {
 
   info(message: string, ...parameters: unknown[]): true | Error {
     if (!isMainThread) {
-      logMessage(message, parameters, "info");
+      logMessage(message, parameters, LogLevelEnum.INFO);
       return true;
     }
 
@@ -142,7 +144,7 @@ export default class Logger implements LoggerContract {
 
   warn(message: string, ...parameters: unknown[]): true | Error {
     if (!isMainThread) {
-      logMessage(message, parameters, "warn");
+      logMessage(message, parameters, LogLevelEnum.WARN);
       return true;
     }
 
@@ -152,7 +154,7 @@ export default class Logger implements LoggerContract {
 
   error(message: string, ...parameters: unknown[]): true | Error {
     if (!isMainThread) {
-      logMessage(message, parameters, "error");
+      logMessage(message, parameters, LogLevelEnum.ERROR);
       return true;
     }
 
@@ -162,7 +164,7 @@ export default class Logger implements LoggerContract {
 
   fatal(message: string, ...parameters: unknown[]): true | Error {
     if (!isMainThread) {
-      logMessage(message, parameters, "fatal");
+      logMessage(message, parameters, LogLevelEnum.FATAL);
       return true;
     }
 
@@ -170,14 +172,24 @@ export default class Logger implements LoggerContract {
     return this.writeLine(LogLevelEnum.FATAL, logLine);
   }
 
-  table(table: any[], columnNames: string[] = []): true | Error {
+  log(message: string, ...parameters: unknown[]): true | Error {
     if (!isMainThread) {
-      logMessage("", [], "table", table, columnNames);
+      logMessage(message, parameters, LogLevelEnum.INFO);
+      return true;
+    }
+
+    const logLine = this.attachParametersToMessage(message, parameters);
+    return this.writeLine(LogLevelEnum.INFO, logLine);
+  }
+
+  table(table: any[], columnNames: string[] = [], logLevelTo: LogLevelEnum = LogLevelEnum.INFO): true | Error {
+    if (!isMainThread) {
+      logMessage("", [], LogLevelEnum.TABLE, table, columnNames, logLevelTo);
       return true;
     }
 
     const logLine = this.createTableLog(table, columnNames);
-    return this.writeLine(LogLevelEnum.INFO, logLine);
+    return this.writeLine(logLevelTo, logLine);
   }
 
   private getLogLineAnnotation(): string {
@@ -185,7 +197,7 @@ export default class Logger implements LoggerContract {
     return "[" + fullTime + "]";
   }
 
-  private getLogLine(level: string, logLine: string): string {
+  private getLogLine(level: LogLevelEnum, logLine: string): string {
     return this.getLogLineAnnotation() + "[" + level.toUpperCase() + "] " + logLine + "\t\n";
   }
 

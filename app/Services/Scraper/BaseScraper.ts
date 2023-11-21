@@ -3,6 +3,7 @@ import {LoggerContract} from "App/Services/Logger/Logger";
 import Logger from "@ioc:Providers/Logger";
 import ScraperStatus from "App/Models/ScraperStatus";
 import Console from "@ioc:Providers/Console";
+import {LogLevelEnum} from "App/Enums/LogLevelEnum";
 
 export type ScraperTestFunction = (_browser: Browser, _page: Page) => Promise<boolean>;
 
@@ -47,7 +48,7 @@ export interface BaseScraperContract {
 
   registerError(error: Error | any, key: string): Promise<void>;
 
-  writeTableLog(table: any[]): void;
+  writeTableLog(table: any[], logLevel?: LogLevelEnum): void;
 
   writeLog(level: string, message: string, ...values: unknown[]): void;
 }
@@ -179,15 +180,15 @@ export default class BaseScraper implements BaseScraperContract {
     }
   }
 
-  writeTableLog(table: any[]): void {
-    this.logger.table(table);
+  writeTableLog(table: any[], logLevel: LogLevelEnum = LogLevelEnum.INFO): void {
+    this.logger.table(table, [], logLevel);
 
     if (this.writeOnConsole) {
       Console.table(table);
     }
   }
 
-  writeLog(level: string, message: string, ...values: unknown[]): void {
+  writeLog(level: LogLevelEnum, message: string, ...values: unknown[]): void {
     this.logger[level.trim()](message, ...values);
 
     if (this.writeOnConsole) {
@@ -408,8 +409,8 @@ export default class BaseScraper implements BaseScraperContract {
     }
 
     if (this.errors.length > 0) {
-      this.writeLog('error', 'Errors during execution: \n\r');
-      this.writeTableLog(this.errors);
+      this.writeLog(LogLevelEnum.ERROR, 'Errors during execution: \n\r');
+      this.writeTableLog(this.errors, LogLevelEnum.ERROR);
     }
 
     this.registeredHandlers = [];

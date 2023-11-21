@@ -8,6 +8,7 @@ import path from "path";
 import ProgressBar from "@ioc:Providers/ProgressBar";
 import {DateTime} from "luxon";
 import Console from "@ioc:Providers/Console";
+import {LogLevelEnum} from "App/Enums/LogLevelEnum";
 
 export interface JobContract {
   dispatch<T extends BaseJobParameters>(
@@ -48,10 +49,11 @@ export interface JobMessage {
   payload?: any;
   error?: Error;
   logLine?: string;
-  logLevel?: string;
+  logLevel?: LogLevelEnum;
   logParameters?: any[];
   logTable?: any[];
   logTableColumnNames?: string[];
+  logLevelWriteTo?: LogLevelEnum;
 }
 
 export interface JobRunInfo {
@@ -112,12 +114,12 @@ export default class Jobs implements JobContract {
 
     if (message.status === JobMessageEnum.LOGGING) {
       if (message.logLevel === "table") {
-        Logger.table(message.logTable as any[], message.logTableColumnNames);
+        Logger.table(message.logTable as any[], message.logTableColumnNames, message.logLevelWriteTo);
         return;
       }
 
       Logger[message.logLevel ?? "info"](
-        message.logLine,
+        message.logLine as string,
         ...(message.logParameters ?? [])
       );
       return;
