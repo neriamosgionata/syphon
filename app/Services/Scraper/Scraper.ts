@@ -73,7 +73,7 @@ export interface ScraperContract extends BaseScraperContract {
 
   removeGPDR(): ScraperHandlerFunction<void>;
 
-  repeat(fn: () => ScraperHandlerFunction<any>, times: number, timeoutBetweenRepetition?: number): ScraperHandlerFunction<any>;
+  repeat(fn: ScraperHandlerFunction<any>, times: number, timeoutBetweenRepetition?: number): ScraperHandlerFunction<any>;
 
   autoScroll(maxScrolls?: number): ScraperHandlerFunction<void>;
 
@@ -297,12 +297,12 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  repeat(fn: () => ScraperHandlerFunction<any>, times: number, timeoutBetweenRepetition: number = 1000): ScraperHandlerFunction<any> {
+  repeat(fn: ScraperHandlerFunction<any>, times: number, timeoutBetweenRepetition: number = 1000): ScraperHandlerFunction<any> {
     return async (_browser: Browser, _page: Page) => {
       let totalResult: any = {};
 
       for (let i = 0; i < times; i++) {
-        let r = await fn()(_browser, _page);
+        let r = await fn(_browser, _page);
         await _page.waitForNetworkIdle();
         await new Promise((resolve) => setTimeout(resolve, timeoutBetweenRepetition));
         totalResult = {...r};
