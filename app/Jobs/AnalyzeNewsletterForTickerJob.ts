@@ -36,7 +36,7 @@ const handler = async () => {
   let index = ProgressBar.newBar(articleUrls.length, "Scraping articles");
 
   do {
-    let articles: string[] = articleUrls.splice(0, 2);
+    let articles: string[] = articleUrls.splice(0, 4);
 
     chunk = articles.map((articleUrl) =>
       async () => await Jobs.waitUntilDone(

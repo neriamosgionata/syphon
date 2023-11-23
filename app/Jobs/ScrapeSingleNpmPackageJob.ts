@@ -2,6 +2,7 @@ import {configureJob, loadJobParameters} from "App/Services/Jobs/JobHelpers";
 import Scraper from "@ioc:Providers/Scraper";
 import {BaseJobParameters} from "App/Services/Jobs/Jobs";
 import NpmPackage from "App/Models/NpmPackage";
+import ProgressBar from "@ioc:Providers/ProgressBar";
 
 
 const upsertNpmPackageVersion = async (packageName: string, packageVersion: string | null) => {
@@ -58,6 +59,8 @@ const handler = async () => {
   const packageVersion = await scrapeNpmPackage(packageName);
 
   await upsertNpmPackageVersion(packageName, packageVersion.results.packageVersion);
+
+  ProgressBar.increment();
 };
 
 export interface ScrapeSingleNpmPackageJobParameters extends BaseJobParameters {
