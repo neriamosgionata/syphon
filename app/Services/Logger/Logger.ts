@@ -8,7 +8,7 @@ import {AppContainerAliasesEnum} from "App/Enums/AppContainerAliasesEnum";
 import {logMessage} from "App/Services/Jobs/JobHelpers";
 import {isMainThread} from "node:worker_threads";
 import Console from "@ioc:Providers/Console";
-import Table from "table";
+import {table as T} from "table";
 
 export interface LoggerContract {
   removeOneTimeLog(): void;
@@ -263,7 +263,7 @@ export default class Logger implements LoggerContract {
       table.unshift(columnNames);
     }
 
-    return Table.table(table);
+    return T(table);
   }
 
   setPrintToConsole(status: boolean): LoggerContract {
