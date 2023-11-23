@@ -8,23 +8,6 @@ import {BaseJobParameters} from "App/Services/Jobs/Jobs";
 import Jobs from "@ioc:Providers/Jobs";
 import Console from "@ioc:Providers/Console";
 
-const upsertNpmPackageVersion = async (packageName: string, packageVersion: string | null) => {
-  const res = await NpmPackage
-    .query()
-    .where("name", packageName)
-    .update({
-      lastVersion: packageVersion,
-    })
-    .exec()
-
-  if (res.length === 0 || res[0] === 0) {
-    await NpmPackage.create({
-      name: packageName,
-      lastVersion: packageVersion,
-    });
-  }
-}
-
 const verifyPackageToSearch = async (packageNames: string[]) => {
   const nowMinus1Week = DateTime.now().minus({weeks: 1}).endOf('day').toISO() as string;
 
@@ -41,8 +24,6 @@ const verifyPackageToSearch = async (packageNames: string[]) => {
 }
 
 const scrapeNpmPackages = async (packageNames: string[]) => {
-  let results: { packageName: string, packageVersion: string | null }[] = [];
-
   const promises = packageNames
     .map((packageName) =>
       Jobs.dispatch(
@@ -51,21 +32,10 @@ const scrapeNpmPackages = async (packageNames: string[]) => {
           packageName,
         },
         [],
-        (payload) => {
-          results.push({
-            packageName,
-            packageVersion: payload.payload.packageVersion,
-          });
-          ProgressBar.increment();
-        }
       )
     );
 
   await Jobs.waitUntilAllDone(await Promise.all(promises));
-
-  for (const result of results) {
-    await upsertNpmPackageVersion(result.packageName, result.packageVersion);
-  }
 }
 
 const scrapeNpmRegistryJob = async () => {

@@ -1,6 +1,25 @@
-import {configureJob, loadJobParameters, messageToParent} from "App/Services/Jobs/JobHelpers";
+import {configureJob, loadJobParameters} from "App/Services/Jobs/JobHelpers";
 import Scraper from "@ioc:Providers/Scraper";
 import {BaseJobParameters} from "App/Services/Jobs/Jobs";
+import NpmPackage from "App/Models/NpmPackage";
+
+
+const upsertNpmPackageVersion = async (packageName: string, packageVersion: string | null) => {
+  const res = await NpmPackage
+    .query()
+    .where("name", packageName)
+    .update({
+      lastVersion: packageVersion,
+    })
+    .exec()
+
+  if (res.length === 0 || res[0] === 0) {
+    await NpmPackage.create({
+      name: packageName,
+      lastVersion: packageVersion,
+    });
+  }
+}
 
 const evalFunction = () => {
   const h3Version = [...document.querySelectorAll("h3")]
@@ -35,11 +54,10 @@ const scrapeNpmPackage = async (packageName: string) => {
 
 const handler = async () => {
   const {packageName} = loadJobParameters<ScrapeSingleNpmPackageJobParameters>();
+
   const packageVersion = await scrapeNpmPackage(packageName);
-  messageToParent({
-    packageName,
-    packageVersion: packageVersion.results.packageVersion,
-  });
+
+  await upsertNpmPackageVersion(packageName, packageVersion.results.packageVersion);
 };
 
 export interface ScrapeSingleNpmPackageJobParameters extends BaseJobParameters {
