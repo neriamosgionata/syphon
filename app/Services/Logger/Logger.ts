@@ -8,6 +8,7 @@ import {AppContainerAliasesEnum} from "App/Enums/AppContainerAliasesEnum";
 import {logMessage} from "App/Services/Jobs/JobHelpers";
 import {isMainThread} from "node:worker_threads";
 import Console from "@ioc:Providers/Console";
+import Table from "table";
 
 export interface LoggerContract {
   removeOneTimeLog(): void;
@@ -257,58 +258,12 @@ export default class Logger implements LoggerContract {
     return logLine;
   }
 
-  private recursiveObjectToString(object: any): string {
-    let logLine = "";
-
-    let first = true;
-
-    for (const [key, value] of Object.entries(object)) {
-      if (!first) {
-        logLine += ", ";
-      }
-
-      logLine += key + ": ";
-
-      if (typeof value === "object") {
-        logLine += this.recursiveObjectToString(value);
-      } else if (value instanceof Date) {
-        logLine += value.toISOString();
-      } else {
-        logLine += value;
-      }
-
-      first = false;
-
-    }
-    return logLine;
-  }
-
   private createTableLog(table: any[], columnNames: string[] = []): string {
-    let eachLineStartSpaces: string = "\t\t\t\t\t";
-
-    let logLine = eachLineStartSpaces + "\n";
-
-    if (columnNames?.length > 0) {
-      logLine += eachLineStartSpaces + columnNames.join("\t|") + "\n";
+    if (columnNames.length) {
+      table.unshift(columnNames);
     }
 
-    table.forEach((row) => {
-      logLine += eachLineStartSpaces + "|\t";
-
-      if (Array.isArray(row)) {
-        logLine += eachLineStartSpaces + this.recursiveObjectToString(row);
-      } else if (row instanceof Date) {
-        logLine += eachLineStartSpaces + row.toISOString();
-      } else if (typeof row === "object") {
-        logLine += eachLineStartSpaces + Object.entries(row).map(([key, value]) => key + ":" + value).join("|\t");
-      } else {
-        logLine += eachLineStartSpaces + row;
-      }
-
-      logLine += eachLineStartSpaces + "\t|\n";
-    });
-
-    return logLine;
+    return Table.table(table);
   }
 
   setPrintToConsole(status: boolean): LoggerContract {
