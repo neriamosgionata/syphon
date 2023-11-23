@@ -279,7 +279,7 @@ export default class Logger implements LoggerContract {
       return [row];
     });
 
-    return T(table);
+    return "\n" + T(table);
   }
 
   setPrintToConsole(status: boolean): LoggerContract {
