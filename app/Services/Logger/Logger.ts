@@ -263,6 +263,22 @@ export default class Logger implements LoggerContract {
       table.unshift(columnNames);
     }
 
+    table = table.map((row) => {
+      if (typeof row === "object" && row instanceof Date) {
+        return [row.toISOString()];
+      }
+
+      if (typeof row === "object" && !Array.isArray(row)) {
+        return Object.values(row);
+      }
+
+      if (Array.isArray(row)) {
+        return row;
+      }
+
+      return [row];
+    });
+
     return T(table);
   }
 
