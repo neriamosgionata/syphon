@@ -1,12 +1,12 @@
 import {configureJob} from "App/Services/Jobs/JobHelpers";
 import Logger from "@ioc:Providers/Logger";
-import Scraper from "@ioc:Providers/Scraper";
 import NpmPackage from "App/Models/NpmPackage";
 import ProgressBar from "@ioc:Providers/ProgressBar";
 import {DateTime} from "luxon";
 import Helper from "@ioc:Providers/Helper";
 import {BaseJobParameters} from "App/Services/Jobs/Jobs";
-
+import Jobs from "@ioc:Providers/Jobs";
+import Console from "@ioc:Providers/Console";
 
 const upsertNpmPackageVersion = async (packageName: string, packageVersion: string | null) => {
   const res = await NpmPackage
@@ -40,35 +40,32 @@ const verifyPackageToSearch = async (packageNames: string[]) => {
   return packageNames.filter((packageName) => results.findIndex((result) => result.name === packageName) === -1);
 }
 
-const evalFunction = () => {
-  const h3Version = [...document.querySelectorAll("h3")]
-    .filter((el) => el.textContent === "Version");
+const scrapeNpmPackages = async (packageNames: string[]) => {
+  let results: { packageName: string, packageVersion: string | null }[] = [];
 
-  if (h3Version.length === 0) {
-    return {packageVersion: null};
+  const promises = packageNames
+    .map((packageName) =>
+      Jobs.dispatch(
+        "ScrapeSingleNpmPackageJob",
+        {
+          packageName,
+        },
+        [],
+        (payload) => {
+          results.push({
+            packageName,
+            packageVersion: payload.payload.packageVersion,
+          });
+          ProgressBar.increment();
+        }
+      )
+    );
+
+  await Jobs.waitUntilAllDone(await Promise.all(promises));
+
+  for (const result of results) {
+    await upsertNpmPackageVersion(result.packageName, result.packageVersion);
   }
-
-  const version = h3Version[0].nextElementSibling?.textContent;
-
-  if (!version) {
-    return {packageVersion: null};
-  }
-
-  return {packageVersion: version};
-}
-
-const scrapeNpmPackage = async (packageName: string) => {
-  return await Scraper
-    .setScraperStatusName("newsletter-get-single-article")
-    .setWithAdblockerPlugin(true)
-    .setWithStealthPlugin(true)
-    .setHandlers([
-      Scraper.goto(`https://www.npmjs.com/package/${packageName}`),
-      Scraper.waitRandom(),
-      Scraper.removeGPDR(),
-      Scraper.evaluate(evalFunction),
-    ])
-    .run<{ packageVersion: string | null }>();
 }
 
 const scrapeNpmRegistryJob = async () => {
@@ -83,14 +80,11 @@ const scrapeNpmRegistryJob = async () => {
 
   Logger.table(packageNames);
 
-  for (const packageName of packageNames) {
-    Logger.info("Scraping package: " + packageName);
-    const packageVersion = await scrapeNpmPackage(packageName);
+  Console.log("Scraping packages...");
 
-    Logger.info("Package version: " + packageVersion.results.packageVersion);
-    await upsertNpmPackageVersion(packageName, packageVersion.results.packageVersion);
-
-    ProgressBar.increment();
+  while (packageNames.length > 0) {
+    const packageNamesToSearch = packageNames.splice(0, 4);
+    await scrapeNpmPackages(packageNamesToSearch);
   }
 
   ProgressBar.finish();
