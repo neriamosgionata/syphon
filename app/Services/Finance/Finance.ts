@@ -131,7 +131,7 @@ export default class Finance implements FinanceContract {
         Scraper.goto(`https://finance.yahoo.com/etfs?count=${count}`),
         Scraper.waitRandom(),
         Scraper.removeGPDR(),
-        this.crawlTotalPages(),
+        this.crawlTotalPages(), //defaults to only ETF with >=10 USD intraday price only
       ])
       .run<{ total_pages: number }>();
 

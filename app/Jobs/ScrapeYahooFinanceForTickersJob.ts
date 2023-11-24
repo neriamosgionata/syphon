@@ -7,14 +7,29 @@ import {DateTime} from "luxon";
 import Logger from "@ioc:Providers/Logger";
 import ProgressBar from "@ioc:Providers/ProgressBar";
 import {BaseJobParameters} from "App/Services/Jobs/Jobs";
-
-let progressBarIndex1: number = 0;
-let progressBarIndex2: number = 1;
+import Profile from "App/Models/Profile";
 
 const importTickers = async (tickers: string[]) => {
   Logger.info("Importing total tickers data: " + tickers.length);
 
-  ProgressBar.newBar(tickers.length, "Importing tickers data...", progressBarIndex1);
+  for (const tickerIndex in tickers) {
+    let ticker = tickers[tickerIndex];
+
+    const lastIndex = await Profile
+      .query()
+      .where("ticker", ticker)
+      .where("index_date", ">", new Date(Date.now() - (15 * 24 * 60 * 60 * 1000)))
+      .orderBy("index_date", "desc")
+      .first();
+
+    if (!lastIndex) {
+      continue;
+    }
+
+    tickers.splice(parseInt(tickerIndex), 1);
+  }
+
+  ProgressBar.newBar(tickers.length, "Importing tickers data...", 0);
 
   while (tickers.length > 0) {
     const batch = tickers.splice(0, 4);
@@ -35,7 +50,7 @@ const importTickers = async (tickers: string[]) => {
 
     await Jobs.waitUntilAllDone(toWait);
 
-    ProgressBar.increment(progressBarIndex1, batch.length);
+    ProgressBar.increment(0, batch.length);
 
     Logger.info("Imported tickers data: " + batch.length);
 
@@ -45,14 +60,12 @@ const importTickers = async (tickers: string[]) => {
   }
 
   Logger.info("Importing tickers data done");
-
-  ProgressBar.finish(progressBarIndex1);
 }
 
 const importCharts = async (tickers: string[]) => {
   Logger.info("Importing charts for total tickers: " + tickers.length);
 
-  ProgressBar.newBar(tickers.length, "Importing charts...", progressBarIndex2);
+  ProgressBar.newBar(tickers.length, "Importing charts...", 1);
 
   const fromDate = DateTime.fromISO("2010-01-01").toJSDate().getTime();
 
@@ -77,7 +90,7 @@ const importCharts = async (tickers: string[]) => {
 
     await Jobs.waitUntilAllDone(toWait);
 
-    ProgressBar.increment(progressBarIndex2, batch.length);
+    ProgressBar.increment(1, batch.length);
 
     Logger.info("Imported charts for tickers: " + batch.length);
 
@@ -87,8 +100,6 @@ const importCharts = async (tickers: string[]) => {
   }
 
   Logger.info("Importing charts for tickers done");
-
-  ProgressBar.finish(progressBarIndex2);
 }
 
 const scrapeYahooFinance = async () => {
@@ -100,11 +111,11 @@ const scrapeYahooFinance = async () => {
 
   await importTickers([...tickers]);
   await importCharts([...tickers]);
+
+  ProgressBar.finishAll();
 }
 
 const handler = async () => {
-
-
   await scrapeYahooFinance();
 };
 
