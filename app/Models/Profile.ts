@@ -53,7 +53,7 @@ export default class Profile extends BaseModel {
   market: string;
 
   @column.dateTime()
-  dividendDate: DateTime;
+  dividendDate: DateTime | null;
 
   @column()
   trailingAnnualDividendRate: number | null;
@@ -141,7 +141,7 @@ export default class Profile extends BaseModel {
       exchangeTimezoneName: profile.exchangeTimezoneName,
       exchangeTimezoneShortName: profile.exchangeTimezoneShortName,
       market: profile.market,
-      dividendDate: toLuxon(profile.dividendDate, defaultAppDateTimeFormat),
+      dividendDate: profile.dividendDate ? toLuxon(profile.dividendDate.getTime(), defaultAppDateTimeFormat) : null,
       trailingAnnualDividendRate: profile.trailingAnnualDividendRate,
       trailingPE: profile.trailingPE,
       trailingAnnualDividendYield: profile.trailingAnnualDividendYield,
@@ -160,7 +160,7 @@ export default class Profile extends BaseModel {
       prevName: profile.prevName,
       averageAnalystRating: profile.averageAnalystRating,
       openInterest: profile.openInterest,
-      indexDate: toLuxon(currentDate, defaultAppDateTimeFormat),
+      indexDate: toLuxon(currentDate.getTime(), defaultAppDateTimeFormat),
     }
   }
 
