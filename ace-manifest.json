@@ -130,6 +130,18 @@
       "aliases": [],
       "flags": []
     },
+    "test:ann": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/TestAnn",
+      "commandName": "test:ann",
+      "description": "",
+      "args": [],
+      "aliases": [],
+      "flags": []
+    },
     "test:ticker_chart": {
       "settings": {
         "loadApp": true,

@@ -5,6 +5,7 @@ import {ProfileMarketStateEnum} from "App/Enums/ProfileMarketStateEnum";
 import {Quote} from "yahoo-finance2/dist/esm/src/modules/quote";
 import Config from "@ioc:Adonis/Core/Config";
 import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
+import * as dfd from "danfojs-node";
 
 export default class Profile extends BaseModel {
   @column({isPrimary: true})
@@ -141,7 +142,6 @@ export default class Profile extends BaseModel {
       exchangeTimezoneName: profile.exchangeTimezoneName,
       exchangeTimezoneShortName: profile.exchangeTimezoneShortName,
       market: profile.market,
-      dividendDate: profile.dividendDate ? toLuxon(profile.dividendDate.getTime(), defaultAppDateTimeFormat) : null,
       trailingAnnualDividendRate: profile.trailingAnnualDividendRate,
       trailingPE: profile.trailingPE,
       trailingAnnualDividendYield: profile.trailingAnnualDividendYield,
@@ -160,8 +160,71 @@ export default class Profile extends BaseModel {
       prevName: profile.prevName,
       averageAnalystRating: profile.averageAnalystRating,
       openInterest: profile.openInterest,
+      dividendDate: profile.dividendDate ? toLuxon(profile.dividendDate.getTime(), defaultAppDateTimeFormat) : null,
       indexDate: toLuxon(currentDate.getTime(), defaultAppDateTimeFormat),
     }
   }
 
+  toANNData() {
+    return [
+      this.ticker,
+      this.language,
+      this.region,
+      this.quoteType as ProfileQuoteTypeEnum,
+      this.currency || "USD",
+      this.marketState as ProfileMarketStateEnum,
+      this.tradeable ? 1 : 0,
+      this.cryptoTradeable ? 1 : 0,
+      this.exchangeTimezoneName,
+      this.exchangeTimezoneShortName,
+      this.market,
+      this.trailingAnnualDividendRate || 0,
+      this.trailingPE || 0,
+      this.trailingAnnualDividendYield || 0,
+      this.epsTrailingTwelveMonths || 0,
+      this.epsForward || 0,
+      this.epsCurrentYear || 0,
+      this.priceEpsCurrentYear || 0,
+      this.sharesOutstanding || 0,
+      this.bookValue || 0,
+      this.marketCap || 0,
+      this.financialCurrency || "USD",
+      this.averageDailyVolume3Month || 0,
+      this.averageDailyVolume10Day || 0,
+      this.ytdReturn || 0,
+      this.averageAnalystRating || "N/A",
+      this.openInterest || 0,
+    ];
+  }
+
+  static async allProfilesToANNData() {
+    const profiles = await Profile.all();
+
+    const mappedProfiles = profiles.map((profile) => profile.toANNData());
+
+    const indexesOfNonNumericColumn = mappedProfiles[0]
+      .filter((value) => typeof value !== "number")
+      .map((_, index) => index);
+
+    const finalProfiles: { ticker: string, data: number[] }[] = [];
+
+    for (const index of indexesOfNonNumericColumn) {
+      const series = new dfd.Series(mappedProfiles.map((row, index) => row[index]));
+      const encoder = new dfd.LabelEncoder();
+      encoder.fit(series);
+
+      for (const mappedProfile of mappedProfiles) {
+        const ticker = mappedProfile[0] as string;
+
+        mappedProfile[index] = encoder.transform([mappedProfile[index]])[0] as number;
+
+        finalProfiles.push({
+          ticker: ticker,
+          data: mappedProfile as number[],
+        });
+      }
+    }
+
+    return finalProfiles;
+  }
 }
