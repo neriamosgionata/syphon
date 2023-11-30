@@ -59,6 +59,18 @@
       "aliases": [],
       "flags": []
     },
+    "delete:old_jobs": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/DeleteOldJobs",
+      "commandName": "delete:old_jobs",
+      "description": "",
+      "args": [],
+      "aliases": [],
+      "flags": []
+    },
     "import:chart_data": {
       "settings": {
         "loadApp": true,
