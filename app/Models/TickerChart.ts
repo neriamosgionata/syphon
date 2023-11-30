@@ -85,37 +85,54 @@ export default class TickerChart extends BaseModel {
   ) {
     const data = await TickerChart.getTickerChart(fromDate, toDate, ticker, interval, "date", "asc");
 
-    Console.log("Retrieves " + data.length + " rows from db...");
-
-    Console.log("Encoding tickers...");
-
-    Console.log("Encoding tickers... Done");
-
-    Console.log("Encoding data...");
+    Console.log("Retrieved " + data.length + " ticker chart data...");
 
     const allProfiles = await Profile.allProfilesToANNData();
 
+    Console.log("Retrieved " + allProfiles.length + " mapped profiles...");
+
     const mappedData = data
       .filter((row) => allProfiles.find((profile) => profile.ticker === row.ticker))
-      .map((row) => {
-        const found = allProfiles.find((profile) => profile.ticker === row.ticker) as {
-          ticker: string,
-          data: number[]
-        };
+      .map((row) => ([
+        row.ticker,
+        row.high || 0,
+        row.close || 0,
+        row.low || 0,
+        row.open || 0,
+        row.adjclose || 0,
+        row.volume || 0,
+      ])) as [string, number, number, number, number, number, number][];
+
+    Console.log("Mapping final data...");
+
+    const finalData = allProfiles
+      .map((profile) => {
+        let allDataForProfile = mappedData
+          .filter((row) => row[0] === profile.ticker);
 
         return [
-          ...found.data,
-          row.high || 0,
-          row.low || 0,
-          row.open || 0,
-          row.close || 0,
-          row.adjclose || 0,
-          row.volume || 0,
-        ]
+          profile.data[0],
+          ...profile.data.slice(1),
+          ...allDataForProfile.map((row) => row[1]),
+        ];
       });
 
-    Console.log("Encoding data... Done");
+    const longestArrayLength = finalData.reduce((currentLength, currentArray) => {
+      if (currentArray.length > currentLength) {
+        return currentArray.length;
+      }
 
-    return new dfd.DataFrame(mappedData);
+      return currentLength;
+    }, 0);
+
+    for (const array of finalData) {
+      while (array.length < longestArrayLength) {
+        array.push(0);
+      }
+    }
+
+    Console.log("Mapping final data... Done");
+
+    return new dfd.DataFrame(finalData);
   }
 }

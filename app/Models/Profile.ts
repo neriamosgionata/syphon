@@ -3,9 +3,9 @@ import {BaseModel, column} from "@ioc:Adonis/Lucid/Orm";
 import {ProfileQuoteTypeEnum} from "App/Enums/ProfileQuoteTypeEnum";
 import {ProfileMarketStateEnum} from "App/Enums/ProfileMarketStateEnum";
 import {Quote} from "yahoo-finance2/dist/esm/src/modules/quote";
-import Config from "@ioc:Adonis/Core/Config";
 import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
 import * as dfd from "danfojs-node";
+import Console from "@ioc:Providers/Console";
 
 export default class Profile extends BaseModel {
   @column({isPrimary: true})
@@ -123,9 +123,6 @@ export default class Profile extends BaseModel {
   public updatedAt: DateTime;
 
   static createObject(ticker: string, profile: Quote) {
-    const currentDate = new Date();
-    const defaultAppDateTimeFormat = Config.get("app.date_formats.default");
-
     return {
       ticker: ticker,
       language: profile.language,
@@ -160,9 +157,9 @@ export default class Profile extends BaseModel {
       prevName: profile.prevName,
       averageAnalystRating: profile.averageAnalystRating,
       openInterest: profile.openInterest,
-      dividendDate: profile.dividendDate ? toLuxon(profile.dividendDate.getTime(), defaultAppDateTimeFormat) : null,
-      indexDate: toLuxon(currentDate.getTime(), defaultAppDateTimeFormat),
-    }
+      dividendDate: toLuxon(profile.dividendDate, undefined),
+      indexDate: toLuxon(new Date(), undefined),
+    };
   }
 
   toANNData() {
@@ -200,7 +197,11 @@ export default class Profile extends BaseModel {
   static async allProfilesToANNData() {
     const profiles = await Profile.all();
 
+    Console.log("Retrieved " + profiles.length + " profiles from db...");
+
     const mappedProfiles = profiles.map((profile) => profile.toANNData());
+
+    Console.log("Mapping profiles...");
 
     const indexesOfNonNumericColumn = mappedProfiles[0]
       .filter((value) => typeof value !== "number")
@@ -224,6 +225,8 @@ export default class Profile extends BaseModel {
         });
       }
     }
+
+    Console.log("Mapping profiles... Done");
 
     return finalProfiles;
   }

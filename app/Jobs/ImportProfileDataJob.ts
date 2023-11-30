@@ -1,4 +1,4 @@
-import {loadJobParameters, configureJob} from "App/Services/Jobs/JobHelpers";
+import {configureJob, loadJobParameters} from "App/Services/Jobs/JobHelpers";
 import {Quote} from "yahoo-finance2/dist/esm/src/modules/quote";
 import Finance from "@ioc:Providers/Finance";
 import Profile from "App/Models/Profile";
@@ -6,6 +6,18 @@ import Logger from "@ioc:Providers/Logger";
 import {BaseJobParameters} from "App/Services/Jobs/Jobs";
 
 const updateProfile = async (ticker: string, profile: Quote) => {
+  const existing = await Profile
+    .query()
+    .where("ticker", ticker)
+    .first();
+
+  if (!existing) {
+    await Profile.create(
+      Profile.createObject(ticker, profile)
+    );
+    return;
+  }
+
   await Profile
     .query()
     .where("ticker", ticker)
@@ -27,6 +39,7 @@ const handler = async () => {
 
   for (const ticker of parameters.ticker) {
     try {
+      Logger.info(`Importing profile data for ${ticker}`);
       await importQuoteFromFinance(ticker);
     } catch (e) {
       Logger.error(`Error importing profile data for ${ticker}: ${e.message}`);
