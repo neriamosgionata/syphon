@@ -44,6 +44,8 @@ export interface StringCleanerContract {
 
   removeHtmlEntities(): StringCleanerContract;
 
+  removeEscapeCharacters(): StringCleanerContract;
+
   removeDashes(): StringCleanerContract;
 
   setString(s: string): StringCleanerContract;
@@ -173,7 +175,11 @@ export default class StringCleaner implements StringCleanerContract {
   }
 
   removeHtmlEntities(): StringCleanerContract {
-    return this.remove(/&[#0-9a-z]+;/gi);
+    return this.remove(/(&[#0-9a-z]+;)|( )/gi);
+  }
+
+  removeEscapeCharacters(): StringCleanerContract {
+    return this.remove(/\//gi);
   }
 
   removeDashes(): StringCleanerContract {

@@ -52,11 +52,7 @@ const importTickers = async (tickers: string[]) => {
 
     ProgressBar.increment(0, batch.length);
 
-    Logger.info("Imported tickers data: " + batch.length);
-
-    Logger.info("Waiting 10 seconds before next batch");
-
-    await new Promise(resolve => setTimeout(resolve, 10000));
+    Logger.info("Imported tickers data for: " + batch);
   }
 
   Logger.info("Importing tickers data done");
@@ -92,11 +88,7 @@ const importCharts = async (tickers: string[]) => {
 
     ProgressBar.increment(1, batch.length);
 
-    Logger.info("Imported charts for tickers: " + batch.length);
-
-    Logger.info("Waiting 10 seconds before next batch");
-
-    await new Promise(resolve => setTimeout(resolve, 10000));
+    Logger.info("Imported tickers charts for: " + batch);
   }
 
   Logger.info("Importing charts for tickers done");

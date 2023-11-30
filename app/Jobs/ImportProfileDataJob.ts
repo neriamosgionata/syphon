@@ -13,7 +13,7 @@ const updateProfile = async (ticker: string, profile: Quote) => {
 
   if (!existing) {
     await Profile.create(
-      Profile.createObject(ticker, profile)
+      Profile.createObjectFromYahoo(ticker, profile)
     );
     return;
   }
@@ -21,7 +21,7 @@ const updateProfile = async (ticker: string, profile: Quote) => {
   await Profile
     .query()
     .where("ticker", ticker)
-    .update(Profile.createObject(ticker, profile))
+    .update(Profile.createObjectFromYahoo(ticker, profile))
     .exec();
 }
 

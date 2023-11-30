@@ -3,9 +3,9 @@ import {BaseModel, column} from "@ioc:Adonis/Lucid/Orm";
 import {ProfileQuoteTypeEnum} from "App/Enums/ProfileQuoteTypeEnum";
 import {ProfileMarketStateEnum} from "App/Enums/ProfileMarketStateEnum";
 import {Quote} from "yahoo-finance2/dist/esm/src/modules/quote";
-import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
 import * as dfd from "danfojs-node";
 import Console from "@ioc:Providers/Console";
+import Helper from "@ioc:Providers/Helper";
 
 export default class Profile extends BaseModel {
   @column({isPrimary: true})
@@ -53,8 +53,9 @@ export default class Profile extends BaseModel {
   @column()
   market: string;
 
+  // @ts-ignore
   @column.dateTime()
-  dividendDate: DateTime | null;
+  dividendDate: DateTime | null | string;
 
   @column()
   trailingAnnualDividendRate: number | null;
@@ -113,8 +114,9 @@ export default class Profile extends BaseModel {
   @column()
   openInterest: number | null;
 
+  // @ts-ignore
   @column.dateTime()
-  indexDate: DateTime;
+  indexDate: DateTime | string;
 
   @column.dateTime({autoCreate: true})
   public createdAt: DateTime;
@@ -122,43 +124,43 @@ export default class Profile extends BaseModel {
   @column.dateTime({autoCreate: true, autoUpdate: true})
   public updatedAt: DateTime;
 
-  static createObject(ticker: string, profile: Quote) {
+  static createObjectFromYahoo(ticker: string, profile: Quote): Partial<Profile> {
     return {
       ticker: ticker,
       language: profile.language,
       region: profile.region,
       quoteType: profile.quoteType as ProfileQuoteTypeEnum,
-      quoteSourceName: profile.quoteSourceName,
-      currency: profile.currency,
+      quoteSourceName: profile.quoteSourceName ? Helper.sanitizeWords(profile.quoteSourceName) : null,
+      currency: profile.currency || null,
       marketState: profile.marketState as ProfileMarketStateEnum,
       tradeable: profile.tradeable,
-      cryptoTradeable: profile.cryptoTradeable,
+      cryptoTradeable: profile.cryptoTradeable || null,
       exchange: profile.exchange,
-      shortName: profile.shortName,
-      longName: profile.longName,
+      shortName: profile.shortName ? Helper.sanitizeWords(profile.shortName) : null,
+      longName: profile.longName ? Helper.sanitizeWords(profile.longName) : null,
       exchangeTimezoneName: profile.exchangeTimezoneName,
       exchangeTimezoneShortName: profile.exchangeTimezoneShortName,
       market: profile.market,
-      trailingAnnualDividendRate: profile.trailingAnnualDividendRate,
-      trailingPE: profile.trailingPE,
-      trailingAnnualDividendYield: profile.trailingAnnualDividendYield,
-      epsTrailingTwelveMonths: profile.epsTrailingTwelveMonths,
-      epsForward: profile.epsForward,
-      epsCurrentYear: profile.epsCurrentYear,
-      priceEpsCurrentYear: profile.priceEpsCurrentYear,
-      sharesOutstanding: profile.sharesOutstanding,
-      bookValue: profile.bookValue,
-      marketCap: profile.marketCap,
-      financialCurrency: profile.financialCurrency,
-      averageDailyVolume3Month: profile.averageDailyVolume3Month,
-      averageDailyVolume10Day: profile.averageDailyVolume10Day,
-      displayName: profile.displayName,
-      ytdReturn: profile.ytdReturn,
-      prevName: profile.prevName,
-      averageAnalystRating: profile.averageAnalystRating,
-      openInterest: profile.openInterest,
-      dividendDate: toLuxon(profile.dividendDate, undefined),
-      indexDate: toLuxon(new Date(), undefined),
+      trailingAnnualDividendRate: profile.trailingAnnualDividendRate || null,
+      trailingPE: profile.trailingPE || null,
+      trailingAnnualDividendYield: profile.trailingAnnualDividendYield || null,
+      epsTrailingTwelveMonths: profile.epsTrailingTwelveMonths || null,
+      epsForward: profile.epsForward || null,
+      epsCurrentYear: profile.epsCurrentYear || null,
+      priceEpsCurrentYear: profile.priceEpsCurrentYear || null,
+      sharesOutstanding: profile.sharesOutstanding || null,
+      bookValue: profile.bookValue || null,
+      marketCap: profile.marketCap || null,
+      financialCurrency: profile.financialCurrency || null,
+      averageDailyVolume3Month: profile.averageDailyVolume3Month || null,
+      averageDailyVolume10Day: profile.averageDailyVolume10Day || null,
+      displayName: profile.displayName ? Helper.sanitizeWords(profile.displayName) : null,
+      ytdReturn: profile.ytdReturn || null,
+      prevName: profile.prevName ? Helper.sanitizeWords(profile.prevName) : null,
+      averageAnalystRating: profile.averageAnalystRating || null,
+      openInterest: profile.openInterest || null,
+      dividendDate: profile.dividendDate ? DateTime.fromISO(profile.dividendDate.toISOString()).toSQL({includeOffset: false}) : null,
+      indexDate: DateTime.fromISO(new Date().toISOString(), {}).toSQL({includeOffset: false}) as string,
     };
   }
 

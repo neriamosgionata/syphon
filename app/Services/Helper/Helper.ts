@@ -19,6 +19,8 @@ export interface HelperContract {
 
   cleanText(text: string): string;
 
+  sanitizeWords(words: string): string;
+
   removeStopwordsJoined(text: string, customStops?: string[]): string;
 
   removeStopwords(text: string, customStops?: string[]): string[];
@@ -57,6 +59,17 @@ export default class Helper implements HelperContract {
       .replace(/[^a-zA-Z\s]+/g, "")
       .fixSpellingErrors()
       .toLowerCase()
+      .valueOf()
+  }
+
+  sanitizeWords(words: string): string {
+    return StringCleaner
+      .setString(words)
+      .stripHtml()
+      .removeHtmlEntities()
+      .removeDashes()
+      .removeEscapeCharacters()
+      .replace(/[^a-zA-Z\s]+/g, "")
       .valueOf()
   }
 
