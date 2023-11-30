@@ -4,6 +4,8 @@ import {ModelCompileArgs} from "@tensorflow/tfjs-layers/dist/engine/training";
 
 export interface ANNContract {
   createANN(layersStructure: DenseLayerArgs[], compileOptions: ModelCompileArgs): tf.Sequential;
+
+  calculateBatchSizeFromNumberOfSamples(numberOfSamples: number): number;
 }
 
 export default class ANN implements ANNContract {
@@ -18,6 +20,10 @@ export default class ANN implements ANNContract {
     model.compile(compileOptions);
 
     return model;
+  }
+
+  calculateBatchSizeFromNumberOfSamples(numberOfSamples: number): number {
+    return numberOfSamples > 500000 ? Math.floor(numberOfSamples / 5) : numberOfSamples;
   }
 
 }

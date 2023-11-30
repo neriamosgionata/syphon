@@ -47,7 +47,7 @@ export default class TickerChart extends BaseModel {
   static async getTickerChart(
     fromDate?: string,
     toDate?: string,
-    ticker?: string,
+    ticker?: string | string[],
     interval?: string,
     sortBy?: string,
     sortDirection?: "asc" | "desc",
@@ -55,7 +55,11 @@ export default class TickerChart extends BaseModel {
     const query = TickerChart.query();
 
     if (ticker) {
-      query.where("ticker", ticker);
+      if (Array.isArray(ticker)) {
+        query.whereIn("ticker", ticker);
+      } else {
+        query.where("ticker", ticker);
+      }
     }
 
     if (interval) {
@@ -80,7 +84,7 @@ export default class TickerChart extends BaseModel {
   static async TickerChartToANNData(
     fromDate?: string,
     toDate?: string,
-    ticker?: string,
+    ticker?: string | string[],
     interval?: string,
   ) {
     const data = await TickerChart.getTickerChart(fromDate, toDate, ticker, interval, "date", "asc");
@@ -101,35 +105,37 @@ export default class TickerChart extends BaseModel {
         row.open || 0,
         row.adjclose || 0,
         row.volume || 0,
-      ])) as [string, number, number, number, number, number, number][];
+        row.date.toJSDate().getTime(),
+      ]))
+      // @ts-ignore
+      .sort((a, b) => (a[7] - b[7])) as [string, number, number, number, number, number, number, number][];
 
     Console.log("Mapping final data...");
 
-    const finalData = allProfiles
-      .map((profile) => {
-        let allDataForProfile = mappedData
-          .filter((row) => row[0] === profile.ticker);
+    let finalData = allProfiles
+      .map((profile) => ([
+        ...profile.data,
+        ...mappedData
+          .filter((row) => row[0] === profile.ticker)
+          .map((row) => row[1]),
+      ]));
 
-        return [
-          profile.data[0],
-          ...profile.data.slice(1),
-          ...allDataForProfile.map((row) => row[1]),
+    const longestArrayLength = finalData
+      .reduce((currentLength, currentArray) =>
+        currentArray.length > currentLength ? currentArray.length : currentLength, 0);
+
+    for (const i in finalData) {
+      if (finalData[i].length < longestArrayLength) {
+        const missing_length = longestArrayLength - finalData[i].length;
+        finalData[i] = [
+          ...finalData[i].splice(0, allProfiles[0].data.length),
+          ...Array(missing_length).fill(0),
+          ...finalData[i]
         ];
-      });
-
-    const longestArrayLength = finalData.reduce((currentLength, currentArray) => {
-      if (currentArray.length > currentLength) {
-        return currentArray.length;
-      }
-
-      return currentLength;
-    }, 0);
-
-    for (const array of finalData) {
-      while (array.length < longestArrayLength) {
-        array.push(0);
       }
     }
+
+    finalData = finalData.filter((row) => row.length === longestArrayLength);
 
     Console.log("Mapping final data... Done");
 
