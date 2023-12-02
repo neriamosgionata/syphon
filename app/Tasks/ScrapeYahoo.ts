@@ -15,7 +15,9 @@ export default class ScrapeYahoo extends BaseTask {
     await Jobs.waitUntilDone(
       await Jobs.dispatch<ScrapeYahooFinanceForTickersJobParameters>(
         "ScrapeYahooFinanceForTickersJob",
-        {}
+        {
+          numOfThreads: 2
+        }
       )
     );
   }

@@ -1,4 +1,4 @@
-import {BaseCommand} from '@adonisjs/core/build/standalone'
+import {args, BaseCommand} from '@adonisjs/core/build/standalone'
 import {JobContract} from "App/Services/Jobs/Jobs";
 import {AppContainerAliasesEnum} from "App/Enums/AppContainerAliasesEnum";
 import {ScrapeYahooFinanceForTickersJobParameters} from "App/Jobs/ScrapeYahooFinanceForTickersJob";
@@ -30,13 +30,18 @@ export default class ScrapeYahooFinance extends BaseCommand {
     stayAlive: false,
   }
 
+  @args.string({description: "Num of threads to use", required: false})
+  public numOfThreads: string | undefined;
+
   public async run() {
     const Jobs: JobContract = this.application.container.use(AppContainerAliasesEnum.Jobs);
 
     await Jobs.waitUntilDone(
       await Jobs.dispatch<ScrapeYahooFinanceForTickersJobParameters>(
         "ScrapeYahooFinanceForTickersJob",
-        {}
+        {
+          numOfThreads: this.numOfThreads ? parseInt(this.numOfThreads) : 2
+        }
       )
     );
   }
