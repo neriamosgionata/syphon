@@ -53,7 +53,7 @@ const scrapeNpmRegistryJob = async () => {
   Console.log("Scraping packages...");
 
   while (packageNames.length > 0) {
-    const packageNamesToSearch = packageNames.splice(0, 4);
+    const packageNamesToSearch = packageNames.splice(0, 2);
     await scrapeNpmPackages(packageNamesToSearch);
   }
 
