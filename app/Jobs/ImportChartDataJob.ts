@@ -1,32 +1,20 @@
 import Finance from "@ioc:Providers/Finance";
-import Config from "@ioc:Adonis/Core/Config";
 import TickerChart from "App/Models/TickerChart";
 import {ChartResultArray, ChartResultArrayQuote} from "yahoo-finance2/dist/esm/src/modules/chart";
 import {configureJob, loadJobParameters} from "App/Services/Jobs/JobHelpers";
 import {ChartInterval} from "App/Services/Finance/Finance";
-import {toLuxon} from "@adonisjs/validator/build/src/Validations/date/helpers/toLuxon";
 import Logger from "@ioc:Providers/Logger";
 import {BaseJobParameters} from "App/Services/Jobs/Jobs";
+import {DateTime} from "luxon";
 
 const createChartEntry = async (
   ticker: string,
   entry: ChartResultArrayQuote,
   interval: ChartInterval
 ) => {
-  const defaultAppDateTimeFormat = Config.get("app.date_formats.default");
-
-  await TickerChart
-    .create({
-      ticker: ticker,
-      date: toLuxon(entry.date, defaultAppDateTimeFormat),
-      high: entry.high,
-      volume: entry.volume,
-      open: entry.open,
-      low: entry.low,
-      close: entry.close,
-      adjclose: entry.adjclose,
-      interval: interval
-    });
+  await TickerChart.create(
+    TickerChart.createObjectFromYahoo(ticker, interval, entry)
+  );
 };
 
 const importElementsFromFinance = async (ticker: string, chart: ChartResultArray, interval: ChartInterval) => {
@@ -46,7 +34,7 @@ const importElementsFromFinance = async (ticker: string, chart: ChartResultArray
     return;
   }
 
-  const lastDate = lastTicker.date;
+  const lastDate = lastTicker.date as DateTime;
   const lastDateIndex = elements.findIndex((el) => el.date.getTime() < lastDate.toJSDate().getTime());
 
   if (lastDateIndex === -1) {

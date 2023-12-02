@@ -4,6 +4,7 @@ import {ChartInterval} from "App/Services/Finance/Finance";
 import * as dfd from "danfojs-node";
 import Console from "@ioc:Providers/Console";
 import Profile from "App/Models/Profile";
+import {ChartResultArrayQuote} from "yahoo-finance2/dist/esm/src/modules/chart";
 
 export default class TickerChart extends BaseModel {
   public static table = "ticker_charts";
@@ -20,8 +21,9 @@ export default class TickerChart extends BaseModel {
   @column()
   public ticker: string;
 
+  // @ts-ignore
   @column.dateTime()
-  public date: DateTime;
+  public date: DateTime | null | string;
 
   @column()
   public volume: number | null;
@@ -105,7 +107,7 @@ export default class TickerChart extends BaseModel {
         row.open || 0,
         row.adjclose || 0,
         row.volume || 0,
-        row.date.toJSDate().getTime(),
+        (row.date as DateTime).toJSDate().getTime(),
       ]))
       // @ts-ignore
       .sort((a, b) => (a[7] - b[7])) as [string, number, number, number, number, number, number, number][];
@@ -140,5 +142,19 @@ export default class TickerChart extends BaseModel {
     Console.log("Mapping final data... Done");
 
     return new dfd.DataFrame(finalData);
+  }
+
+  static createObjectFromYahoo(ticker: string, interval: ChartInterval, entry: ChartResultArrayQuote): Partial<TickerChart> {
+    return {
+      ticker: ticker,
+      date: DateTime.fromISO(entry.date.toISOString()).toSQL({includeOffset: false}),
+      high: entry.high,
+      volume: entry.volume,
+      open: entry.open,
+      low: entry.low,
+      close: entry.close,
+      adjclose: entry.adjclose,
+      interval: interval
+    };
   }
 }
