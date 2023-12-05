@@ -41,7 +41,6 @@ const evalFunction = () => {
 
 const scrapeNpmPackage = async (packageName: string) => {
   return await Scraper
-    .setScraperStatusName("newsletter-get-single-article")
     .setWithAdblockerPlugin(true)
     .setWithStealthPlugin(true)
     .setHandlers([

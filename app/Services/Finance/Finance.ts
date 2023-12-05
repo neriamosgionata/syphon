@@ -124,7 +124,6 @@ export default class Finance implements FinanceContract {
     let tickersFound: string[] = [];
 
     let resTotalPages = await Scraper
-      .setScraperStatusName("newsletter-get-single-article")
       .setWithAdblockerPlugin(true)
       .setWithStealthPlugin(true)
       .setHandlers([
@@ -145,7 +144,6 @@ export default class Finance implements FinanceContract {
     do {
 
       resTickers = await Scraper
-        .setScraperStatusName("newsletter-get-single-article")
         .setWithAdblockerPlugin(true)
         .setWithStealthPlugin(true)
         .setHandlers([

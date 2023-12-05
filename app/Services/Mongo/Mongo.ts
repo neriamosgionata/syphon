@@ -1,8 +1,6 @@
-import { Db, MongoClient } from "mongodb";
+import {Db, MongoClient} from "mongodb";
 
 export interface MongoContract {
-  connect(): Promise<void>;
-
   isReady(): boolean;
 
   client: MongoClient;
@@ -15,11 +13,10 @@ export default class Mongo implements MongoContract {
 
   constructor(public url: string, public dbName: string) {
     this.client = new MongoClient(this.url, {});
-  }
 
-  async connect() {
-    await this.client.connect();
-    this.db = this.client.db(this.dbName);
+    this.client.connect().then(() => {
+      this.db = this.client.db(this.dbName);
+    });
   }
 
   isReady() {

@@ -9,14 +9,10 @@ export default class MongoProvider {
     this.app.container.singleton(AppContainerAliasesEnum.Mongo, () => {
       const Env = this.app.container.use("Adonis/Core/Env");
 
-      const mongo = new (require("App/Services/Mongo/Mongo").default)(
+      return new (require("App/Services/Mongo/Mongo").default)(
         Env.get("MONGO_DSN"),
         Env.get("MONGO_DATABASE")
       );
-
-      mongo.connect().then().catch();
-
-      return mongo;
     });
   }
 

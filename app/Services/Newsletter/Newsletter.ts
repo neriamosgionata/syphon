@@ -75,7 +75,6 @@ export default class Newsletter implements NewsletterContract {
 
   async getArticle(articleUrl: string): Promise<ScraperRunReturn<{ title?: string, content?: string }>> {
     return await Scraper
-      .setScraperStatusName("newsletter-get-single-article")
       .setWithAdblockerPlugin(true)
       .setWithStealthPlugin(true)
       .setHandlers([

@@ -52,7 +52,7 @@ export default class TestAnn extends BaseCommand {
 
     Console.log("Running ANN training...");
 
-    const ann = ANN.createANN(
+    const ann = await ANN.createANN(
       [
         {
           units: dataFeaturesLength,
@@ -60,23 +60,7 @@ export default class TestAnn extends BaseCommand {
           batchInputShape: [null, dataFeaturesLength],
         },
         {
-          units: dataFeaturesLength + 2,
-          activation: "relu",
-        },
-        {
-          units: dataFeaturesLength + 2,
-          activation: "relu",
-        },
-        {
-          units: dataFeaturesLength + 2,
-          activation: "relu",
-        },
-        {
-          units: dataFeaturesLength + 2,
-          activation: "relu",
-        },
-        {
-          units: dataFeaturesLength + 2,
+          units: dataFeaturesLength * 2,
           activation: "relu",
         },
         {
@@ -96,34 +80,53 @@ export default class TestAnn extends BaseCommand {
     const x_set = data.iloc({columns: ["0:" + (dataFeaturesLength - 2)]}).values as ArrayType2D;
     const y_set = data.iloc({columns: [":" + (dataFeaturesLength - 1)]}).values as ArrayType2D;
 
+    Console.log("X set shape: " + x_set.length);
+    Console.log("Y set shape: " + y_set.length);
+
     Console.log("Splitting dataset...");
 
     const res = model_selection.train_test_split(
       x_set,
       y_set,
+      {
+        test_size: 0.2,
+        train_size: 0.8,
+        random_state: 0,
+        clone: true,
+      }
     );
 
     let x_train = res.xTrain;
-    let x_test = res.xTest;
     let y_train = res.yTrain;
+    let x_test = res.xTest;
     let y_test = res.yTest;
 
     Console.log("Normalizing dataset...");
 
     const standardScaler = new dfd.StandardScaler();
 
-    x_train = standardScaler.fitTransform(x_train);
+    standardScaler.fit(x_train);
+
+    x_train = standardScaler.transform(x_train);
     x_test = standardScaler.transform(x_test);
 
     Console.log("Fitting ANN...");
+
+    Console.log("Batch size: " + ANN.calculateBatchSizeFromNumberOfSamples(dataSampleLength));
+
+    Console.log("Epochs: 100");
+
+    Console.log("X train shape: " + x_train.length);
+
+    Console.log("Y train shape: " + y_train.length);
 
     const _history = await ann.fit(
       x_train,
       y_train,
       {
-        batchSize: ANN.calculateBatchSizeFromNumberOfSamples(dataSampleLength),
+        batchSize: 192,
         epochs: 1000,
-        verbose: 1,
+        verbose: 2,
       },
     );
 

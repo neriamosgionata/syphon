@@ -16,13 +16,13 @@ export interface LoggerContract {
   changeAppDefaultLogger(
     logChannelName: string,
     logPrefix: string,
-    printToConsole: boolean,
+    writeToConsole: boolean,
   ): void;
 
   logger(
     logChannelName: string,
     logPrefix: string,
-    printToConsole: boolean,
+    writeToConsole: boolean,
   ): LoggerContract;
 
   setPrintToConsole(status: boolean): LoggerContract;
@@ -45,7 +45,7 @@ export interface LoggerContract {
 }
 
 export default class Logger implements LoggerContract {
-  private readonly config: {
+  private config: {
     baseName: string,
     lifeTime: number, //not implemented yet
     permissions: number,
@@ -63,12 +63,12 @@ export default class Logger implements LoggerContract {
   };
 
   constructor(
-    private readonly logChannelName: string = "default",
-    private readonly logPrefix: string = "adonis",
-    private printToConsole: boolean = false,
+    private logChannelName: string = "default",
+    private logPrefix: string = "adonis",
+    private writeToConsole: boolean = false,
   ) {
     this.logFolder = Config.get("app.logger.log_folder");
-    this.printToConsole = printToConsole;
+    this.writeToConsole = writeToConsole;
     this.logPrefix = logPrefix;
 
     if (logChannelName) {
@@ -88,11 +88,24 @@ export default class Logger implements LoggerContract {
   changeAppDefaultLogger(
     logChannelName: string = "default",
     logPrefix: string = "",
-    printToConsole: boolean,
+    writeToConsole: boolean,
   ) {
-    Application.container.singleton(AppContainerAliasesEnum.Logger, () => {
-      return this.logger(logChannelName, logPrefix, printToConsole);
-    });
+    Application.container.singleton(AppContainerAliasesEnum.Logger, () => this.logger(logChannelName, logPrefix, writeToConsole));
+
+    this.logChannelName = logChannelName;
+    this.writeToConsole = writeToConsole;
+    this.logPrefix = logPrefix;
+
+    this.config = Config.get("app.logger.log_channels." + logChannelName.toString().toLowerCase());
+
+    if (!this.config) {
+      this.warn("Log channel used doesn't exist, reverting back to default");
+    }
+
+    if (!this.config || !logChannelName) {
+      this.logChannelName = "default";
+      this.config = Config.get("app.logger.log_channels.default");
+    }
   }
 
   removeOneTimeLog(): void {
@@ -114,9 +127,9 @@ export default class Logger implements LoggerContract {
   logger(
     logChannelName: string = "default",
     logPrefix: string = "",
-    printToConsole: boolean = false,
+    writeToConsole: boolean = false,
   ): LoggerContract {
-    return new Logger(logChannelName, logPrefix, printToConsole);
+    return new Logger(logChannelName, logPrefix, writeToConsole);
   }
 
   getCurrentChannelName(): string {
@@ -242,7 +255,7 @@ export default class Logger implements LoggerContract {
     const logFileName = this.getLogFileName(level);
     const logLineWithAnnotation = this.getLogLine(level, logLine);
 
-    if (this.printToConsole) {
+    if (this.writeToConsole) {
       Console.log(logLineWithAnnotation);
     }
 
@@ -283,7 +296,7 @@ export default class Logger implements LoggerContract {
   }
 
   setPrintToConsole(status: boolean): LoggerContract {
-    this.printToConsole = status;
+    this.writeToConsole = status;
     return this;
   }
 }

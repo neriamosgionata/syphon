@@ -1,15 +1,18 @@
 import {Browser, CDPSession, defaultArgs, executablePath, Page} from "puppeteer";
 import {LoggerContract} from "App/Services/Logger/Logger";
 import Logger from "@ioc:Providers/Logger";
-import ScraperStatus from "App/Models/ScraperStatus";
-import Console from "@ioc:Providers/Console";
 import {LogLevelEnum} from "App/Enums/LogLevelEnum";
 
 export type ScraperTestFunction = (_browser: Browser, _page: Page) => Promise<boolean>;
 
 export type ScraperHandlerReturn<T extends ({ [p: string | number]: any } | null | undefined)> = T;
 
-export type ScraperHandlerFunction<T extends ScraperHandlerReturn<any>> = (_browser: Browser, _page: Page) => Promise<T>;
+export type ScraperHandlerFunction<T extends ScraperHandlerReturn<any>> = (
+  _browser: Browser,
+  _page: Page,
+  args: { [p: string]: any },
+  results: { [p: string]: any },
+) => Promise<T>;
 
 export type ScraperRunReturn<T extends ScraperHandlerReturn<any>> = { results: T, errors: Error[] };
 
@@ -36,19 +39,19 @@ export interface BaseScraperContract {
 
   setDebugConsole(debugConsole: boolean): BaseScraperContract;
 
+  setTakeScreenshot(takeScreenshot: boolean): BaseScraperContract;
+
   setTests(testsFunctions: ScraperTestFunction[]): BaseScraperContract;
 
   setHandlers(handlersFunctions: ScraperHandlerFunction<any>[]): BaseScraperContract;
 
+  setArguments(args: { [p: string]: any }): BaseScraperContract;
+
+  setCloseOnExit(closeOnExit: boolean): BaseScraperContract;
+
   addHandler(handlerFunction: ScraperHandlerFunction<any>): BaseScraperContract;
 
-  setScraperStatusName(name: string): BaseScraperContract;
-
-  resetScraperStatus(): Promise<void>;
-
-  updateScraperStatus(status: object | any): Promise<void>;
-
-  registerError(error: Error | any, key: string): Promise<void>;
+  registerError(error: Error | any, key: string): void;
 
   writeTableLog(table: any[], logLevel?: LogLevelEnum): void;
 
@@ -56,9 +59,6 @@ export interface BaseScraperContract {
 }
 
 export default class BaseScraper implements BaseScraperContract {
-  protected defaultStatus: { name: string, status: { [p: string | number]: any } } = {name: "", status: {}};
-  protected scraperStatus: typeof this.defaultStatus = this.defaultStatus;
-
   protected errors: Error[] = [];
   protected results: any = {};
 
@@ -73,9 +73,13 @@ export default class BaseScraper implements BaseScraperContract {
   protected registeredTests: ScraperTestFunction[] = [];
   protected registeredHandlers: ScraperHandlerFunction<any>[] = [];
   protected logger: LoggerContract;
+  protected args: { [p: string]: any } = {};
+
+  protected enableTakeScreenshot: boolean = false;
+  protected closeOnExit: boolean = true;
 
   constructor(
-    protected withHeadlessChrome: boolean | "new" = true,
+    protected withHeadlessChrome: boolean | "new" = "new",
     protected writeOnConsole: boolean = false,
     protected debugConsole: boolean = false,
     protected withAdblockerPlugin: boolean = false,
@@ -133,74 +137,38 @@ export default class BaseScraper implements BaseScraperContract {
     return this;
   }
 
+  setArguments(args: { [p: string]: any }): this {
+    this.args = args;
+    return this;
+  }
+
+  setCloseOnExit(closeOnExit: boolean): this {
+    this.closeOnExit = closeOnExit;
+    return this;
+  }
+
   addHandler(handlerFunction: ScraperHandlerFunction<any>): this {
     this.registeredHandlers.push(handlerFunction);
     return this;
   }
 
-  setScraperStatusName(name: string): this {
-    this.defaultStatus = {
-      name,
-      status: {}
-    };
+  setTakeScreenshot(takeScreenshot: boolean): this {
+    this.enableTakeScreenshot = takeScreenshot;
     return this;
   }
 
-  async resetScraperStatus(): Promise<void> {
-    await ScraperStatus
-      .query()
-      .where('name', this.scraperStatus.name)
-      .update({
-        status: this.defaultStatus
-      })
-      .exec();
-  }
-
-  async updateScraperStatus(status: object | any): Promise<void> {
-    Object
-      .keys(this.scraperStatus.status)
-      .forEach((key) => {
-        if (status[key] !== undefined && typeof status[key] === "number") {
-          this.scraperStatus.status[key] += +status[key];
-        } else if (status[key] !== undefined) {
-          this.scraperStatus.status[key] = status[key];
-        }
-      });
-
-    await ScraperStatus
-      .query()
-      .where('name', this.scraperStatus.name)
-      .update({
-        status: this.defaultStatus
-      })
-      .exec();
-  }
-
-  async registerError(error: Error | any, key: string): Promise<void> {
+  registerError(error: Error | any, key: string): void {
     const newErr = new Error(key + ": " + error.message);
     newErr.stack = error.stack;
     this.errors.push(error);
-
-    if (this.writeOnConsole) {
-      Console.error("Error message: ", error.message);
-      Console.error("Error stack: ", error.stack);
-    }
   }
 
   writeTableLog(table: any[], logLevel: LogLevelEnum = LogLevelEnum.INFO): void {
     this.logger.table(table, [], logLevel);
-
-    if (this.writeOnConsole) {
-      Console.table(table);
-    }
   }
 
   writeLog(level: LogLevelEnum, message: string, ...values: unknown[]): void {
     this.logger[level.trim()](message, ...values);
-
-    if (this.writeOnConsole) {
-      Console[level](message, ...values);
-    }
   }
 
   private getErrors(): Error[] {
@@ -219,51 +187,31 @@ export default class BaseScraper implements BaseScraperContract {
 
   async run<T extends ScraperHandlerReturn<any>>(): Promise<ScraperRunReturn<T>> {
     try {
-
       await this.start();
-
     } catch (e) {
-
-      await this.registerError(e, "Start");
-
+      this.registerError(e, "Start");
       await this.end();
-
       return this.getRunResult<T>();
     }
 
     try {
-
       const isOk = await this.test();
-
       if (!isOk) {
-
-        await this.registerError(new Error('Initial test was not successful!'), "Tests");
-
+        this.registerError(new Error('Initial test was not successful!'), "Tests");
         await this.end();
-
         return this.getRunResult<T>();
-
       }
-
     } catch (e) {
-
-      await this.registerError(e, "Test");
-
+      this.registerError(e, "Test");
       await this.end();
-
       return this.getRunResult<T>();
     }
 
     try {
-
       await this.handle();
-
       await this.end();
-
     } catch (err) {
-
-      await this.registerError(err, "Execution");
-
+      this.registerError(err, "Execution");
     }
 
     return this.getRunResult<T>();
@@ -277,7 +225,7 @@ export default class BaseScraper implements BaseScraperContract {
         try {
           const msgArgs = msg.args();
           for (const element of msgArgs) {
-            Console.log(await element.jsonValue());
+            console.log(await element.jsonValue());
           }
         } catch (e) {
 
@@ -330,9 +278,8 @@ export default class BaseScraper implements BaseScraperContract {
             "--no-sandbox",
             "--no-zygote",
             "--window-size=1920,1080",
-            "--disable-gpu",
             "--ignore-certificate-errors",
-            "--lang=\"en-US\"",
+            "--lang='en-US'",
             "--enable-automation",
             "--no-default-browser-check",
           ]
@@ -342,7 +289,7 @@ export default class BaseScraper implements BaseScraperContract {
     ];
 
     const launchArgs = {
-      executablePath: executablePath(),
+      executablePath: executablePath("chrome"),
       defaultViewport: {
         deviceScaleFactor: 1,
         hasTouch: false,
@@ -378,7 +325,7 @@ export default class BaseScraper implements BaseScraperContract {
         try {
           const msgArgs = msg.args();
           for (const element of msgArgs) {
-            Console.log(await element.jsonValue());
+            console.log(await element.jsonValue());
           }
         } catch (e) {
 
@@ -388,35 +335,38 @@ export default class BaseScraper implements BaseScraperContract {
   }
 
   protected async end(): Promise<void> {
-    if (this.page && this.page.close && !this.page.isClosed()) {
+    await this.captureScreenshot();
 
-      if (this.removeUserDataOnExit) {
-        await this.cdpClient.send('Network.clearBrowserCookies');
-        await this.cdpClient.send('Network.clearBrowserCache');
+    if (this.closeOnExit) {
+      if (this.page && this.page.close && !this.page.isClosed()) {
+        if (this.removeUserDataOnExit) {
+          await this.cdpClient.send('Network.clearBrowserCookies');
+          await this.cdpClient.send('Network.clearBrowserCache');
+        }
+
+        await this.cdpClient.detach();
+        await this.page.close();
       }
 
-      await this.cdpClient.detach();
-      await this.page.close();
-    }
+      for (const pageIndex in this.extraOpenedPages) {
+        const page = this.extraOpenedPages[pageIndex];
+        const cdpClient = this.extraCdpClient[pageIndex];
 
-    for (const pageIndex in this.extraOpenedPages) {
-      const page = this.extraOpenedPages[pageIndex];
-      const cdpClient = this.extraCdpClient[pageIndex];
+        if (this.removeUserDataOnExit) {
+          await cdpClient.send('Network.clearBrowserCookies');
+          await cdpClient.send('Network.clearBrowserCache');
+        }
 
-      if (this.removeUserDataOnExit) {
-        await cdpClient.send('Network.clearBrowserCookies');
-        await cdpClient.send('Network.clearBrowserCache');
+        await cdpClient.detach();
+
+        if (page && page.close && !page.isClosed()) {
+          await page.close();
+        }
       }
 
-      await cdpClient.detach();
-
-      if (page && page.close && !page.isClosed()) {
-        await page.close();
+      if (this.browser && this.browser.close && this.browser.connected) {
+        await this.browser.close();
       }
-    }
-
-    if (this.browser && this.browser.close && this.browser.connected) {
-      await this.browser.close();
     }
 
     if (this.errors.length > 0) {
@@ -435,13 +385,13 @@ export default class BaseScraper implements BaseScraperContract {
 
     for (const funcIndex in this.registeredHandlers) {
       try {
-        const res = await this.registeredHandlers[funcIndex](this.browser, this.page);
+        const res = await this.registeredHandlers[funcIndex](this.browser, this.page, this.args, result);
         if (res) {
-          result = {...res};
+          result = {...result, ...res};
         }
       } catch (err) {
-        await this.registerError(new Error('Handler failed, func index: ' + funcIndex), "Handler_failed_" + funcIndex);
-        await this.registerError(err, "Handler_failed_" + funcIndex);
+        this.registerError(new Error('Handler failed, func index: ' + funcIndex), "Handler_failed_" + funcIndex);
+        this.registerError(err, "Handler_failed_" + funcIndex);
         break;
       }
     }
@@ -453,15 +403,26 @@ export default class BaseScraper implements BaseScraperContract {
     for (const funcIndex in this.registeredTests) {
       try {
         if (!(await this.registeredTests[funcIndex](this.browser, this.page))) {
-          await this.registerError(new Error('Test failed, func index: ' + funcIndex), "Test_failed_" + funcIndex);
+          this.registerError(new Error('Test failed, func index: ' + funcIndex), "Test_failed_" + funcIndex);
           return false;
         }
       } catch (err) {
-        await this.registerError(err, "Test");
+        this.registerError(err, "Test");
         return false;
       }
     }
 
     return true;
+  }
+
+  protected async captureScreenshot(name?: string): Promise<void> {
+    if (this.enableTakeScreenshot) {
+
+      const fileName = name ? name + '.png' : Date.now() + '.png';
+
+      const fullFilePath = 'storage/data/screenshots/' + fileName;
+
+      await this.page.screenshot({path: fullFilePath});
+    }
   }
 }

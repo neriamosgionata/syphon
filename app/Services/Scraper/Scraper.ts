@@ -27,21 +27,21 @@ export interface ScraperContract extends BaseScraperContract {
 
   setPrintInConsole(writeOnConsole: boolean): ScraperContract;
 
+  setTakeScreenshot(takeScreenshot: boolean): ScraperContract;
+
   setDebugConsole(debugConsole: boolean): ScraperContract;
 
   setTests(testsFunctions: ScraperTestFunction[]): ScraperContract;
 
   setHandlers(handlersFunctions: ScraperHandlerFunction<any>[]): ScraperContract;
 
+  setArguments(args: { [p: string]: any }): ScraperContract;
+
+  setCloseOnExit(closeOnExit: boolean): ScraperContract;
+
   addHandler(handlerFunction: ScraperHandlerFunction<any>): ScraperContract;
 
-  setScraperStatusName(name: string): ScraperContract;
-
-  resetScraperStatus(): Promise<void>;
-
-  updateScraperStatus(status: object | any): Promise<void>;
-
-  registerError(error: Error | any, key: string): Promise<void>;
+  registerError(error: Error | any, key: string): void;
 
   writeTableLog(table: any[]): void;
 
@@ -51,11 +51,11 @@ export interface ScraperContract extends BaseScraperContract {
 
   goto(href: string, timeoutMs?: number): ScraperHandlerFunction<void>;
 
-  checkForCaptcha(page: Page): ScraperHandlerFunction<boolean>;
+  checkForCaptcha(): ScraperHandlerFunction<boolean>;
 
   waitRandom(enlarge?: boolean): ScraperHandlerFunction<void>;
 
-  removeCookiesHref(page: Page): ScraperHandlerFunction<void>;
+  removeCookiesHref(): ScraperHandlerFunction<void>;
 
   typeIn(selector: string, text: string, options?: { delay: number }): ScraperHandlerFunction<void>;
 
@@ -104,7 +104,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   //HELPERS
 
   goto(href: string, timeoutMs: number = 10000): ScraperHandlerFunction<void> {
-    return async (_browser: Browser, _page: Page) => {
+    return async (_browser: Browser, _page) => {
       if (_page) {
         await Promise.all([
           _page.waitForNavigation({timeout: timeoutMs}),
@@ -119,7 +119,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   }
 
   checkForCaptcha(): ScraperHandlerFunction<boolean> {
-    return async (_browser: Browser, _page: Page) => {
+    return async (_browser, _page) => {
       return _page.evaluate(() => {
         const selectors = [...document.querySelectorAll('iframe')] as HTMLIFrameElement[];
         return selectors.filter((selector) => selector?.src?.includes('captcha')).length > 0;
@@ -128,13 +128,13 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   }
 
   waitRandom(enlarge: boolean = false): ScraperHandlerFunction<void> {
-    return async (_browser: Browser, _page: Page) => {
+    return async () => {
       await new Promise((res) => setTimeout(res, 87 + Math.random() * (enlarge ? 10000 : 3000)));
     }
   }
 
-  removeCookiesHref(page: Page): ScraperHandlerFunction<void> {
-    return async (_browser: Browser, _page: Page) => {
+  removeCookiesHref(): ScraperHandlerFunction<void> {
+    return async (_browser, page) => {
       const client = await page.target().createCDPSession();
       const cookies = (await client.send('Network.getAllCookies')).cookies;
       await page.deleteCookie(...cookies);
@@ -142,7 +142,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   }
 
   typeIn(selector: string, text: string, options: { delay: number } = {delay: 0}): ScraperHandlerFunction<void> {
-    return async (_browser: Browser, _page: Page) => {
+    return async (_browser, _page) => {
       if (_page) {
         await _page.evaluate((selector) => {
           const element = (document.querySelector(selector) as HTMLInputElement);
@@ -161,7 +161,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   }
 
   keyEnter(selector: string, options: { delay: number } = {delay: 0}): ScraperHandlerFunction<void> {
-    return async (_browser: Browser, _page: Page) => {
+    return async (_browser, _page) => {
       if (_page) {
         await _page.evaluate((selector) => {
           const element = (document.querySelector(selector) as HTMLInputElement);
@@ -178,7 +178,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   }
 
   evaluate<T>(fn: (...args: any[]) => T, ...args: any[]): ScraperHandlerFunction<T> {
-    return async (_browser: Browser, _page: Page) => {
+    return async (_browser, _page) => {
       if (_page) {
         return await _page.evaluate(fn, ...args);
       }
@@ -187,7 +187,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   }
 
   click(selector: string): ScraperHandlerFunction<void> {
-    return async (_browser: Browser, _page: Page) => {
+    return async (_browser, _page) => {
       if (_page) {
         await _page.click(selector);
       }
@@ -196,7 +196,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   }
 
   focus(selector: string): ScraperHandlerFunction<void> {
-    return async (_browser: Browser, _page: Page) => {
+    return async (_browser, _page) => {
       if (_page) {
         await _page.focus(selector);
         return;
@@ -214,7 +214,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   }
 
   takeScreenshot(name?: string): ScraperHandlerFunction<void> {
-    return async (_browser: Browser, _page: Page) => {
+    return async (_browser, _page) => {
       if (_page) {
         const path = "screenshots";
 
@@ -229,9 +229,9 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   }
 
   removeGPDR(): ScraperHandlerFunction<void> {
-    return async (_browser: Browser, _page: Page) => {
+    return async (_browser, page) => {
 
-      for (const context of _page.frames()) {
+      for (const context of page.frames()) {
         await context.evaluate(() => {
           const acceptTexts = [
             'accetta', 'accetta tutto', 'accetto', 'accept', 'accept all', 'agree', 'i agree', 'consent', 'ich stimme zu', 'acepto', 'j\'accepte',
@@ -250,7 +250,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
             ...document.querySelectorAll('input[type="submit"]'),
           ] as HTMLButtonElement[];
 
-          for (let button of buttons) {
+          for (const button of buttons) {
             if (button.innerText.toLowerCase().match(new RegExp(acceptREString, 'i'))) {
               button.click();
               return;
@@ -262,7 +262,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
       await new Promise((resolve) => setTimeout(resolve, 32 + Math.random() * 250));
 
       try {
-        await _page.waitForNavigation({timeout: 10000});
+        await page.waitForNavigation({timeout: 10000});
       } catch (e) {
 
       }
@@ -270,7 +270,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   }
 
   autoScroll(maxScrolls: number = 50): ScraperHandlerFunction<void> {
-    return async (_browser: Browser, _page: Page) => {
+    return async (_browser, _page) => {
       await _page.evaluate(async (maxScrolls) => {
 
         await new Promise<void>((resolve) => {
@@ -298,11 +298,11 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   }
 
   repeat(fn: ScraperHandlerFunction<any>, times: number, timeoutBetweenRepetition: number = 1000): ScraperHandlerFunction<any> {
-    return async (_browser: Browser, _page: Page) => {
+    return async (_browser, _page) => {
       let totalResult: any = {};
 
       for (let i = 0; i < times; i++) {
-        let r = await fn(_browser, _page);
+        const r = await fn(_browser, _page, this.args, totalResult);
         await _page.waitForNetworkIdle();
         await new Promise((resolve) => setTimeout(resolve, timeoutBetweenRepetition));
         totalResult = {...r};
@@ -313,7 +313,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   }
 
   waitForNavigation(timeout: number = 10000): ScraperHandlerFunction<void> {
-    return async (_browser: Browser, _page: Page) => {
+    return async (_browser, _page) => {
       try {
         await _page.waitForNavigation({timeout});
       } catch (e) {
