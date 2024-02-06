@@ -33,6 +33,7 @@
     "./providers/FinanceProvider",
     "./providers/LoggerProvider",
     "./providers/MongoProvider",
+    "./providers/CurrencyProvider",
     "./providers/ProgressBarProvider",
     "./providers/FiltersProvider",
     "./providers/StringCleanerProvider",

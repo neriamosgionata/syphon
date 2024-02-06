@@ -13,4 +13,5 @@ export enum AppContainerAliasesEnum {
   Filters = "Providers/Filters",
   Console = "Providers/Console",
   ANN = "Providers/ANN",
+  Currency = "Providers/Currency",
 }
