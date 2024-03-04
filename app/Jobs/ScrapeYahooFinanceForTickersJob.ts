@@ -6,7 +6,7 @@ import {ImportChartDataJobParameters} from "App/Jobs/ImportChartDataJob";
 import {DateTime} from "luxon";
 import Logger from "@ioc:Providers/Logger";
 import ProgressBar from "@ioc:Providers/ProgressBar";
-import {BaseJobParameters} from "App/Services/Jobs/Jobs";
+import {BaseJobParameters} from "App/Services/Jobs/JobsTypes";
 import Profile from "App/Models/Profile";
 
 const importTickers = async (tickers: string[], numOfThreads: number) => {
@@ -29,7 +29,7 @@ const importTickers = async (tickers: string[], numOfThreads: number) => {
     tickers.splice(parseInt(tickerIndex), 1);
   }
 
-  ProgressBar.newBar(tickers.length, "Importing tickers data...", 0);
+  const index = await ProgressBar.newBar(tickers.length, "Importing tickers data...");
 
   while (tickers.length > 0) {
     const batch = tickers.splice(0, numOfThreads);
@@ -50,7 +50,7 @@ const importTickers = async (tickers: string[], numOfThreads: number) => {
 
     await Jobs.waitUntilAllDone(toWait);
 
-    ProgressBar.increment(0, batch.length);
+    await ProgressBar.increment(index, batch.length);
 
     Logger.info("Imported tickers data for: " + batch);
   }
@@ -61,7 +61,7 @@ const importTickers = async (tickers: string[], numOfThreads: number) => {
 const importCharts = async (tickers: string[], numOfThreads: number) => {
   Logger.info("Importing charts for total tickers: " + tickers.length);
 
-  ProgressBar.newBar(tickers.length, "Importing charts...", 1);
+  const index = await ProgressBar.newBar(tickers.length, "Importing charts...");
 
   const fromDate = DateTime.fromISO("2010-01-01").toJSDate().getTime();
 
@@ -86,7 +86,7 @@ const importCharts = async (tickers: string[], numOfThreads: number) => {
 
     await Jobs.waitUntilAllDone(toWait);
 
-    ProgressBar.increment(1, batch.length);
+    await ProgressBar.increment(index, batch.length);
 
     Logger.info("Imported tickers charts for: " + batch);
   }
@@ -104,7 +104,7 @@ const scrapeYahooFinance = async (numOfThreads: number) => {
   await importTickers([...tickers], numOfThreads);
   await importCharts([...tickers], numOfThreads);
 
-  ProgressBar.finishAll();
+  await ProgressBar.finishAll();
 }
 
 const handler = async () => {

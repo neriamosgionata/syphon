@@ -46,7 +46,6 @@
       "@adonisjs/bouncer",
       "@adonisjs/i18n",
       "@adonisjs/limiter",
-      "@adonisjs/route-model-binding/build/adonis-typings",
       "adonis5-scheduler"
     ]
   }

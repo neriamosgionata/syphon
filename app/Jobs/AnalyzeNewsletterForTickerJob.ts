@@ -7,7 +7,7 @@ import Helper from "@ioc:Providers/Helper";
 import Jobs from "@ioc:Providers/Jobs";
 import Console from "@ioc:Providers/Console";
 import {JobMessageEnum} from "App/Enums/JobMessageEnum";
-import {BaseJobParameters} from "App/Services/Jobs/Jobs";
+import {BaseJobParameters} from "App/Services/Jobs/JobsTypes";
 
 const handler = async () => {
   let data = loadJobParameters<AnalyzeNewsletterForTickerJobParameters>();
@@ -33,7 +33,7 @@ const handler = async () => {
 
   const articleData: Map<string, { title: string; content: string }> = new Map();
   let chunk: (() => Promise<JobMessageEnum>)[] = [];
-  let index = ProgressBar.newBar(articleUrls.length, "Scraping articles");
+  let index = await ProgressBar.newBar(articleUrls.length, "Scraping articles");
 
   do {
     let articles: string[] = articleUrls.splice(0, 2);
@@ -60,11 +60,11 @@ const handler = async () => {
 
     await Promise.all(chunk.map((job) => job()));
 
-    ProgressBar.increment(index, articles.length);
+    await ProgressBar.increment(index, articles.length);
 
   } while (articleUrls.length > 0);
 
-  ProgressBar.finishAll();
+  await ProgressBar.finishAll();
 
   try {
 

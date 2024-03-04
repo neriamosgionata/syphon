@@ -1,6 +1,6 @@
 import {configureJob, loadJobParameters} from "App/Services/Jobs/JobHelpers";
 import Scraper from "@ioc:Providers/Scraper";
-import {BaseJobParameters} from "App/Services/Jobs/Jobs";
+import {BaseJobParameters} from "App/Services/Jobs/JobsTypes";
 import NpmPackage from "App/Models/NpmPackage";
 import ProgressBar from "@ioc:Providers/ProgressBar";
 
@@ -41,8 +41,6 @@ const evalFunction = () => {
 
 const scrapeNpmPackage = async (packageName: string) => {
   return await Scraper
-    .setWithAdblockerPlugin(true)
-    .setWithStealthPlugin(true)
     .setHandlers([
       Scraper.goto(`https://www.npmjs.com/package/${packageName}`),
       Scraper.waitRandom(),
@@ -53,17 +51,18 @@ const scrapeNpmPackage = async (packageName: string) => {
 }
 
 const handler = async () => {
-  const {packageName} = loadJobParameters<ScrapeSingleNpmPackageJobParameters>();
+  const {packageName, progressBarIndex} = loadJobParameters<ScrapeSingleNpmPackageJobParameters>();
 
   const packageVersion = await scrapeNpmPackage(packageName);
 
   await upsertNpmPackageVersion(packageName, packageVersion.results.packageVersion);
 
-  ProgressBar.increment();
+  await ProgressBar.increment(progressBarIndex);
 };
 
 export interface ScrapeSingleNpmPackageJobParameters extends BaseJobParameters {
   packageName: string;
+  progressBarIndex: string;
 }
 
 export default configureJob(handler);

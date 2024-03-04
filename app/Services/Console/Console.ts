@@ -25,7 +25,7 @@ export default class Console implements ConsoleContract {
       return;
     }
 
-    consoleLog(LogLevelEnum.ERROR, ...args);
+    consoleLog(LogLevelEnum.ERROR, args);
   }
 
   info(...args: any[]): void {
@@ -34,7 +34,7 @@ export default class Console implements ConsoleContract {
       return;
     }
 
-    consoleLog(LogLevelEnum.INFO, ...args);
+    consoleLog(LogLevelEnum.INFO, args);
   }
 
   log(...args: any[]): void {
@@ -43,7 +43,7 @@ export default class Console implements ConsoleContract {
       return;
     }
 
-    consoleLog(LogLevelEnum.LOG, ...args);
+    consoleLog(LogLevelEnum.LOG, args);
   }
 
   table(...args: any[]): void {
@@ -52,7 +52,7 @@ export default class Console implements ConsoleContract {
       return;
     }
 
-    consoleLog(LogLevelEnum.TABLE, ...args);
+    consoleLog(LogLevelEnum.TABLE, args);
   }
 
   warn(...args: any[]): void {
@@ -61,7 +61,7 @@ export default class Console implements ConsoleContract {
       return;
     }
 
-    consoleLog(LogLevelEnum.WARN, ...args);
+    consoleLog(LogLevelEnum.WARN, args);
   }
 
   debug(...args: any[]): void {
@@ -70,7 +70,7 @@ export default class Console implements ConsoleContract {
       return;
     }
 
-    consoleLog(LogLevelEnum.DEBUG, ...args);
+    consoleLog(LogLevelEnum.DEBUG, args);
   }
 
   fatal(...args: any[]): void {
@@ -79,6 +79,6 @@ export default class Console implements ConsoleContract {
       return;
     }
 
-    consoleLog(LogLevelEnum.ERROR, ...args);
+    consoleLog(LogLevelEnum.ERROR, args);
   }
 }

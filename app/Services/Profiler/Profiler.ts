@@ -2,8 +2,7 @@ import Env from "@ioc:Adonis/Core/Env";
 import axios, {AxiosInstance} from "axios";
 import Helper from "@ioc:Providers/Helper";
 import Logger from "@ioc:Providers/Logger";
-import validator from "validator";
-import trim = validator.trim;
+import {trim} from "lodash";
 
 export interface ProfilerContract {
   askAnything(prompt: string): Promise<ProfilerChatResponse | null>;

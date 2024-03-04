@@ -9,25 +9,28 @@ import {logMessage} from "App/Services/Jobs/JobHelpers";
 import {isMainThread} from "node:worker_threads";
 import Console from "@ioc:Providers/Console";
 import {table as T} from "table";
+import {logger} from "Config/app";
+
+export type LogChannels = keyof typeof logger.log_channels;
 
 export interface LoggerContract {
   removeOneTimeLog(): void;
 
   changeAppDefaultLogger(
-    logChannelName: string,
-    logPrefix: string,
-    writeToConsole: boolean,
+    logChannelName: LogChannels,
+    logPrefix?: string,
+    writeToConsole?: boolean,
   ): void;
 
   logger(
-    logChannelName: string,
-    logPrefix: string,
-    writeToConsole: boolean,
+    logChannelName: LogChannels,
+    logPrefix?: string,
+    writeToConsole?: boolean,
   ): LoggerContract;
 
   setPrintToConsole(status: boolean): LoggerContract;
 
-  getCurrentChannelName(): string;
+  getCurrentChannelName(): LogChannels;
 
   debug(message: string, ...parameters: unknown[]): true | Error;
 
@@ -63,7 +66,7 @@ export default class Logger implements LoggerContract {
   };
 
   constructor(
-    private logChannelName: string = "default",
+    private logChannelName: LogChannels = "default",
     private logPrefix: string = "adonis",
     private writeToConsole: boolean = false,
   ) {
@@ -72,8 +75,8 @@ export default class Logger implements LoggerContract {
     this.logPrefix = logPrefix;
 
     if (logChannelName) {
-      this.logChannelName = logChannelName;
-      this.config = Config.get("app.logger.log_channels." + logChannelName);
+      this.logChannelName = logChannelName.toString().toLowerCase();
+      this.config = Config.get("app.logger.log_channels." + logChannelName.toString().toLowerCase());
       if (!this.config) {
         this.warn("Log channel used doesn't exist, reverting back to default");
       }
@@ -86,9 +89,9 @@ export default class Logger implements LoggerContract {
   }
 
   changeAppDefaultLogger(
-    logChannelName: string = "default",
+    logChannelName: LogChannels = "default",
     logPrefix: string = "",
-    writeToConsole: boolean,
+    writeToConsole: boolean = false,
   ) {
     Application.container.singleton(AppContainerAliasesEnum.Logger, () => this.logger(logChannelName, logPrefix, writeToConsole));
 
@@ -106,6 +109,18 @@ export default class Logger implements LoggerContract {
       this.logChannelName = "default";
       this.config = Config.get("app.logger.log_channels.default");
     }
+
+    if (this.config.type === LogChannelEnum.ONETIME) {
+      this.removeOneTimeLog();
+    }
+  }
+
+  logger(
+    logChannelName: LogChannels = "default",
+    logPrefix: string = "",
+    writeToConsole: boolean = false,
+  ): LoggerContract {
+    return new Logger(logChannelName, logPrefix, writeToConsole);
   }
 
   removeOneTimeLog(): void {
@@ -124,15 +139,7 @@ export default class Logger implements LoggerContract {
     }
   }
 
-  logger(
-    logChannelName: string = "default",
-    logPrefix: string = "",
-    writeToConsole: boolean = false,
-  ): LoggerContract {
-    return new Logger(logChannelName, logPrefix, writeToConsole);
-  }
-
-  getCurrentChannelName(): string {
+  getCurrentChannelName(): LogChannels {
     return this.logChannelName;
   }
 

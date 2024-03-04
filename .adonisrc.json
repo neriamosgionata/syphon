@@ -39,6 +39,7 @@
     "./providers/StringCleanerProvider",
     "./providers/HelperProvider",
     "./providers/ConsoleProvider",
+    "./providers/SocketProvider",
     "@adonisjs/core",
     "@adonisjs/lucid",
     "@adonisjs/auth",
@@ -50,7 +51,6 @@
     "@adonisjs/bouncer",
     "@adonisjs/i18n",
     "@adonisjs/limiter",
-    "@adonisjs/route-model-binding/build/providers/RmbProvider",
     "adonis5-scheduler"
   ],
   "aceProviders": [

@@ -2,17 +2,27 @@ import {JobMessageEnum} from "App/Enums/JobMessageEnum";
 import fs from "fs";
 import Job from "App/Models/Job";
 import Application from "@ioc:Adonis/Core/Application";
-import Logger from "@ioc:Providers/Logger";
 import {Worker} from "worker_threads";
 import path from "path";
-import ProgressBar from "@ioc:Providers/ProgressBar";
 import {DateTime} from "luxon";
-import Console from "@ioc:Providers/Console";
-import {LogLevelEnum} from "App/Enums/LogLevelEnum";
+import Env from "@ioc:Adonis/Core/Env";
+import {sendToWorker, socketEmit} from "App/Services/Jobs/JobHelpers";
+import Helper from "@ioc:Providers/Helper";
+import {AppContainerAliasesEnum} from "App/Enums/AppContainerAliasesEnum";
+import {EmitEventType, EmitEventTypeData} from "App/Services/Socket/SocketTypes";
+import {
+  BaseJobParameters,
+  Callback,
+  ErrorCallback,
+  JobMessage,
+  JobName,
+  JobRunInfo,
+  JobWorkerData
+} from "App/Services/Jobs/JobsTypes";
 
 export interface JobContract {
   dispatch<T extends BaseJobParameters>(
-    jobName: string,
+    jobName: JobName,
     parameters: T,
     tags?: string[],
     payloadCallback?: (message: JobMessage) => void,
@@ -20,7 +30,7 @@ export interface JobContract {
   ): Promise<{ id: string, tags: string[] }>;
 
   runWithoutDispatch<T extends BaseJobParameters>(
-    jobName: string,
+    jobName: JobName,
     parameters: T,
     tags?: string[],
     payloadCallback?: (message: JobMessage) => void,
@@ -33,46 +43,75 @@ export interface JobContract {
   retryFailed(job: Job): Promise<{ id: string, tags: string[] }>;
 
   waitUntilAllDone(toWait: { id: string; tags: string[] }[]): Promise<JobMessageEnum[]>;
+
+  jobIsRegistered(jobName: JobName): Promise<boolean>;
+
+  getAllJobs(): Promise<Job[]>;
+
+  getAllRunningJobs(): Promise<Job[]>;
+
+  getAllDispatchedJobs(): Promise<Job[]>;
+
+  getAllCompletedJobs(): Promise<Job[]>;
+
+  getAllFailedJobs(): Promise<Job[]>;
+
+  getSingleJob(id: string): Promise<Job>;
+
+  stopJob(id: string): Promise<Job>;
+
+  socketEmitter(event: string, data: any): void;
 }
-
-export type BaseJobParameters = {
-  [p: string | number]: any
-};
-
-export type Callback = (message: JobMessage) => Promise<void> | void;
-export type ErrorCallback = (error: Error, id: string, tags: string[]) => Promise<void> | void;
-
-export interface JobMessage {
-  status: JobMessageEnum;
-  id: string;
-  tags: string[];
-  payload?: any;
-  error?: Error;
-  logLine?: string;
-  logLevel?: LogLevelEnum;
-  logParameters?: any[];
-  logTable?: any[];
-  logTableColumnNames?: string[];
-  logLevelWriteTo?: LogLevelEnum;
-}
-
-export interface JobRunInfo {
-  jobName: string;
-  id: string;
-  tags: string[];
-  error?: Error;
-}
-
-export type JobWorkerData<T extends BaseJobParameters> = {
-  [p in keyof T]: any;
-} & {
-  jobName: string;
-  id: string;
-  tags: string[];
-  jobPath: string;
-};
 
 export default class Jobs implements JobContract {
+
+  runningJobs: Map<string, Worker> = new Map();
+
+  getAllJobs() {
+    return Job
+      .query()
+      .orderBy("created_at", "desc")
+      .exec()
+  }
+
+  getAllRunningJobs() {
+    return Job
+      .query()
+      .where("status", JobMessageEnum.RUNNING)
+      .orderBy("created_at", "desc")
+      .exec();
+  }
+
+  getAllDispatchedJobs() {
+    return Job
+      .query()
+      .where("status", JobMessageEnum.DISPATCHED)
+      .orderBy("created_at", "desc")
+      .exec();
+  }
+
+  getAllCompletedJobs() {
+    return Job
+      .query()
+      .where("status", JobMessageEnum.COMPLETED)
+      .orderBy("created_at", "desc")
+      .exec();
+  }
+
+  getAllFailedJobs() {
+    return Job
+      .query()
+      .where("status", JobMessageEnum.FAILED)
+      .orderBy("created_at", "desc")
+      .exec();
+  }
+
+  getSingleJob(id: string) {
+    return Job
+      .query()
+      .where("id", id)
+      .firstOrFail();
+  }
 
   private async catchJobMessage(message: JobMessage) {
     let isStarted = false;
@@ -80,12 +119,10 @@ export default class Jobs implements JobContract {
 
     if (message.status === JobMessageEnum.FAILED) {
       isFinished = true;
-      Logger.error("Job failed", message.id, message.tags, message.error?.name, message.error?.message);
     }
 
     if (message.status === JobMessageEnum.COMPLETED) {
       isFinished = true;
-      Logger.info("Job completed", message.id, message.tags);
     }
 
     if (message.status === JobMessageEnum.RUNNING) {
@@ -106,51 +143,112 @@ export default class Jobs implements JobContract {
       .exec();
   }
 
-  private async defaultCallback(message: JobMessage, payloadCallback?: Callback) {
+  private defaultCallback(worker: Worker, message: JobMessage, payloadCallback?: Callback, isDispatched?: boolean) {
     if (payloadCallback && message.status === JobMessageEnum.MESSAGE) {
-      await payloadCallback(message);
+      payloadCallback(message);
       return;
     }
 
     if (message.status === JobMessageEnum.LOGGING) {
       if (message.logLevel === "table") {
-        Logger.table(message.logTable as any[], message.logTableColumnNames, message.logLevelWriteTo);
+        Application.container.use(AppContainerAliasesEnum.Logger)
+          .table(message.logTable as any[], message.logTableColumnNames, message.logLevelWriteTo);
         return;
       }
 
-      Logger[message.logLevel ?? "info"](
-        message.logLine as string,
+      Application.container.use(AppContainerAliasesEnum.Logger)[message.logLevel ?? "info"](
+        message.logMessage as string,
         ...(message.logParameters ?? [])
       );
       return;
     }
 
     if (message.status === JobMessageEnum.PROGRESS_BAR_ON) {
-      ProgressBar.newBar(message.payload.total, message.payload.title, message.payload.progressBarIndex);
+      Application.container.use(AppContainerAliasesEnum.ProgressBar)
+        .newBar(
+          message.payload.total,
+          message.payload.title,
+          message.payload.progressBarIndex,
+        )
+        .then((progressBarIndex) => {
+          sendToWorker(
+            worker,
+            {
+              status: JobMessageEnum.PROGRESS_BAR_ON_INDEX,
+              id: message.id,
+              tags: message.tags,
+              uuid: message.uuid,
+              payload: {
+                progressBarIndex
+              }
+            });
+        });
       return;
     }
 
     if (message.status === JobMessageEnum.PROGRESS_BAR_UPDATE) {
-      ProgressBar.increment(message.payload.progressBarIndex, message.payload.current);
+      Application.container.use(AppContainerAliasesEnum.ProgressBar)
+        .increment(message.payload.progressBarIndex, message.payload.current)
+        .then(() => {
+        })
+        .catch(() => {
+        });
       return;
     }
 
     if (message.status === JobMessageEnum.PROGRESS_BAR_OFF) {
-      ProgressBar.finish(message.payload.progressBarIndex);
+      Application.container.use(AppContainerAliasesEnum.ProgressBar)
+        .finish(message.payload.progressBarIndex)
+        .then(() => {
+        })
+        .catch(() => {
+        });
       return;
     }
 
     if (message.status === JobMessageEnum.PROGRESS_BAR_OFF_ALL) {
-      ProgressBar.finishAll();
+      Application.container.use(AppContainerAliasesEnum.ProgressBar)
+        .finishAll()
+        .then(() => {
+        })
+        .catch(() => {
+        });
+      return;
+    }
+
+    if (message.status === JobMessageEnum.PROGRESS_BAR_CHANGE_TITLE) {
+      Application.container.use(AppContainerAliasesEnum.ProgressBar)
+        .changeTitle(message.payload.progressBarIndex, message.payload.title)
+        .then(() => {
+        })
+        .catch(() => {
+        });
+      return;
+    }
+
+    if (message.status === JobMessageEnum.PROGRESS_BAR_SET_PROGRESS) {
+      Application.container.use(AppContainerAliasesEnum.ProgressBar)
+        .setProgress(message.payload.progressBarIndex, message.payload.current)
+        .then(() => {
+        })
+        .catch(() => {
+        });
+      return;
+    }
+
+    if (message.status === JobMessageEnum.SOCKET_EMIT) {
+      Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(message.payload.event, message.payload.data);
       return;
     }
 
     if (message.status === JobMessageEnum.CONSOLE_LOG) {
-      Console[message.payload.logLevel](...message.payload.args);
+      Application.container.use(AppContainerAliasesEnum.Console)[message.payload.logLevel].call(this, message.payload.args);
       return;
     }
 
-    return this.catchJobMessage(message);
+    if (isDispatched) {
+      return this.catchJobMessage(message);
+    }
   }
 
   private async defaultErrorCallback(error: Error, id: string, tags: string[] = [], errorCallBack?: ErrorCallback) {
@@ -160,33 +258,31 @@ export default class Jobs implements JobContract {
     return this.catchJobMessage({status: JobMessageEnum.FAILED, id, tags, error});
   }
 
-  private getJobPath(jobName: string) {
+  private getJobPath(jobName: JobName) {
     return path.resolve(Application.appRoot, "app", "Jobs", jobName);
   }
 
-  private async jobIsRegistered(jobName: string): Promise<boolean> {
+  async jobIsRegistered(jobName: JobName): Promise<boolean> {
     try {
       const jobPath = this.getJobPath(jobName);
       return fs.existsSync(jobPath + ".js") || fs.existsSync(jobPath + ".ts");
     } catch (e) {
-      Logger.error(e.message, e.stack);
+      Application.container.use(AppContainerAliasesEnum.Logger).error(e.message, e.stack);
       return false;
     }
   }
 
   async dispatch<T extends BaseJobParameters>(
-    jobName: string,
+    jobName: JobName,
     parameters: T,
     tags: string[] = [],
     payloadCallback?: Callback,
     errorCallback?: ErrorCallback,
   ): Promise<JobRunInfo> {
-
     if (!await this.jobIsRegistered(jobName)) {
       throw new Error("Job not registered");
     }
 
-    Logger.info("Dispatching job on queue", jobName, tags);
 
     const id: string = require("uuid").v4();
 
@@ -198,20 +294,23 @@ export default class Jobs implements JobContract {
       parameters: JSON.stringify(parameters)
     });
 
-    let jobCountRunning = await Job
-      .query()
-      .where("status", JobMessageEnum.RUNNING)
-      .count("id")
-      .exec();
+    let jobCountRunning = await this.getAllRunningJobs();
 
-    while (jobCountRunning.length > 8) {
-      await new Promise(r => setTimeout(r, 2000));
-      jobCountRunning = await Job
-        .query()
-        .where("status", JobMessageEnum.RUNNING)
-        .count("id")
-        .exec();
+    const maxParallelJobs = Env.get("MAX_PARALLEL_JOBS") as number;
+
+    while (jobCountRunning.length > maxParallelJobs) {
+      await Helper.wait(2000);
+      jobCountRunning = await this.getAllRunningJobs();
     }
+
+    await Job
+      .query()
+      .where("id", id)
+      .update({
+        status: JobMessageEnum.RUNNING,
+        startedAt: DateTime.now().toISO(),
+      })
+      .exec();
 
     const worker = new Worker(
       path.join(Application.appRoot, "jobRunner.js"),
@@ -226,27 +325,28 @@ export default class Jobs implements JobContract {
       }
     );
 
+    this.runningJobs.set(id, worker);
+
     const onlineListener = () => {
-      Logger.info("Job started", jobName, id, tags);
+
     };
 
-    const messageListener = (message: JobMessage) => {
-      this.defaultCallback(message, payloadCallback);
+    const messageListener = (worker: Worker, message: JobMessage) => {
+      return this.defaultCallback(worker, message, payloadCallback, true);
     };
 
     const errorListener = (err: Error) => {
       this.defaultErrorCallback(err, id, tags, errorCallback);
     };
 
-    const exitListener = () => {
-      worker.removeAllListeners();
-      Logger.info("Job finished", jobName, id, tags);
-    };
-
     worker.on("online", onlineListener);
-    worker.on("message", messageListener);
+    worker.on("message", (m: JobMessage) => messageListener(worker, m));
     worker.on("error", errorListener);
-    worker.on("exit", exitListener);
+    worker.on("exit", () => {
+      worker.removeAllListeners();
+
+      this.runningJobs.delete(id);
+    });
 
     return {
       id,
@@ -256,7 +356,7 @@ export default class Jobs implements JobContract {
   }
 
   async runWithoutDispatch<T extends BaseJobParameters>(
-    jobName: string,
+    jobName: JobName,
     parameters: T,
     tags: string[] = [],
     payloadCallback?: Callback,
@@ -268,15 +368,13 @@ export default class Jobs implements JobContract {
       throw new Error("Job not registered");
     }
 
-    Logger.info("Running job", jobName, id, tags);
-
     let resolver: (value?: Error) => void;
 
     const promise = new Promise<undefined | Error>((res) => {
       resolver = res;
     });
 
-    let actualId = id || require("uuid").v4();
+    const actualId: any = id || require("uuid").v4();
 
     const worker = new Worker(
       path.join(Application.appRoot, "jobRunner.js"),
@@ -291,19 +389,18 @@ export default class Jobs implements JobContract {
       }
     );
 
+    this.runningJobs.set(actualId, worker);
+
     const onlineListener = () => {
-      Logger.info("Job started", jobName, id, tags);
     };
 
-    const messageListener = (message: JobMessage) => {
+    const messageListener = (worker: Worker, message: JobMessage) => {
       if (message.status === JobMessageEnum.COMPLETED || message.status === JobMessageEnum.FAILED) {
         resolver();
         return;
       }
 
-      if (message.status === JobMessageEnum.MESSAGE && payloadCallback) {
-        payloadCallback(message);
-      }
+      return this.defaultCallback(worker, message, payloadCallback, false);
     };
 
     const errorListener = (err: Error) => {
@@ -314,15 +411,14 @@ export default class Jobs implements JobContract {
       }
     };
 
-    const exitListener = () => {
-      worker.removeAllListeners();
-      Logger.info("Job finished", jobName, actualId, tags);
-    };
-
     worker.on("online", onlineListener);
-    worker.on("message", messageListener);
+    worker.on("message", (m: JobMessage) => messageListener(worker, m));
     worker.on("error", errorListener);
-    worker.on("exit", exitListener);
+    worker.on("exit", () => {
+      worker.removeAllListeners();
+
+      this.runningJobs.delete(actualId);
+    });
 
     const err = await promise;
 
@@ -335,10 +431,34 @@ export default class Jobs implements JobContract {
   }
 
   async waitUntilDone(obj: JobRunInfo): Promise<JobMessageEnum> {
-    Logger.info("Waiting for job to finish", obj.jobName, obj.id, obj.tags);
+    return await this.waitForJobOnDB(obj);
+  }
 
+  async waitUntilAllDone(objArray: JobRunInfo[]): Promise<JobMessageEnum[]> {
+    const statuses: JobMessageEnum[] = [];
+
+    for (const objIndex in objArray) {
+      const obj = objArray[objIndex];
+
+      statuses[objIndex] = await this.waitForJobOnDB(obj);
+    }
+
+    return statuses;
+  }
+
+  async retryFailed(job: Job): Promise<JobRunInfo> {
+    if (job.status !== JobMessageEnum.FAILED) {
+      throw new Error("Job is not failed");
+    }
+    const parameters = JSON.parse(job.parameters || "{}");
+    const tags = job.tags?.split(",") || [];
+    return this.dispatch(job.name, parameters, tags);
+  }
+
+  private async waitForJobOnDB(obj: { id: string, tags: string[] }): Promise<JobMessageEnum> {
     let foundStatus = 0;
 
+    // eslint-disable-next-line no-constant-condition
     while (true) {
       await new Promise(r => setTimeout(r, 2000));
 
@@ -355,50 +475,31 @@ export default class Jobs implements JobContract {
       }
     }
 
-    Logger.info("Job finished", obj.jobName, obj.id, obj.tags);
-
     return foundStatus;
   }
 
-  async waitUntilAllDone(objArray: JobRunInfo[]): Promise<JobMessageEnum[]> {
-    let statuses: JobMessageEnum[] = [];
+  async stopJob(id: string) {
+    const worker = this.runningJobs.get(id);
 
-    for (const objIndex in objArray) {
-      const obj = objArray[objIndex];
-      Logger.info("Waiting for job to finish", obj.jobName, obj.id, obj.tags);
-
-      let foundStatus = 0;
-
-      while (true) {
-        await new Promise(r => setTimeout(r, 2000));
-
-        const found = await Job
-          .query()
-          .where("id", obj.id)
-          .where("tags", obj.tags.join(","))
-          .firstOrFail();
-
-        foundStatus = found.status;
-
-        if (!([JobMessageEnum.RUNNING, JobMessageEnum.DISPATCHED].includes(foundStatus as JobMessageEnum))) {
-          break;
-        }
-      }
-
-      statuses[objIndex] = foundStatus;
-
-      Logger.info("Job finished", obj.jobName, obj.id, obj.tags);
+    if (worker) {
+      await worker.terminate();
+      this.runningJobs.delete(id);
     }
 
-    return statuses;
+    await Job
+      .query()
+      .where("id", id)
+      .update({
+        status: JobMessageEnum.STOPPED,
+        error: "Job was stopped",
+        finishedAt: DateTime.now().toISO()
+      })
+      .exec();
+
+    return this.getSingleJob(id);
   }
 
-  async retryFailed(job: Job): Promise<JobRunInfo> {
-    if (job.status !== JobMessageEnum.FAILED) {
-      throw new Error("Job is not failed");
-    }
-    const parameters = JSON.parse(job.parameters || "{}");
-    const tags = job.tags?.split(",") || [];
-    return this.dispatch(job.name, parameters, tags);
+  socketEmitter<K extends EmitEventType>(event: K, data: EmitEventTypeData[K]) {
+    socketEmit(event, data);
   }
 }

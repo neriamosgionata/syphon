@@ -1,10 +1,10 @@
 import {configureJob} from "App/Services/Jobs/JobHelpers";
-import Logger from "@ioc:Providers/Logger";
+import Log from "@ioc:Providers/Logger";
 import NpmPackage from "App/Models/NpmPackage";
 import ProgressBar from "@ioc:Providers/ProgressBar";
 import {DateTime} from "luxon";
 import Helper from "@ioc:Providers/Helper";
-import {BaseJobParameters} from "App/Services/Jobs/Jobs";
+import {BaseJobParameters} from "App/Services/Jobs/JobsTypes";
 import Jobs from "@ioc:Providers/Jobs";
 import Console from "@ioc:Providers/Console";
 
@@ -23,13 +23,14 @@ const verifyPackageToSearch = async (packageNames: string[]) => {
   return packageNames.filter((packageName) => results.findIndex((result) => result.name === packageName) === -1);
 }
 
-const scrapeNpmPackages = async (packageNames: string[]) => {
+const scrapeNpmPackages = async (packageNames: string[], progressBarIndex: string) => {
   const promises = packageNames
     .map((packageName) =>
       Jobs.dispatch(
         "ScrapeSingleNpmPackageJob",
         {
           packageName,
+          progressBarIndex,
         },
         [],
       )
@@ -39,25 +40,25 @@ const scrapeNpmPackages = async (packageNames: string[]) => {
 }
 
 const scrapeNpmRegistryJob = async () => {
-  Logger.info("Loading installed packages..");
+  Log.info("Loading installed packages..");
   let packageNames = Helper.loadInstalledPackageNames();
 
-  Logger.info("Loaded packages: " + packageNames.length);
+  Log.info("Loaded packages: " + packageNames.length);
   packageNames = await verifyPackageToSearch(packageNames);
 
-  Logger.info("Packages to search: " + packageNames.length);
-  ProgressBar.newBar(packageNames.length, "Scraping packages");
+  Log.info("Packages to search: " + packageNames.length);
+  const progressBarIndex = await ProgressBar.newBar(packageNames.length, "Scraping packages");
 
-  Logger.table(packageNames);
+  Log.table(packageNames);
 
   Console.log("Scraping packages...");
 
   while (packageNames.length > 0) {
     const packageNamesToSearch = packageNames.splice(0, 2);
-    await scrapeNpmPackages(packageNamesToSearch);
+    await scrapeNpmPackages(packageNamesToSearch, progressBarIndex);
   }
 
-  ProgressBar.finish();
+  await ProgressBar.finish(progressBarIndex);
 }
 
 const handler = async () => {

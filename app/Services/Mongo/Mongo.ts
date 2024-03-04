@@ -14,12 +14,16 @@ export default class Mongo implements MongoContract {
   constructor(public url: string, public dbName: string) {
     this.client = new MongoClient(this.url, {});
 
-    this.client.connect().then(() => {
-      this.db = this.client.db(this.dbName);
-    });
+    this.client.connect().then(() => {}).catch(() => {});
+
+    this.db = this.client.db(this.dbName);
   }
 
   isReady() {
-    return this.db !== undefined;
+    return this.db !== undefined && !!this.db.databaseName;
+  }
+
+  async close() {
+    await this.client.close();
   }
 }

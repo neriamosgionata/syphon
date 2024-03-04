@@ -1,6 +1,6 @@
 import {loadJobParameters, messageToParent, configureJob} from "App/Services/Jobs/JobHelpers";
 import Newsletter from "@ioc:Providers/Newsletter";
-import {BaseJobParameters} from "App/Services/Jobs/Jobs";
+import {BaseJobParameters} from "App/Services/Jobs/JobsTypes";
 
 const scraperNewsArticle = async (articleUrl: string) => {
   return await Newsletter.getArticle(articleUrl);

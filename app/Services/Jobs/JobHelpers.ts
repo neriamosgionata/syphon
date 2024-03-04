@@ -1,7 +1,9 @@
 import {JobMessageEnum} from "App/Enums/JobMessageEnum";
-import {BaseJobParameters, JobMessage, JobWorkerData} from "App/Services/Jobs/Jobs";
-import type {MessagePort} from "worker_threads";
+import {BaseJobParameters, JobMessage, JobWorkerData} from "App/Services/Jobs/JobsTypes";
+import type {MessagePort, Worker} from "worker_threads";
 import {LogLevelEnum} from "App/Enums/LogLevelEnum";
+import {isEqual} from "lodash";
+import {EmitEventType, EmitEventTypeData} from "App/Services/Socket/SocketTypes";
 
 export const retriveWorkerThreadsData = <T extends BaseJobParameters>(): {
   parentPort: MessagePort,
@@ -37,7 +39,7 @@ export const loadJobParameters = <T extends BaseJobParameters>(): T => {
 };
 
 export const logMessage = <T extends BaseJobParameters>(
-  logLine: string,
+  logMessage: string,
   logParameters: any[],
   logLevel: LogLevelEnum = LogLevelEnum.INFO,
   logTable?: any[],
@@ -49,7 +51,7 @@ export const logMessage = <T extends BaseJobParameters>(
     status: JobMessageEnum.LOGGING,
     id: workerData.id,
     tags: workerData.tags,
-    logLine,
+    logMessage,
     logParameters,
     logLevel,
     logTable,
@@ -81,21 +83,42 @@ export const configureJob = (mainHandler: () => void | Promise<void>): RunJobFun
   };
 };
 
-export const progressBarOn = <T extends BaseJobParameters>(progressBarIndex: number, total: number, title?: string) => {
+export const progressBarOn = <T extends BaseJobParameters>(progressBarIndex?: string, total?: number, title?: string): Promise<string> => {
   const {parentPort, workerData} = retriveWorkerThreadsData<T>();
-  parentPort?.postMessage({
-    status: JobMessageEnum.PROGRESS_BAR_ON,
-    id: workerData.id,
-    tags: workerData.tags,
-    payload: {
-      title,
-      total,
-      progressBarIndex
-    }
-  } as JobMessage);
+
+  const uuid = require("uuid").v4();
+
+  return new Promise((resolve) => {
+
+    const listener = (message: JobMessage) => {
+      if (
+        message.status === JobMessageEnum.PROGRESS_BAR_ON_INDEX &&
+        message.id === workerData.id &&
+        message.uuid === uuid &&
+        isEqual(message.tags, workerData.tags)
+      ) {
+        resolve(message.payload.progressBarIndex as string);
+        parentPort?.off("message", listener);
+      }
+    };
+
+    parentPort?.on("message", listener);
+
+    parentPort?.postMessage({
+      status: JobMessageEnum.PROGRESS_BAR_ON,
+      id: workerData.id,
+      tags: workerData.tags,
+      uuid,
+      payload: {
+        title,
+        total,
+        progressBarIndex
+      }
+    } as JobMessage);
+  });
 }
 
-export const progressBarUpdate = <T extends BaseJobParameters>(progressBarIndex: number, current: number) => {
+export const progressBarUpdate = <T extends BaseJobParameters>(progressBarIndex: string, current: number) => {
   const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({
     status: JobMessageEnum.PROGRESS_BAR_UPDATE,
@@ -108,7 +131,7 @@ export const progressBarUpdate = <T extends BaseJobParameters>(progressBarIndex:
   } as JobMessage);
 }
 
-export const progressBarOff = <T extends BaseJobParameters>(progressBarIndex: number) => {
+export const progressBarOff = <T extends BaseJobParameters>(progressBarIndex: string) => {
   const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({
     status: JobMessageEnum.PROGRESS_BAR_OFF,
@@ -130,21 +153,57 @@ export const progressBarOffAll = <T extends BaseJobParameters>() => {
   } as JobMessage);
 }
 
+export const progressBarChangeTitle = <T extends BaseJobParameters>(progressBarIndex: string, title: string): void => {
+  const {parentPort, workerData} = retriveWorkerThreadsData<T>();
+
+  parentPort?.postMessage({
+    status: JobMessageEnum.PROGRESS_BAR_CHANGE_TITLE,
+    id: workerData.id,
+    tags: workerData.tags,
+    payload: {
+      title,
+      progressBarIndex
+    }
+  } as JobMessage);
+}
+
+export const progressBarSetProgress = <T extends BaseJobParameters>(progressBarIndex: string, current: number) => {
+  const {parentPort, workerData} = retriveWorkerThreadsData<T>();
+  parentPort?.postMessage({
+    status: JobMessageEnum.PROGRESS_BAR_SET_PROGRESS,
+    id: workerData.id,
+    tags: workerData.tags,
+    payload: {
+      current,
+      progressBarIndex
+    }
+  } as JobMessage);
+
+}
+
+export const socketEmit = <T extends BaseJobParameters, K extends EmitEventType>(event: K, data: EmitEventTypeData[K]) => {
+  const {parentPort, workerData} = retriveWorkerThreadsData<T>();
+  parentPort?.postMessage({
+    status: JobMessageEnum.SOCKET_EMIT,
+    id: workerData.id,
+    tags: workerData.tags,
+    payload: {
+      event,
+      data
+    }
+  } as JobMessage);
+}
+
 export const registerCallbackToParentMessage = <T extends BaseJobParameters>(callback: (parentMessage: JobMessage) => void) => {
   const {parentPort} = retriveWorkerThreadsData<T>();
   parentPort?.on("message", callback);
 }
 
-export const sendToWorker = (worker: any, status: JobMessageEnum, payload: any) => {
-  worker.postMessage(
-    {
-      status,
-      payload
-    } as JobMessage
-  );
+export const sendToWorker = (worker: Worker, message: JobMessage) => {
+  worker.postMessage(message);
 }
 
-export const consoleLog = <T extends BaseJobParameters>(logLevel: LogLevelEnum = LogLevelEnum.INFO, ...args: any[]) => {
+export const consoleLog = <T extends BaseJobParameters>(logLevel: LogLevelEnum = LogLevelEnum.INFO, args: any[]) => {
   const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({
     status: JobMessageEnum.CONSOLE_LOG,

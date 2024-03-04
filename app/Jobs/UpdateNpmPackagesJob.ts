@@ -2,7 +2,7 @@ import {configureJob, loadJobParameters} from "App/Services/Jobs/JobHelpers";
 import util from "util";
 import {exec} from "child_process";
 import Console from "@ioc:Providers/Console";
-import {BaseJobParameters} from "App/Services/Jobs/Jobs";
+import {BaseJobParameters} from "App/Services/Jobs/JobsTypes";
 
 const updatePackage = async (name: string, version: string) => {
   try {

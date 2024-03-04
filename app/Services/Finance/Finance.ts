@@ -134,7 +134,7 @@ export default class Finance implements FinanceContract {
       ])
       .run<{ total_pages: number }>();
 
-    const pIndex = ProgressBar.newBar(
+    const pIndex = await ProgressBar.newBar(
       Math.ceil(resTotalPages.results.total_pages / count) + 1,
       "Scraping Yahoo Finance results for ETFs tickers",
     );
@@ -158,11 +158,11 @@ export default class Finance implements FinanceContract {
 
       offset += count;
 
-      ProgressBar.increment(pIndex);
+      await ProgressBar.increment(pIndex);
 
     } while ((resTickers.results?.tickers || []).length > 0);
 
-    ProgressBar.finish(pIndex);
+    await ProgressBar.finish(pIndex);
 
     return tickersFound;
   }

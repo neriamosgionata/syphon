@@ -3,7 +3,7 @@ import {Quote} from "yahoo-finance2/dist/esm/src/modules/quote";
 import Finance from "@ioc:Providers/Finance";
 import Profile from "App/Models/Profile";
 import Logger from "@ioc:Providers/Logger";
-import {BaseJobParameters} from "App/Services/Jobs/Jobs";
+import {BaseJobParameters} from "App/Services/Jobs/JobsTypes";
 
 const updateProfile = async (ticker: string, profile: Quote) => {
   const existing = await Profile

@@ -7,8 +7,11 @@ import BaseScraper, {
   ScraperTestFunction
 } from "App/Services/Scraper/BaseScraper";
 import Drive from "@ioc:Adonis/Core/Drive";
+import {LogChannels} from "App/Services/Logger/Logger";
 
 export interface ScraperContract extends BaseScraperContract {
+  end(): Promise<void>;
+
   run<T extends ScraperHandlerReturn<any>>(): Promise<ScraperRunReturn<T>>;
 
   openNewPage(): Promise<Page>;
@@ -17,13 +20,13 @@ export interface ScraperContract extends BaseScraperContract {
 
   // SETUP
 
-  setWithHeadlessChrome(headlessChrome: boolean | string): ScraperContract;
+  setWithHeadlessChrome(headlessChrome: boolean): ScraperContract;
 
   setWithStealthPlugin(withStealthPlugin: boolean): ScraperContract;
 
   setWithAdblockerPlugin(withAdblockerPlugin: boolean): ScraperContract;
 
-  setLoggerChannel(logChannel: string, writeOnConsole: boolean): ScraperContract;
+  setLoggerChannel(logChannel: LogChannels, writeOnConsole: boolean): ScraperContract;
 
   setPrintInConsole(writeOnConsole: boolean): ScraperContract;
 
@@ -38,6 +41,8 @@ export interface ScraperContract extends BaseScraperContract {
   setArguments(args: { [p: string]: any }): ScraperContract;
 
   setCloseOnExit(closeOnExit: boolean): ScraperContract;
+
+  setEnableProxy(enableProxy: boolean): ScraperContract;
 
   addHandler(handlerFunction: ScraperHandlerFunction<any>): ScraperContract;
 
@@ -82,13 +87,14 @@ export interface ScraperContract extends BaseScraperContract {
 
 export default class Scraper extends BaseScraper implements ScraperContract {
   constructor(
-    protected withHeadlessChrome: boolean | "new" = "new",
+    protected withHeadlessChrome: boolean = true,
     protected writeOnConsole: boolean = false,
     protected debugConsole: boolean = false,
-    protected withAdblockerPlugin: boolean = false,
-    protected withStealthPlugin: boolean = false,
+    protected withAdblockerPlugin: boolean = true,
+    protected withStealthPlugin: boolean = true,
     protected removeUserDataOnExit: boolean = true,
-    protected logChannel: string = "scraper",
+    protected enableProxy: boolean = true,
+    protected logChannel: LogChannels = "scraper",
   ) {
     super(
       withHeadlessChrome,
@@ -97,16 +103,17 @@ export default class Scraper extends BaseScraper implements ScraperContract {
       withAdblockerPlugin,
       withStealthPlugin,
       removeUserDataOnExit,
+      enableProxy,
       logChannel,
     );
   }
 
   //HELPERS
 
-  goto(href: string, timeoutMs: number = 10000): ScraperHandlerFunction<void> {
+  goto(href: string, timeoutMs: number = 60000): ScraperHandlerFunction<void> {
     return async (_browser: Browser, _page) => {
       if (_page) {
-        await Promise.all([
+        await Promise.allSettled([
           _page.waitForNavigation({timeout: timeoutMs}),
           _page.goto(href, {
             waitUntil: ['networkidle2', 'domcontentloaded'],
@@ -230,39 +237,36 @@ export default class Scraper extends BaseScraper implements ScraperContract {
 
   removeGPDR(): ScraperHandlerFunction<void> {
     return async (_browser, page) => {
+      await page.evaluate(() => {
+        const acceptTexts = [
+          'accetta', 'accetta tutto', 'accetto', 'accept', 'accept all', 'agree', 'i agree', 'consent', 'ich stimme zu', 'acepto', 'j\'accepte',
+          'alle akzeptieren', 'akzeptieren', 'verstanden', 'zustimmen', 'okay', 'ok', 'acconsento', 'accepter tout', 'accepter', 'accept all',
+        ];
 
-      for (const context of page.frames()) {
-        await context.evaluate(() => {
-          const acceptTexts = [
-            'accetta', 'accetta tutto', 'accetto', 'accept', 'accept all', 'agree', 'i agree', 'consent', 'ich stimme zu', 'acepto', 'j\'accepte',
-            'alle akzeptieren', 'akzeptieren', 'verstanden', 'zustimmen', 'okay', 'ok', 'acconsento', 'accepter tout', 'accepter', 'accept all',
-          ];
+        const acceptREString = (
+          '^([^a-zA-Z0-9]+)?'
+          + acceptTexts.join('([^a-zA-Z0-9]+)?$|^([^a-zA-Z0-9]+)?')
+          + '([^a-zA-Z0-9]+)?$'
+        );
 
-          const acceptREString = (
-            '^([^a-zA-Z0-9]+)?'
-            + acceptTexts.join('([^a-zA-Z0-9]+)?$|^([^a-zA-Z0-9]+)?')
-            + '([^a-zA-Z0-9]+)?$'
-          );
+        const buttons = [
+          ...document.querySelectorAll('button'),
+          ...document.querySelectorAll('input[type="button"]'),
+          ...document.querySelectorAll('input[type="submit"]'),
+        ] as HTMLButtonElement[];
 
-          const buttons = [
-            ...document.querySelectorAll('button'),
-            ...document.querySelectorAll('input[type="button"]'),
-            ...document.querySelectorAll('input[type="submit"]'),
-          ] as HTMLButtonElement[];
-
-          for (const button of buttons) {
-            if (button.innerText.toLowerCase().match(new RegExp(acceptREString, 'i'))) {
-              button.click();
-              return;
-            }
+        for (const button of buttons) {
+          if (button.innerText.toLowerCase().match(new RegExp(acceptREString, 'i'))) {
+            button.click();
+            return;
           }
-        });
-      }
+        }
+      });
 
       await new Promise((resolve) => setTimeout(resolve, 32 + Math.random() * 250));
 
       try {
-        await page.waitForNavigation({timeout: 10000});
+        await page.waitForNavigation({timeout: 15000});
       } catch (e) {
 
       }
@@ -312,7 +316,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  waitForNavigation(timeout: number = 10000): ScraperHandlerFunction<void> {
+  waitForNavigation(timeout: number = 60000): ScraperHandlerFunction<void> {
     return async (_browser, _page) => {
       try {
         await _page.waitForNavigation({timeout});

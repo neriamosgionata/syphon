@@ -1,7 +1,10 @@
 import {Browser, CDPSession, defaultArgs, executablePath, Page} from "puppeteer";
-import {LoggerContract} from "App/Services/Logger/Logger";
-import Logger from "@ioc:Providers/Logger";
+import {LogChannels, LoggerContract} from "App/Services/Logger/Logger";
+import Log from "@ioc:Providers/Logger";
 import {LogLevelEnum} from "App/Enums/LogLevelEnum";
+import Env from "@ioc:Adonis/Core/Env";
+import fs from "fs";
+import * as uuid from "uuid";
 
 export type ScraperTestFunction = (_browser: Browser, _page: Page) => Promise<boolean>;
 
@@ -17,6 +20,8 @@ export type ScraperHandlerFunction<T extends ScraperHandlerReturn<any>> = (
 export type ScraperRunReturn<T extends ScraperHandlerReturn<any>> = { results: T, errors: Error[] };
 
 export interface BaseScraperContract {
+  end(): Promise<void>;
+
   run<T extends ScraperHandlerReturn<any>>(): Promise<ScraperRunReturn<T>>;
 
   openNewPage(): Promise<Page>;
@@ -33,7 +38,7 @@ export interface BaseScraperContract {
 
   setRemoveUserDataOnExit(removeUserDataOnExit: boolean): BaseScraperContract;
 
-  setLoggerChannel(logChannel: string, writeOnConsole: boolean): BaseScraperContract;
+  setLoggerChannel(logChannel: LogChannels, writeOnConsole: boolean): BaseScraperContract;
 
   setPrintInConsole(writeOnConsole: boolean): BaseScraperContract;
 
@@ -49,6 +54,8 @@ export interface BaseScraperContract {
 
   setCloseOnExit(closeOnExit: boolean): BaseScraperContract;
 
+  setEnableProxy(enableProxy: boolean): BaseScraperContract;
+
   addHandler(handlerFunction: ScraperHandlerFunction<any>): BaseScraperContract;
 
   registerError(error: Error | any, key: string): void;
@@ -59,6 +66,9 @@ export interface BaseScraperContract {
 }
 
 export default class BaseScraper implements BaseScraperContract {
+  protected defaultStatus: { name: string, status: { [p: string | number]: any } } = {name: "", status: {}};
+  protected scraperStatus: typeof this.defaultStatus = this.defaultStatus;
+
   protected errors: Error[] = [];
   protected results: any = {};
 
@@ -78,21 +88,24 @@ export default class BaseScraper implements BaseScraperContract {
   protected enableTakeScreenshot: boolean = false;
   protected closeOnExit: boolean = true;
 
+  protected isRunning: boolean = false;
+
   constructor(
-    protected withHeadlessChrome: boolean | "new" = "new",
+    protected withHeadlessChrome: boolean = true,
     protected writeOnConsole: boolean = false,
     protected debugConsole: boolean = false,
-    protected withAdblockerPlugin: boolean = false,
-    protected withStealthPlugin: boolean = false,
+    protected withAdblockerPlugin: boolean = true,
+    protected withStealthPlugin: boolean = true,
     protected removeUserDataOnExit: boolean = true,
-    protected logChannel: string = "scraper",
+    protected enableProxy: boolean = true,
+    protected logChannel: LogChannels = "scraper",
   ) {
-    this.logger = Logger.logger(logChannel, "scraper", writeOnConsole);
+    this.logger = Log.logger(logChannel, "scraper", writeOnConsole);
   }
 
   // SETUP
 
-  setWithHeadlessChrome(headlessChrome: boolean | "new"): this {
+  setWithHeadlessChrome(headlessChrome: boolean): this {
     this.withHeadlessChrome = headlessChrome;
     return this;
   }
@@ -122,8 +135,8 @@ export default class BaseScraper implements BaseScraperContract {
     return this;
   }
 
-  setLoggerChannel(logChannel: string, writeOnConsole: boolean = false): this {
-    this.logger = Logger.logger(logChannel, "scraper", writeOnConsole);
+  setLoggerChannel(logChannel: LogChannels, writeOnConsole: boolean = false): this {
+    this.logger = Log.logger(logChannel, "scraper", writeOnConsole);
     return this;
   }
 
@@ -144,6 +157,11 @@ export default class BaseScraper implements BaseScraperContract {
 
   setCloseOnExit(closeOnExit: boolean): this {
     this.closeOnExit = closeOnExit;
+    return this;
+  }
+
+  setEnableProxy(enableProxy: boolean): this {
+    this.enableProxy = enableProxy;
     return this;
   }
 
@@ -186,6 +204,8 @@ export default class BaseScraper implements BaseScraperContract {
   //HANDLER
 
   async run<T extends ScraperHandlerReturn<any>>(): Promise<ScraperRunReturn<T>> {
+    this.isRunning = true;
+
     try {
       await this.start();
     } catch (e) {
@@ -207,12 +227,9 @@ export default class BaseScraper implements BaseScraperContract {
       return this.getRunResult<T>();
     }
 
-    try {
-      await this.handle();
-      await this.end();
-    } catch (err) {
-      this.registerError(err, "Execution");
-    }
+    await this.handle();
+
+    await this.end();
 
     return this.getRunResult<T>();
   }
@@ -248,48 +265,52 @@ export default class BaseScraper implements BaseScraperContract {
     this.errors = [];
 
     const args = [
-      ...new Set([
-        ...defaultArgs({
-          // @ts-ignore
-          headless: this.withHeadlessChrome,
-          args: [
-            "--single-process",
-            "--allow-running-insecure-content",
-            "--autoplay-policy=user-gesture-required",
-            "--disable-background-timer-throttling",
-            "--disable-component-update",
-            "--disable-domain-reliability",
-            "--disable-ipc-flooding-protection",
-            "--disable-print-preview",
-            "--disable-dev-shm-usage",
-            "--disable-setuid-sandbox",
-            "--disable-site-isolation-trials",
-            "--disable-speech-api",
-            "--disable-web-security",
-            "--disk-cache-size=1073741824",
-            "--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process",
-            "--enable-features=SharedArrayBuffer,NetworkService,NetworkServiceInProcess",
-            "--hide-scrollbars",
-            "--ignore-gpu-blocklist",
-            "--mute-audio",
-            "--no-default-browser-check",
-            "--no-first-run",
-            "--no-pings",
-            "--no-sandbox",
-            "--no-zygote",
-            "--window-size=1920,1080",
-            "--ignore-certificate-errors",
-            "--lang='en-US'",
-            "--enable-automation",
-            "--no-default-browser-check",
-          ]
-        }),
-
-      ])
+      ...new Set(
+        [
+          "--single-process",
+          "--allow-running-insecure-content",
+          "--autoplay-policy=user-gesture-required",
+          "--disable-background-timer-throttling",
+          "--disable-component-update",
+          "--disable-domain-reliability",
+          "--disable-ipc-flooding-protection",
+          "--disable-print-preview",
+          "--disable-dev-shm-usage",
+          "--disable-setuid-sandbox",
+          "--disable-site-isolation-trials",
+          "--disable-speech-api",
+          "--disable-web-security",
+          "--disk-cache-size=1073741824",
+          "--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process",
+          "--enable-features=SharedArrayBuffer,NetworkService,NetworkServiceInProcess",
+          "--hide-scrollbars",
+          "--ignore-gpu-blocklist",
+          "--mute-audio",
+          "--no-default-browser-check",
+          "--no-first-run",
+          "--no-pings",
+          "--no-sandbox",
+          "--no-zygote",
+          "--window-size=1920,1080",
+          "--ignore-certificate-errors",
+          "--lang='en-US'",
+          "--enable-automation",
+          "--no-default-browser-check",
+          "--in-process-gpu",
+          ...defaultArgs({
+            headless: this.withHeadlessChrome,
+          }),
+        ]
+      ),
     ];
 
+    if (this.enableProxy && Env.get("USE_PROXY", false)) {
+      args.filter((arg) => !arg.includes("--proxy-server="));
+      args.push(`--proxy-server=proxy:${Env.get("LOCAL_PROXY_PORT", 6001)}`);
+    }
+
     const launchArgs = {
-      executablePath: executablePath("chrome"),
+      executablePath: executablePath(),
       defaultViewport: {
         deviceScaleFactor: 1,
         hasTouch: false,
@@ -304,18 +325,20 @@ export default class BaseScraper implements BaseScraperContract {
     };
 
     const puppeteer = (await import("puppeteer-extra")).default;
-    const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
-    const AdblockerPlugin = (await import("puppeteer-extra-plugin-adblocker")).default;
 
     if (this.withStealthPlugin) {
+      const StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
       puppeteer.use(StealthPlugin());
     }
 
     if (this.withAdblockerPlugin) {
-      puppeteer.use(AdblockerPlugin());
+      const AdBlockerPlugin = (await import("puppeteer-extra-plugin-adblocker")).default;
+      puppeteer.use(AdBlockerPlugin({
+        blockTrackers: true,
+        blockTrackersAndAnnoyances: true,
+      }));
     }
 
-    // @ts-ignore
     this.browser = await puppeteer.launch(launchArgs);
     this.page = await this.browser.newPage();
     this.cdpClient = await this.page.target().createCDPSession();
@@ -334,50 +357,56 @@ export default class BaseScraper implements BaseScraperContract {
     }
   }
 
-  protected async end(): Promise<void> {
-    await this.captureScreenshot();
+  async end(): Promise<void> {
 
-    if (this.closeOnExit) {
-      if (this.page && this.page.close && !this.page.isClosed()) {
-        if (this.removeUserDataOnExit) {
-          await this.cdpClient.send('Network.clearBrowserCookies');
-          await this.cdpClient.send('Network.clearBrowserCache');
+    if (this.isRunning) {
+      this.isRunning = false;
+
+      await this.captureScreenshot();
+
+      if (this.closeOnExit) {
+        if (this.page && this.page.close && !this.page.isClosed()) {
+          if (this.removeUserDataOnExit) {
+            await this.cdpClient.send('Network.clearBrowserCookies');
+            await this.cdpClient.send('Network.clearBrowserCache');
+          }
+
+          await this.cdpClient.detach();
+          await this.page.close();
         }
 
-        await this.cdpClient.detach();
-        await this.page.close();
-      }
+        for (const pageIndex in this.extraOpenedPages) {
+          const page = this.extraOpenedPages[pageIndex];
+          const cdpClient = this.extraCdpClient[pageIndex];
 
-      for (const pageIndex in this.extraOpenedPages) {
-        const page = this.extraOpenedPages[pageIndex];
-        const cdpClient = this.extraCdpClient[pageIndex];
+          if (this.removeUserDataOnExit) {
+            await cdpClient.send('Network.clearBrowserCookies');
+            await cdpClient.send('Network.clearBrowserCache');
+          }
 
-        if (this.removeUserDataOnExit) {
-          await cdpClient.send('Network.clearBrowserCookies');
-          await cdpClient.send('Network.clearBrowserCache');
+          await cdpClient.detach();
+
+          if (page && page.close && !page.isClosed()) {
+            await page.close();
+          }
         }
 
-        await cdpClient.detach();
-
-        if (page && page.close && !page.isClosed()) {
-          await page.close();
+        if (this.browser && this.browser.close && this.browser.connected) {
+          await this.browser.close();
         }
       }
 
-      if (this.browser && this.browser.close && this.browser.connected) {
-        await this.browser.close();
+      if (this.errors.length > 0) {
+        this.writeLog(LogLevelEnum.ERROR, "Errors during execution:");
+        this.writeTableLog(this.errors.map((e) => e.toString()), LogLevelEnum.ERROR);
       }
+
+      this.registeredHandlers = [];
+      this.registeredTests = [];
+      this.extraCdpClient = [];
+      this.extraOpenedPages = [];
+
     }
-
-    if (this.errors.length > 0) {
-      this.writeLog(LogLevelEnum.ERROR, "Errors during execution:");
-      this.writeTableLog(this.errors.map((e) => e.toString()), LogLevelEnum.ERROR);
-    }
-
-    this.registeredHandlers = [];
-    this.registeredTests = [];
-    this.extraCdpClient = [];
-    this.extraOpenedPages = [];
   }
 
   protected async handle(): Promise<void> {
@@ -390,7 +419,6 @@ export default class BaseScraper implements BaseScraperContract {
           result = {...result, ...res};
         }
       } catch (err) {
-        this.registerError(new Error('Handler failed, func index: ' + funcIndex), "Handler_failed_" + funcIndex);
         this.registerError(err, "Handler_failed_" + funcIndex);
         break;
       }
@@ -418,11 +446,30 @@ export default class BaseScraper implements BaseScraperContract {
   protected async captureScreenshot(name?: string): Promise<void> {
     if (this.enableTakeScreenshot) {
 
-      const fileName = name ? name + '.png' : Date.now() + '.png';
+      const realPath = fs.realpathSync('storage/screenshots');
+      const folder = Date.now();
 
-      const fullFilePath = 'storage/data/screenshots/' + fileName;
+      if (!fs.existsSync(`${realPath}/${folder}`)) {
+        fs.mkdirSync(`${realPath}/${folder}`, {recursive: true});
+      }
 
-      await this.page.screenshot({path: fullFilePath});
+      let fileName = (name ?? (uuid.v4() + "_" + Date.now())) + ".png";
+
+      await this.page.screenshot({
+        path: `${realPath}/${folder}/${fileName}`,
+        captureBeyondViewport: true,
+        fullPage: true,
+      });
+
+      for (const page of this.extraOpenedPages) {
+        fileName = (name ?? (uuid.v4() + "_" + Date.now())) + ".png";
+
+        await page.screenshot({
+          path: `${realPath}/${folder}/${fileName}`,
+          captureBeyondViewport: true,
+          fullPage: true,
+        });
+      }
     }
   }
 }

@@ -14,4 +14,5 @@ export enum AppContainerAliasesEnum {
   Console = "Providers/Console",
   ANN = "Providers/ANN",
   Currency = "Providers/Currency",
+  Socket = "Providers/Socket",
 }
