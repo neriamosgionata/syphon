@@ -28,8 +28,6 @@ export interface ProgressBarContract {
 
   setProgress(index: string, progress: number): Promise<void>;
 
-  forceCurrentStdout(): void;
-
   getAllBarsConfigAndStatus(): {
     id: string | number;
     title: string;
@@ -46,6 +44,7 @@ export default class ProgressBar implements ProgressBarContract {
   private barColor: { [p: string | number]: string };
   private titles: { [p: string | number]: string };
   private maxTitleLength: number = 55;
+  private eta: { [p: string | number]: number };
 
   constructor() {
     this.multibarService = new progress.MultiBar({});
@@ -55,20 +54,7 @@ export default class ProgressBar implements ProgressBarContract {
     this.length = {};
     this.barColor = {};
     this.titles = {};
-  }
-
-  forceCurrentStdout(): void {
-    if (Application.environment === "console") {
-      this.multibarService.stop();
-      const {stdout} = require("node:process");
-      this.multibarService = new progress.MultiBar({stream: stdout});
-    }
-
-    this.bars = {};
-    this.currentLength = {};
-    this.length = {};
-    this.barColor = {};
-    this.titles = {};
+    this.eta = {};
   }
 
   private calculateTitle(title: string): string {
@@ -95,25 +81,24 @@ export default class ProgressBar implements ProgressBarContract {
 
     const finalIndex = index ?? require("uuid").v4();
 
-    if (Application.environment === "console") {
-      const bar = this.multibarService.create(
-        length,
-        0,
-        null,
-        {format: newTitle + ' |' + colors[color]('{bar}') + '| {percentage}% | ETA: {eta}s | {value}/{total}'}
-      );
+    const bar = this.multibarService.create(
+      length,
+      0,
+      null,
+      {format: newTitle + ' |' + colors[color]('{bar}') + '| {percentage}% | ETA: {eta}s | {value}/{total}'}
+    );
 
-      if (this.bars[finalIndex]) {
-        await this.finish(finalIndex);
-      }
-
-      this.bars[finalIndex] = bar;
+    if (this.bars[finalIndex]) {
+      await this.finish(finalIndex);
     }
+
+    this.bars[finalIndex] = bar;
 
     this.currentLength[finalIndex] = 0;
     this.barColor[finalIndex] = color;
     this.titles[finalIndex] = newTitle;
     this.length[finalIndex] = length;
+    this.eta[finalIndex] = Infinity;
 
     try {
       await Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
@@ -122,6 +107,7 @@ export default class ProgressBar implements ProgressBarContract {
           id: finalIndex,
           title: newTitle,
           length: length,
+          eta: Infinity,
         }
       );
     } catch (e) {
@@ -138,9 +124,12 @@ export default class ProgressBar implements ProgressBarContract {
 
     this.currentLength[index] += steps;
 
-    if (Application.environment === "console") {
-      this.bars[index].update(this.currentLength[index]);
-    }
+    this.bars[index].update(this.currentLength[index]);
+
+    this.bars[index].updateETA();
+
+    // @ts-ignore
+    this.eta[index] = this.bars[index].eta.getTime();
 
     try {
       await Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
@@ -148,6 +137,7 @@ export default class ProgressBar implements ProgressBarContract {
         {
           id: index,
           steps: steps,
+          eta: this.eta[index]
         }
       );
     } catch (e) {
@@ -162,9 +152,12 @@ export default class ProgressBar implements ProgressBarContract {
 
     this.currentLength[index] -= steps;
 
-    if (Application.environment === "console") {
-      this.bars[index].update(this.currentLength[index]);
-    }
+    this.bars[index].update(this.currentLength[index]);
+
+    this.bars[index].updateETA();
+
+    // @ts-ignore
+    this.eta[index] = this.bars[index].eta.getTime();
 
     try {
       await Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
@@ -172,6 +165,7 @@ export default class ProgressBar implements ProgressBarContract {
         {
           id: index,
           steps: steps,
+          eta: this.eta[index],
         }
       );
     } catch (e) {
@@ -184,15 +178,16 @@ export default class ProgressBar implements ProgressBarContract {
       return;
     }
 
-    if (Application.environment === "console") {
-      this.bars[index].stop();
-      this.multibarService.remove(this.bars[index]);
-    }
+    this.bars[index].stop();
+
+    this.multibarService.remove(this.bars[index]);
 
     delete this.bars[index];
     delete this.currentLength[index];
     delete this.barColor[index];
     delete this.titles[index];
+    delete this.length[index];
+    delete this.eta[index];
 
     try {
       await Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
@@ -211,15 +206,14 @@ export default class ProgressBar implements ProgressBarContract {
       return;
     }
 
-    if (Application.environment === "console") {
-      this.multibarService.stop();
-    }
+    this.multibarService.stop();
 
     this.bars = {};
     this.currentLength = {};
     this.barColor = {};
     this.titles = {};
     this.length = {};
+    this.eta = {};
 
     try {
       await Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
@@ -238,10 +232,8 @@ export default class ProgressBar implements ProgressBarContract {
 
     const newTitle = this.calculateTitle(title);
 
-    if (Application.environment === "console") {
-      // @ts-ignore
-      this.bars[index].options.format = newTitle + ' |' + colors[this.barColor[index]]('{bar}') + '| {percentage}% | ETA: {eta}s | {value}/{total}';
-    }
+    // @ts-ignore
+    this.bars[index].options.format = newTitle + ' |' + colors[this.barColor[index]]('{bar}') + '| {percentage}% | ETA: {eta}s | {value}/{total}';
 
     this.titles[index] = newTitle;
 
@@ -265,9 +257,12 @@ export default class ProgressBar implements ProgressBarContract {
 
     this.currentLength[index] = progress;
 
-    if (Application.environment === "console") {
-      this.bars[index].update(progress);
-    }
+    this.bars[index].update(progress);
+
+    this.bars[index].updateETA();
+
+    // @ts-ignore
+    this.eta[index] = this.bars[index].eta.getTime();
 
     try {
       await Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
@@ -275,6 +270,7 @@ export default class ProgressBar implements ProgressBarContract {
         {
           id: index,
           progress: progress,
+          eta: this.eta[index],
         }
       );
     } catch (e) {
@@ -286,6 +282,7 @@ export default class ProgressBar implements ProgressBarContract {
     title: string;
     length: number;
     progress: number;
+    eta: number;
   }[] {
     const keys = Object.keys(this.currentLength);
 
@@ -294,6 +291,7 @@ export default class ProgressBar implements ProgressBarContract {
       title: string;
       length: number;
       progress: number;
+      eta: number;
     }[] = [];
 
     for (const key of keys) {
@@ -302,6 +300,7 @@ export default class ProgressBar implements ProgressBarContract {
         title: this.titles[key],
         length: this.length[key],
         progress: this.currentLength[key],
+        eta: this.eta[key],
       });
     }
 

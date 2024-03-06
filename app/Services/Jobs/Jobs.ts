@@ -26,7 +26,8 @@ export interface JobContract {
     parameters: T,
     tags?: string[],
     payloadCallback?: (message: JobMessage) => void,
-    errorCallback?: (error: Error, id: string, tags: string[]) => void
+    errorCallback?: (error: Error, id: string, tags: string[]) => void,
+    idEx?: string
   ): Promise<{ id: string, tags: string[] }>;
 
   runWithoutDispatch<T extends BaseJobParameters>(
@@ -59,6 +60,8 @@ export interface JobContract {
   getSingleJob(id: string): Promise<Job>;
 
   stopJob(id: string): Promise<Job>;
+
+  restartJob(id: string): Promise<Job>;
 
   socketEmitter(event: string, data: any): void;
 }
@@ -114,33 +117,37 @@ export default class Jobs implements JobContract {
   }
 
   private async catchJobMessage(message: JobMessage) {
-    let isStarted = false;
-    let isFinished = false;
 
-    if (message.status === JobMessageEnum.FAILED) {
-      isFinished = true;
-    }
+    if (message.status === JobMessageEnum.FAILED || message.status === JobMessageEnum.STOPPED || message.status === JobMessageEnum.COMPLETED) {
+      await Job
+        .query()
+        .where("id", message.id)
+        .where("tags", message.tags.join(","))
+        .update({
+          status: message.status,
+          error: message.error?.message,
+          errorStack: message.error?.stack,
+          finishedAt: DateTime.now().toISO()
+        })
+        .exec();
 
-    if (message.status === JobMessageEnum.COMPLETED) {
-      isFinished = true;
+      return;
     }
 
     if (message.status === JobMessageEnum.RUNNING) {
-      isStarted = true;
+      await Job
+        .query()
+        .where("id", message.id)
+        .where("tags", message.tags.join(","))
+        .update({
+          status: message.status,
+          error: message.error?.message,
+          errorStack: message.error?.stack,
+          startedAt: DateTime.now().toISO()
+        })
+        .exec();
     }
 
-    await Job
-      .query()
-      .where("id", message.id)
-      .where("tags", message.tags.join(","))
-      .update({
-        status: message.status,
-        error: message.error?.message,
-        errorStack: message.error?.stack,
-        startedAt: isStarted ? DateTime.now().toISO() : null,
-        finishedAt: isFinished ? DateTime.now().toISO() : null,
-      })
-      .exec();
   }
 
   private defaultCallback(worker: Worker, message: JobMessage, payloadCallback?: Callback, isDispatched?: boolean) {
@@ -278,21 +285,25 @@ export default class Jobs implements JobContract {
     tags: string[] = [],
     payloadCallback?: Callback,
     errorCallback?: ErrorCallback,
+    idEx?: string,
   ): Promise<JobRunInfo> {
     if (!await this.jobIsRegistered(jobName)) {
       throw new Error("Job not registered");
     }
 
+    const id: string = idEx || require("uuid").v4();
 
-    const id: string = require("uuid").v4();
+    const job = await Job.find(id);
 
-    await Job.create({
-      id,
-      name: jobName,
-      status: JobMessageEnum.DISPATCHED,
-      tags: tags.join(","),
-      parameters: JSON.stringify(parameters)
-    });
+    if (!job) {
+      await Job.create({
+        id,
+        name: jobName,
+        status: JobMessageEnum.DISPATCHED,
+        tags: tags.join(","),
+        parameters: JSON.stringify(parameters)
+      });
+    }
 
     let jobCountRunning = await this.getAllRunningJobs();
 
@@ -497,6 +508,26 @@ export default class Jobs implements JobContract {
       .exec();
 
     return this.getSingleJob(id);
+  }
+
+  async restartJob(id: string) {
+    const job = await this.getSingleJob(id);
+
+    if (job.status === JobMessageEnum.RUNNING) {
+      throw new Error("Job is already running");
+    }
+
+    if (job.status === JobMessageEnum.COMPLETED) {
+      throw new Error("Job is already completed");
+    }
+
+    this.dispatch(job.name, JSON.parse(job.parameters || "{}"), job.tags?.split(",") || [], undefined, undefined, job.id)
+      .then(() => {
+      })
+      .catch(() => {
+      });
+
+    return job;
   }
 
   socketEmitter<K extends EmitEventType>(event: K, data: EmitEventTypeData[K]) {

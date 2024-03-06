@@ -12,10 +12,15 @@ export enum EmitEventType {
   PROGRESS_BAR_CHANGE_TITLE = "progress_bar_change_title",
   PROGRESS_BAR_COMPLETE = "progress_bar_complete",
   PROGRESS_BAR_SET_PROGRESS = "progress_bar_set_progress",
+
   ALL_JOBS = "all_jobs",
   JOB_STATUS = "job_status",
   STARTED_JOB = "started_job",
   ALL_AVAILABLE_JOBS = "all_available_jobs",
+
+  LOG_LINE = "log_line",
+  ALL_LOGS = "all_logs",
+  ALL_AVAILABLE_LOGS = "all_available_logs",
 }
 
 type GetAllProgressBarsEmitData = {
@@ -24,6 +29,7 @@ type GetAllProgressBarsEmitData = {
     title: string;
     length: number;
     progress: number;
+    eta: number;
   }[];
 }
 
@@ -31,6 +37,7 @@ type ProgressBarOnEmitData = {
   id: string;
   title: string;
   length: number;
+  eta: number;
 }
 
 type ProgressBarOffEmitData = {
@@ -42,11 +49,13 @@ type ProgressBarOffAllEmitData = {}
 type ProgressBarIncrementEmitData = {
   id: string;
   steps: number;
+  eta: number;
 }
 
 type ProgressBarDecrementEmitData = {
   id: string;
   steps: number;
+  eta: number;
 }
 
 type ProgressBarChangeTitleEmitData = {
@@ -109,6 +118,19 @@ type StartedJobEmitData = {
 
 type AllAvailableJobsEmitData = JobNameForFrontend[];
 
+type LogLineEmitData = {
+  logLine: string;
+}
+
+type AllLogsEmitData = {
+  logs: string[];
+  name: string;
+}
+
+type AllAvailableLogsEmitData = {
+  logs: string[];
+}
+
 export type EmitEventTypeData = {
   [EmitEventType.GET_ALL_PROGRESS_BARS]: GetAllProgressBarsEmitData,
   [EmitEventType.PROGRESS_BAR_ON]: ProgressBarOnEmitData,
@@ -119,17 +141,25 @@ export type EmitEventTypeData = {
   [EmitEventType.PROGRESS_BAR_CHANGE_TITLE]: ProgressBarChangeTitleEmitData,
   [EmitEventType.PROGRESS_BAR_COMPLETE]: ProgressBarCompleteEmitData,
   [EmitEventType.PROGRESS_BAR_SET_PROGRESS]: ProgressBarSetProgressEmitData,
+
   [EmitEventType.ALL_JOBS]: AllJobsEmitData,
   [EmitEventType.JOB_STATUS]: JobStatusEmitData,
   [EmitEventType.STARTED_JOB]: StartedJobEmitData,
   [EmitEventType.ALL_AVAILABLE_JOBS]: AllAvailableJobsEmitData,
+
+  [EmitEventType.LOG_LINE]: LogLineEmitData,
+  [EmitEventType.ALL_LOGS]: AllLogsEmitData,
+  [EmitEventType.ALL_AVAILABLE_LOGS]: AllAvailableLogsEmitData,
 }
 
 export enum ListenEventType {
   START_JOB = "start_job",
   STOP_JOB = "stop_job",
+  RESTART_JOB = "restart_job",
   GET_JOB_STATUS = "get_job_status",
-  GET_ALL_JOBS = "get_all_jobs"
+  GET_ALL_JOBS = "get_all_jobs",
+  GET_ALL_LOGS = "get_all_logs",
+  SELECT_LOG = "select_log",
 }
 
 type StartJobListenData = {
@@ -143,15 +173,29 @@ type StopJobListenData = {
   id: string;
 }
 
+type RestartJobListenData = {
+  id: string;
+}
+
 type GetJobStatusListenData = {
   id: string;
 }
 
 type GetAllJobsListenData = {}
 
+type SelectLogListenData = {
+  name: string;
+}
+
+type GetAllLogsListenData = {}
+
 export type ListenEventTypeData = {
   [ListenEventType.START_JOB]: StartJobListenData,
   [ListenEventType.STOP_JOB]: StopJobListenData,
+  [ListenEventType.RESTART_JOB]: RestartJobListenData,
   [ListenEventType.GET_JOB_STATUS]: GetJobStatusListenData,
   [ListenEventType.GET_ALL_JOBS]: GetAllJobsListenData,
+
+  [ListenEventType.GET_ALL_LOGS]: GetAllLogsListenData,
+  [ListenEventType.SELECT_LOG]: SelectLogListenData,
 }

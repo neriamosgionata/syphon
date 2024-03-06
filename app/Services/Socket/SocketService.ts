@@ -221,6 +221,14 @@ export default class SocketService implements SocketContract {
         return Application.container.use(AppContainerAliasesEnum.ProgressBar).getAllBarsConfigAndStatus();
       },
     );
+
+    this.addStartupEmitEvent(
+      EmitEventType.ALL_AVAILABLE_LOGS,
+      () => {
+        this.logger.info("Getting all available logs");
+        return Application.container.use(AppContainerAliasesEnum.Logger).getAllAvailableLogs();
+      },
+    );
   }
 
   getSocketEvents(): { event: ListenEventType, listener: (data: any) => void }[] {
@@ -283,6 +291,24 @@ export default class SocketService implements SocketContract {
       },
 
       {
+        event: ListenEventType.RESTART_JOB,
+        listener: (data: ListenEventTypeData[ListenEventType.RESTART_JOB]) => {
+          this.logger.info("Restarting job: " + data.id);
+
+          Application.container.use(AppContainerAliasesEnum.Jobs)
+            .restartJob(data.id)
+            .then((job) => {
+              this.logger.info("Job restarted: " + job.id);
+
+              this.emitToAdmins(EmitEventType.JOB_STATUS, job);
+            })
+            .catch((e) => {
+              this.logger.error(e.message, e.stack);
+            })
+        }
+      },
+
+      {
         event: ListenEventType.GET_JOB_STATUS,
         listener: (data: ListenEventTypeData[ListenEventType.GET_JOB_STATUS]) => {
           this.logger.info("Getting job status: " + data.id);
@@ -312,6 +338,32 @@ export default class SocketService implements SocketContract {
             .catch((e) => {
               this.logger.error(e.message, e.stack);
             });
+        }
+      },
+
+      {
+        event: ListenEventType.SELECT_LOG,
+        listener: (data: ListenEventTypeData[ListenEventType.SELECT_LOG]) => {
+          this.logger.info("Selecting log: " + data.name);
+
+          Application.container.use(AppContainerAliasesEnum.Logger)
+            .tailLog(
+              data.name,
+              (logLine: string) => {
+                this.emitToAdmins(EmitEventType.LOG_LINE, {logLine});
+              },
+              (logData: { logs: string[], name: string }) => {
+                this.emitToAdmins(EmitEventType.ALL_LOGS, logData);
+              },
+            );
+        }
+      },
+
+      {
+        event: ListenEventType.GET_ALL_LOGS,
+        listener: () => {
+          const logs = Application.container.use(AppContainerAliasesEnum.Logger).getAllAvailableLogs();
+          this.emitToAdmins(EmitEventType.ALL_AVAILABLE_LOGS, logs);
         }
       }
     ];
