@@ -126,8 +126,6 @@ export default class ProgressBar implements ProgressBarContract {
 
     this.bars[index].update(this.currentLength[index]);
 
-    this.bars[index].updateETA();
-
     // @ts-ignore
     this.eta[index] = this.bars[index].eta.getTime();
 
@@ -153,8 +151,6 @@ export default class ProgressBar implements ProgressBarContract {
     this.currentLength[index] -= steps;
 
     this.bars[index].update(this.currentLength[index]);
-
-    this.bars[index].updateETA();
 
     // @ts-ignore
     this.eta[index] = this.bars[index].eta.getTime();
@@ -258,8 +254,6 @@ export default class ProgressBar implements ProgressBarContract {
     this.currentLength[index] = progress;
 
     this.bars[index].update(progress);
-
-    this.bars[index].updateETA();
 
     // @ts-ignore
     this.eta[index] = this.bars[index].eta.getTime();
