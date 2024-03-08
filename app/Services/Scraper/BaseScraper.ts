@@ -100,7 +100,7 @@ export default class BaseScraper implements BaseScraperContract {
     protected enableProxy: boolean = true,
     protected logChannel: LogChannels = "scraper",
   ) {
-    this.logger = Log.logger(logChannel, "scraper", writeOnConsole);
+    this.logger = Log.logger(logChannel, writeOnConsole);
   }
 
   // SETUP
@@ -136,7 +136,7 @@ export default class BaseScraper implements BaseScraperContract {
   }
 
   setLoggerChannel(logChannel: LogChannels, writeOnConsole: boolean = false): this {
-    this.logger = Log.logger(logChannel, "scraper", writeOnConsole);
+    this.logger = Log.logger(logChannel, writeOnConsole);
     return this;
   }
 
@@ -398,7 +398,21 @@ export default class BaseScraper implements BaseScraperContract {
 
       if (this.errors.length > 0) {
         this.writeLog(LogLevelEnum.ERROR, "Errors during execution:");
-        this.writeTableLog(this.errors.map((e) => e.toString()), LogLevelEnum.ERROR);
+
+        const errorTable: any = this.errors.reduce((acc, error) => {
+          acc.push(
+            [
+              error.message,
+              error.stack,
+            ]
+          );
+          return acc;
+        }, [] as any[]);
+
+        this.writeTableLog(
+          errorTable,
+          LogLevelEnum.ERROR,
+        );
       }
 
       this.registeredHandlers = [];

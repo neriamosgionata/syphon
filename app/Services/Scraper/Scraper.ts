@@ -110,12 +110,12 @@ export default class Scraper extends BaseScraper implements ScraperContract {
 
   //HELPERS
 
-  goto(href: string, timeoutMs: number = 60000): ScraperHandlerFunction<void> {
-    return async (_browser: Browser, _page) => {
-      if (_page) {
+  goto(href: string, timeoutMs: number = 5000): ScraperHandlerFunction<void> {
+    return async (_browser: Browser, _originalPage) => {
+      if (_originalPage) {
         await Promise.allSettled([
-          _page.waitForNavigation({timeout: timeoutMs}),
-          _page.goto(href, {
+          _originalPage.waitForNavigation({timeout: timeoutMs}),
+          _originalPage.goto(href, {
             waitUntil: ['networkidle2', 'domcontentloaded'],
           })
         ]);
@@ -266,7 +266,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
       await new Promise((resolve) => setTimeout(resolve, 32 + Math.random() * 250));
 
       try {
-        await page.waitForNavigation({timeout: 15000});
+        await page.waitForNavigation({timeout: 5000});
       } catch (e) {
 
       }
@@ -316,7 +316,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  waitForNavigation(timeout: number = 60000): ScraperHandlerFunction<void> {
+  waitForNavigation(timeout: number = 5000): ScraperHandlerFunction<void> {
     return async (_browser, _page) => {
       try {
         await _page.waitForNavigation({timeout});

@@ -32,7 +32,7 @@ export default class SocketService implements SocketContract {
   private logger: any;
 
   constructor() {
-    this.logger = Application.container.use(AppContainerAliasesEnum.Logger).logger("socket", "adonis", true);
+    this.logger = Application.container.use(AppContainerAliasesEnum.Logger).logger("socket", true);
   }
 
   createHttpServer() {

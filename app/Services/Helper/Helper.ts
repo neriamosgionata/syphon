@@ -21,6 +21,7 @@ import crypto from "crypto";
 import {Page} from "puppeteer";
 
 import cheerio from 'cheerio';
+import moment from "moment";
 
 export interface HelperContract {
   pythonSerializedToJson(pythonObj: string): string;
@@ -260,6 +261,8 @@ export interface HelperContract {
   degr2rad(degr: number): number;
 
   isNumeric(str: string): boolean;
+
+  isDate(str: string): boolean;
 
   tokenizeSentence(str: string, customStopWords?: string[] | string): string[];
 }
@@ -630,6 +633,14 @@ export default class Helper implements HelperContract {
 
   isFiniteNumber(a) {
     return this.isNumber(a) && isFinite(a)
+  }
+
+  isDate(str: any) {
+    if (typeof str !== "string") {
+      return false
+    }
+
+    return moment(str, "DD-mm-YYYY").isValid();
   }
 
   map(a, cb) {

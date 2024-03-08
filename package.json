@@ -83,6 +83,7 @@
     "stopword": "3.0.1",
     "striptags": "3.2.0",
     "table": "6.8.1",
+    "tail": "^2.2.6",
     "ts-node": "10.9.2",
     "typescript": "5.3.3",
     "uuid": "9.0.1",
