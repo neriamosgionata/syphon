@@ -190,20 +190,32 @@ export const logger: LoggerConfig = {
       baseName: "adonis-stack",
       lifeTime: 7, //days
       permissions: 755,
-      type: LogChannelEnum.STACK
-    },
-    daily: {
-      baseName: "adonis-daily",
-      lifeTime: 7, //days
-      permissions: 755,
-      type: LogChannelEnum.DAILY
+      type: LogChannelEnum.STACK,  //stack, daily
     },
     scraper: {
-      baseName: "scraper-daily",
+      baseName: "adonis-scraper",
       lifeTime: 7, //days
       permissions: 755,
       type: LogChannelEnum.DAILY,
-    }
+    },
+    daily: {
+      baseName: 'adonis-daily',
+      lifeTime: 7, //days
+      permissions: 755,
+      type: LogChannelEnum.DAILY,  //stack, daily
+    },
+    jobs: {
+      baseName: 'adonis-jobs',
+      lifeTime: 7, //days
+      permissions: 755,
+      type: LogChannelEnum.DAILY,  //stack, daily
+    },
+    socket: {
+      baseName: 'adonis-socket',
+      lifeTime: 7, //days
+      permissions: 755,
+      type: LogChannelEnum.DAILY,  //stack, daily
+    },
   }
 };
 
