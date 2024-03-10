@@ -7,6 +7,7 @@ import {isMainThread} from "node:worker_threads";
 import {EmitEventType, EmitEventTypeData, ListenEventType, ListenEventTypeData} from "App/Services/Socket/SocketTypes";
 import Job from "App/Models/Job";
 import {JobListForFrontend} from "App/Jobs";
+import {HttpContext} from "@adonisjs/http-server/build/src/HttpContext";
 
 export interface SocketContract {
   startServer(): void;
@@ -26,7 +27,7 @@ export default class SocketService implements SocketContract {
   private socketServer!: Server;
   private server: any;
   private registeredAdminSockets!: Map<string, Socket>;
-  private registeredStartupEvents: Map<EmitEventType, () => any> = new Map();
+  private registeredStartupEvents: Map<EmitEventType, () => EmitEventTypeData[EmitEventType] | Promise<EmitEventTypeData[EmitEventType]>> = new Map();
   private booted = false;
 
   private logger: any;
@@ -111,7 +112,7 @@ export default class SocketService implements SocketContract {
     return Env.get("SOCKET_ENABLE", false);
   }
 
-  addStartupEmitEvent<K extends EmitEventType>(event: K, listener: () => any): void {
+  addStartupEmitEvent<K extends EmitEventType>(event: K, listener: (() => EmitEventTypeData[K] | Promise<EmitEventTypeData[K]>)): void {
     this.logger.info("Adding startup emit event: " + event);
     this.registeredStartupEvents.set(event, () => listener());
   }
@@ -132,33 +133,53 @@ export default class SocketService implements SocketContract {
 
       this.socketServer.on("connection", (socket) => {
         this.logger.info("Admin connected id: " + socket.id);
-        const secret = socket.handshake.auth?.secret;
 
-        if (secret !== Env.get("ADMIN_SECRET")) {
-          this.logger.error("Admin wrong secret, id: " + socket.id);
+        socket.request.headers.authorization = socket.handshake.auth?.authorization;
+        socket.request.headers.Authorization = socket.handshake.auth?.authorization;
+
+        try {
+          const ctx = HttpContext.create(
+            "/api/restaurants",
+            {} as Record<string, any>,
+            socket.request,
+          );
+
+          Application
+            .container
+            .use("Adonis/Addons/Auth")
+            // @ts-ignore
+            .getAuthForRequest(ctx)
+            .authenticate()
+            .then(() => {
+              this.runStartupEmitEvents(socket)
+                .then(() => {
+                })
+                .catch(() => {
+                });
+
+              for (const event of this.getSocketEvents()) {
+                this.registerListener(socket, event.event, event.listener);
+              }
+
+              this.registeredAdminSockets.set(socket.id, socket);
+
+              this.logger.info("Admin connected id: " + socket.id);
+
+              socket.on("disconnect", () => {
+                this.logger.info("Admin disconnected id: " + socket.id);
+
+                this.registeredAdminSockets.delete(socket.id);
+              });
+            })
+            .catch(() => {
+              socket.disconnect();
+              this.logger.error("Admin not authenticated");
+            });
+        } catch (e) {
           socket.disconnect();
+          this.logger.error("Admin not authenticated");
           return;
         }
-
-        this.runStartupEmitEvents(socket)
-          .then(() => {
-          })
-          .catch(() => {
-          });
-
-        for (const event of this.getSocketEvents()) {
-          this.registerListener(socket, event.event, event.listener);
-        }
-
-        this.registeredAdminSockets.set(socket.id, socket);
-
-        this.logger.info("Admin connected id: " + socket.id);
-
-        socket.on("disconnect", () => {
-          this.logger.info("Admin disconnected id: " + socket.id);
-
-          this.registeredAdminSockets.delete(socket.id);
-        });
       });
     }
   }
@@ -309,6 +330,24 @@ export default class SocketService implements SocketContract {
       },
 
       {
+        event: ListenEventType.DELETE_JOB,
+        listener: (data: ListenEventTypeData[ListenEventType.DELETE_JOB]) => {
+          this.logger.info("Deleting job: " + data.id);
+
+          Application.container.use(AppContainerAliasesEnum.Jobs)
+            .deleteJob(data.id)
+            .then((job) => {
+              this.logger.info("Job deleted: " + job.id);
+
+              this.emitToAdmins(EmitEventType.JOB_DELETED, job);
+            })
+            .catch((e) => {
+              this.logger.error(e.message, e.stack);
+            })
+        }
+      },
+
+      {
         event: ListenEventType.GET_JOB_STATUS,
         listener: (data: ListenEventTypeData[ListenEventType.GET_JOB_STATUS]) => {
           this.logger.info("Getting job status: " + data.id);
@@ -356,6 +395,16 @@ export default class SocketService implements SocketContract {
                 this.emitToAdmins(EmitEventType.ALL_LOGS, logData);
               },
             );
+        }
+      },
+
+      {
+        event: ListenEventType.DELETE_LOG,
+        listener: (data: ListenEventTypeData[ListenEventType.DELETE_LOG]) => {
+          this.logger.info("Deleting log: " + data.name);
+
+          Application.container.use(AppContainerAliasesEnum.Logger)
+            .deleteLog(data.name);
         }
       },
 

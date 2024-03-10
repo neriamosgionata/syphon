@@ -63,6 +63,8 @@ export interface JobContract {
 
   restartJob(id: string): Promise<Job>;
 
+  deleteJob(id: string): Promise<Job>;
+
   socketEmitter(event: string, data: any): void;
 }
 
@@ -526,6 +528,21 @@ export default class Jobs implements JobContract {
       })
       .catch(() => {
       });
+
+    return job;
+  }
+
+  async deleteJob(id: string) {
+    const job = await this.getSingleJob(id);
+
+    if (job.status === JobMessageEnum.RUNNING) {
+      throw new Error("Job is running");
+    }
+
+    await Job
+      .query()
+      .where("id", id)
+      .delete();
 
     return job;
   }

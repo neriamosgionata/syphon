@@ -17,6 +17,7 @@ export enum EmitEventType {
   JOB_STATUS = "job_status",
   STARTED_JOB = "started_job",
   ALL_AVAILABLE_JOBS = "all_available_jobs",
+  JOB_DELETED = "job_deleted",
 
   LOG_LINE = "log_line",
   ALL_LOGS = "all_logs",
@@ -24,14 +25,12 @@ export enum EmitEventType {
 }
 
 type GetAllProgressBarsEmitData = {
-  progressBars: {
-    id: string;
-    title: string;
-    length: number;
-    progress: number;
-    eta: number;
-  }[];
-}
+  id: string;
+  title: string;
+  length: number;
+  progress: number;
+  eta: number;
+}[];
 
 type ProgressBarOnEmitData = {
   id: string;
@@ -70,23 +69,22 @@ type ProgressBarCompleteEmitData = {
 type ProgressBarSetProgressEmitData = {
   id: string;
   progress: number;
+  eta: number;
 }
 
 type AllJobsEmitData = {
-  jobs: {
-    id: string;
-    name: JobName;
-    tags: string | null;
-    status: JobMessageEnum;
-    parameters: string | null;
-    error: string | null;
-    errorStack: string | null;
-    startedAt: DateTime | null;
-    finishedAt: DateTime | null;
-    createdAt: DateTime;
-    updatedAt: DateTime;
-  }[];
-}
+  id: string;
+  name: JobName;
+  tags: string | null;
+  status: JobMessageEnum;
+  parameters: string | null;
+  error: string | null;
+  errorStack: string | null;
+  startedAt: DateTime | null;
+  finishedAt: DateTime | null;
+  createdAt: DateTime;
+  updatedAt: DateTime;
+}[];
 
 type JobStatusEmitData = {
   id: string;
@@ -116,7 +114,7 @@ type StartedJobEmitData = {
   updatedAt: DateTime;
 };
 
-type AllAvailableJobsEmitData = JobNameForFrontend[];
+type AllAvailableJobsEmitData = JobNameForFrontend;
 
 type LogLineEmitData = {
   logLine: string;
@@ -129,6 +127,10 @@ type AllLogsEmitData = {
 
 type AllAvailableLogsEmitData = {
   logs: string[];
+}
+
+type JobDeletedEmitData = {
+  id: string;
 }
 
 export type EmitEventTypeData = {
@@ -146,6 +148,7 @@ export type EmitEventTypeData = {
   [EmitEventType.JOB_STATUS]: JobStatusEmitData,
   [EmitEventType.STARTED_JOB]: StartedJobEmitData,
   [EmitEventType.ALL_AVAILABLE_JOBS]: AllAvailableJobsEmitData,
+  [EmitEventType.JOB_DELETED]: JobDeletedEmitData,
 
   [EmitEventType.LOG_LINE]: LogLineEmitData,
   [EmitEventType.ALL_LOGS]: AllLogsEmitData,
@@ -156,10 +159,13 @@ export enum ListenEventType {
   START_JOB = "start_job",
   STOP_JOB = "stop_job",
   RESTART_JOB = "restart_job",
+  DELETE_JOB = "delete_job",
   GET_JOB_STATUS = "get_job_status",
   GET_ALL_JOBS = "get_all_jobs",
+
   GET_ALL_LOGS = "get_all_logs",
   SELECT_LOG = "select_log",
+  DELETE_LOG = "delete_log",
 }
 
 type StartJobListenData = {
@@ -183,11 +189,19 @@ type GetJobStatusListenData = {
 
 type GetAllJobsListenData = {}
 
+type DeleteJobListenData = {
+  id: string;
+}
+
 type SelectLogListenData = {
   name: string;
 }
 
 type GetAllLogsListenData = {}
+
+type DeleteLogListenData = {
+  name: string;
+}
 
 export type ListenEventTypeData = {
   [ListenEventType.START_JOB]: StartJobListenData,
@@ -195,7 +209,9 @@ export type ListenEventTypeData = {
   [ListenEventType.RESTART_JOB]: RestartJobListenData,
   [ListenEventType.GET_JOB_STATUS]: GetJobStatusListenData,
   [ListenEventType.GET_ALL_JOBS]: GetAllJobsListenData,
+  [ListenEventType.DELETE_JOB]: DeleteJobListenData,
 
   [ListenEventType.GET_ALL_LOGS]: GetAllLogsListenData,
   [ListenEventType.SELECT_LOG]: SelectLogListenData,
+  [ListenEventType.DELETE_LOG]: DeleteLogListenData,
 }

@@ -3,7 +3,7 @@ import {JobMessageEnum} from "App/Enums/JobMessageEnum";
 import {LogLevelEnum} from "App/Enums/LogLevelEnum";
 
 export type JobName = keyof typeof JobList;
-export type JobNameForFrontend = keyof typeof JobListForFrontend;
+export type JobNameForFrontend = typeof JobListForFrontend;
 
 export type BaseJobParameters = {
   [p: string | number]: any
