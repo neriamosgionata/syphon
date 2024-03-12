@@ -82,7 +82,7 @@ export interface ScraperContract extends BaseScraperContract {
 
   autoScroll(maxScrolls?: number): ScraperHandlerFunction<void>;
 
-  waitForNavigation(timeout?: number): ScraperHandlerFunction<void>;
+  waitForNavigation(timeoutMs?: number): ScraperHandlerFunction<void>;
 }
 
 export default class Scraper extends BaseScraper implements ScraperContract {
@@ -110,7 +110,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
 
   //HELPERS
 
-  goto(href: string, timeoutMs: number = 5000): ScraperHandlerFunction<void> {
+  goto(href: string, timeoutMs: number = 10000): ScraperHandlerFunction<void> {
     return async (_browser: Browser, _originalPage) => {
       if (_originalPage) {
         await Promise.allSettled([
@@ -266,7 +266,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
       await new Promise((resolve) => setTimeout(resolve, 32 + Math.random() * 250));
 
       try {
-        await page.waitForNavigation({timeout: 5000});
+        await page.waitForNavigation({timeout: 10000});
       } catch (e) {
 
       }
@@ -316,10 +316,10 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  waitForNavigation(timeout: number = 5000): ScraperHandlerFunction<void> {
+  waitForNavigation(timeoutMs: number = 10000): ScraperHandlerFunction<void> {
     return async (_browser, _page) => {
       try {
-        await _page.waitForNavigation({timeout});
+        await _page.waitForNavigation({timeout: timeoutMs});
       } catch (e) {
 
       }

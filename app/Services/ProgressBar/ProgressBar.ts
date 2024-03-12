@@ -29,10 +29,11 @@ export interface ProgressBarContract {
   setProgress(index: string, progress: number): Promise<void>;
 
   getAllBarsConfigAndStatus(): {
-    id: string | number;
+    id: string;
     title: string;
     length: number;
     progress: number;
+    eta: number;
   }[];
 }
 
@@ -85,7 +86,11 @@ export default class ProgressBar implements ProgressBarContract {
       length,
       0,
       null,
-      {format: newTitle + ' |' + colors[color]('{bar}') + '| {percentage}% | ETA: {eta}s | {value}/{total}'}
+      {
+        format: newTitle + ' |' + colors[color]('{bar}') + '| {percentage}% | ETA: {eta}s | {value}/{total}',
+        synchronousUpdate: false,
+        etaAsynchronousUpdate: false,
+      }
     );
 
     if (this.bars[finalIndex]) {
@@ -101,7 +106,7 @@ export default class ProgressBar implements ProgressBarContract {
     this.eta[finalIndex] = Infinity;
 
     try {
-      await Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
+      Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
         EmitEventType.PROGRESS_BAR_ON,
         {
           id: finalIndex,
@@ -130,7 +135,7 @@ export default class ProgressBar implements ProgressBarContract {
     this.eta[index] = this.bars[index].eta.getTime();
 
     try {
-      await Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
+      Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
         EmitEventType.PROGRESS_BAR_INCREMENT,
         {
           id: index,
@@ -156,7 +161,7 @@ export default class ProgressBar implements ProgressBarContract {
     this.eta[index] = this.bars[index].eta.getTime();
 
     try {
-      await Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
+      Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
         EmitEventType.PROGRESS_BAR_DECREMENT,
         {
           id: index,
@@ -186,7 +191,7 @@ export default class ProgressBar implements ProgressBarContract {
     delete this.eta[index];
 
     try {
-      await Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
+      Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
         EmitEventType.PROGRESS_BAR_OFF,
         {
           id: index,
@@ -212,7 +217,7 @@ export default class ProgressBar implements ProgressBarContract {
     this.eta = {};
 
     try {
-      await Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
+      Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
         EmitEventType.PROGRESS_BAR_OFF_ALL,
         {}
       );
@@ -234,7 +239,7 @@ export default class ProgressBar implements ProgressBarContract {
     this.titles[index] = newTitle;
 
     try {
-      await Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
+      Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
         EmitEventType.PROGRESS_BAR_CHANGE_TITLE,
         {
           id: index,
@@ -259,7 +264,7 @@ export default class ProgressBar implements ProgressBarContract {
     this.eta[index] = this.bars[index].eta.getTime();
 
     try {
-      await Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
+      Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
         EmitEventType.PROGRESS_BAR_SET_PROGRESS,
         {
           id: index,
@@ -272,7 +277,7 @@ export default class ProgressBar implements ProgressBarContract {
   }
 
   getAllBarsConfigAndStatus(): {
-    id: string | number;
+    id: string;
     title: string;
     length: number;
     progress: number;
@@ -281,7 +286,7 @@ export default class ProgressBar implements ProgressBarContract {
     const keys = Object.keys(this.currentLength);
 
     const bars: {
-      id: string | number;
+      id: string;
       title: string;
       length: number;
       progress: number;
