@@ -139,7 +139,7 @@ export default class SocketService implements SocketContract {
 
         try {
           const ctx = HttpContext.create(
-            "/api/restaurants",
+            "/api/v1/charts",
             {} as Record<string, any>,
             socket.request,
           );

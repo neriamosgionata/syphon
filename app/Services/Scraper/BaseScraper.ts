@@ -5,6 +5,7 @@ import {LogLevelEnum} from "App/Enums/LogLevelEnum";
 import Env from "@ioc:Adonis/Core/Env";
 import fs from "fs";
 import * as uuid from "uuid";
+import Console from "@ioc:Providers/Console";
 
 export type ScraperTestFunction = (_browser: Browser, _page: Page) => Promise<boolean>;
 
@@ -242,7 +243,7 @@ export default class BaseScraper implements BaseScraperContract {
         try {
           const msgArgs = msg.args();
           for (const element of msgArgs) {
-            console.log(await element.jsonValue());
+            Console.log(await element.jsonValue());
           }
         } catch (e) {
 
@@ -348,7 +349,7 @@ export default class BaseScraper implements BaseScraperContract {
         try {
           const msgArgs = msg.args();
           for (const element of msgArgs) {
-            console.log(await element.jsonValue());
+            Console.log(await element.jsonValue());
           }
         } catch (e) {
 
