@@ -307,7 +307,9 @@ export default class BaseScraper implements BaseScraperContract {
 
     if (this.enableProxy && Env.get("USE_PROXY", false)) {
       args.filter((arg) => !arg.includes("--proxy-server="));
-      args.push(`--proxy-server=proxy:${Env.get("LOCAL_PROXY_PORT", 6001)}`);
+      const proxyAddress = Env.get("NODE_ENV") === "development" ? "localhost" : "proxy";
+      const proxyArgs = `--proxy-server=${proxyAddress}:${Env.get("LOCAL_PROXY_PORT", 6001)}`;
+      args.push(proxyArgs);
     }
 
     const launchArgs = {
