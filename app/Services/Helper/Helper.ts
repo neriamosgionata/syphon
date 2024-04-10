@@ -265,6 +265,8 @@ export interface HelperContract {
   isDate(str: string): boolean;
 
   tokenizeSentence(str: string, customStopWords?: string[] | string): string[];
+
+  chunkArray<T>(array: T[], size: number): T[][];
 }
 
 export default class Helper implements HelperContract {
@@ -1219,6 +1221,14 @@ export default class Helper implements HelperContract {
 
     const tokenizer = new natural.WordTokenizer();
     return removeStopwords((tokenizer.tokenize(str) || []), stopWordChoosen);
+  }
+
+  chunkArray<T>(array: T[], size: number): T[][] {
+    const results: T[][] = [];
+    while (array.length) {
+      results.push(array.splice(0, size));
+    }
+    return results;
   }
 
 }
