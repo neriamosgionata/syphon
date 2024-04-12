@@ -59,6 +59,17 @@ export interface BaseScraperContract {
 
   addHandler(handlerFunction: ScraperHandlerFunction<any>): BaseScraperContract;
 
+  addEventListener(event: string, callback: (args: {
+    type: string,
+    pageIndex: number,
+    event: Event
+  }) => void): BaseScraperContract;
+
+  setEventListeners(events: {
+    event: string,
+    callback: (args: { type: string, pageIndex: number, event: Event }) => void
+  }[]): BaseScraperContract;
+
   registerError(error: Error | any, key: string): void;
 
   writeTableLog(table: any[], logLevel?: LogLevelEnum): void;
@@ -67,8 +78,15 @@ export interface BaseScraperContract {
 }
 
 export default class BaseScraper implements BaseScraperContract {
-  protected defaultStatus: { name: string, status: { [p: string | number]: any } } = {name: "", status: {}};
-  protected scraperStatus: typeof this.defaultStatus = this.defaultStatus;
+  protected defaultStatus: any = {};
+
+  protected scraperStatus: {
+    name: string;
+    status: any;
+  } = {
+    name: "",
+    status: {}
+  };
 
   protected errors: Error[] = [];
   protected results: any = {};
@@ -83,6 +101,10 @@ export default class BaseScraper implements BaseScraperContract {
 
   protected registeredTests: ScraperTestFunction[] = [];
   protected registeredHandlers: ScraperHandlerFunction<any>[] = [];
+  protected registeredListeners: {
+    event: string,
+    callback: (args: { type: string, pageIndex: number, event: Event }) => void
+  }[] = [];
   protected logger: LoggerContract;
   protected args: { [p: string]: any } = {};
 
@@ -171,6 +193,19 @@ export default class BaseScraper implements BaseScraperContract {
     return this;
   }
 
+  addEventListener(event: string, callback: (args: { type: string, pageIndex: number, event: Event }) => void): this {
+    this.registeredListeners.push({event, callback});
+    return this;
+  }
+
+  setEventListeners(events: {
+    event: string,
+    callback: (args: { type: string, pageIndex: number, event: Event }) => void
+  }[]): this {
+    this.registeredListeners = events;
+    return this;
+  }
+
   setTakeScreenshot(takeScreenshot: boolean): this {
     this.enableTakeScreenshot = takeScreenshot;
     return this;
@@ -253,6 +288,8 @@ export default class BaseScraper implements BaseScraperContract {
 
     this.extraOpenedPages.push(page);
     this.extraCdpClient.push(await page.target().createCDPSession());
+
+    await this.addEventListenersToPage(page, this.extraOpenedPages.length - 1);
 
     return page;
   }
@@ -358,10 +395,11 @@ export default class BaseScraper implements BaseScraperContract {
         }
       });
     }
+
+    await this.addEventListenersToPage(this.page, 0);
   }
 
   async end(): Promise<void> {
-
     if (this.isRunning) {
       this.isRunning = false;
 
@@ -422,7 +460,6 @@ export default class BaseScraper implements BaseScraperContract {
       this.registeredTests = [];
       this.extraCdpClient = [];
       this.extraOpenedPages = [];
-
     }
   }
 
@@ -470,7 +507,7 @@ export default class BaseScraper implements BaseScraperContract {
         fs.mkdirSync(`${realPath}/${folder}`, {recursive: true});
       }
 
-      let fileName = (name ?? (uuid.v4() + "_" + Date.now())) + ".png";
+      let fileName = (name || (uuid.v4() + "_" + Date.now())) + ".png";
 
       await this.page.screenshot({
         path: `${realPath}/${folder}/${fileName}`,
@@ -479,7 +516,7 @@ export default class BaseScraper implements BaseScraperContract {
       });
 
       for (const page of this.extraOpenedPages) {
-        fileName = (name ?? (uuid.v4() + "_" + Date.now())) + ".png";
+        fileName = (name || (uuid.v4() + "_" + Date.now())) + ".png";
 
         await page.screenshot({
           path: `${realPath}/${folder}/${fileName}`,
@@ -487,6 +524,25 @@ export default class BaseScraper implements BaseScraperContract {
           fullPage: true,
         });
       }
+    }
+  }
+
+  protected async addEventListenersToPage(page: Page, pageIndex: number): Promise<void> {
+    for (const listener of this.registeredListeners) {
+      await page.exposeFunction(listener.event, (args) => {
+        listener.callback({...args, pageIndex});
+      });
+
+      await page.evaluateOnNewDocument((type) => {
+        console.log("Adding event listener: ", type);
+
+        window.addEventListener(
+          type,
+          (e) => {
+            window[type]({type, event: e});
+          },
+        );
+      }, listener.event);
     }
   }
 }

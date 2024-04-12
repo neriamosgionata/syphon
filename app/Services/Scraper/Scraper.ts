@@ -52,6 +52,17 @@ export interface ScraperContract extends BaseScraperContract {
 
   writeLog(level: string, message: string, ...values: unknown[]): void;
 
+  addEventListener(event: string, callback: (args: {
+    type: string,
+    pageIndex: number,
+    event: Event
+  }) => void): ScraperContract;
+
+  setEventListeners(events: {
+    event: string,
+    callback: (args: { type: string, pageIndex: number, event: Event }) => void
+  }[]): ScraperContract;
+
   //HELPERS
 
   goto(href: string, timeoutMs?: number): ScraperHandlerFunction<void>;
@@ -175,7 +186,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
           element.focus();
         }, selector);
 
-        await new Promise((resolve) => setTimeout(resolve, options.delay ?? (32 + (Math.random() * 137))));
+        await new Promise((resolve) => setTimeout(resolve, options.delay || (32 + (Math.random() * 137))));
 
         await _page.keyboard.press("Enter");
         return;
@@ -225,7 +236,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
       if (_page) {
         const path = "screenshots";
 
-        const fullPath = path + "/" + (name ?? "screenshot-") + Date.now() + ".png";
+        const fullPath = path + "/" + (name || "screenshot-") + Date.now() + ".png";
         const img = await _page.screenshot();
 
         await Drive.put(fullPath, img);
