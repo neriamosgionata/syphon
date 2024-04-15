@@ -267,6 +267,8 @@ export interface HelperContract {
   tokenizeSentence(str: string, customStopWords?: string[] | string): string[];
 
   chunkArray<T>(array: T[], size: number): T[][];
+
+  getNestedProperty(obj: object, path: string): any;
 }
 
 export default class Helper implements HelperContract {
@@ -1229,6 +1231,10 @@ export default class Helper implements HelperContract {
       results.push(array.splice(0, size));
     }
     return results;
+  }
+
+  getNestedProperty(obj: any, path: string): any {
+    return path.split('.').reduce((acc, part) => acc && acc[part], obj);
   }
 
 }
