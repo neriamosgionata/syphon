@@ -1,6 +1,6 @@
 import * as stopword from "stopword";
 import {deu, eng, eus, fra, ita, LanguageCode, removeStopwords, spa} from "stopword";
-import lodash from "lodash";
+import {isEqual} from "lodash";
 
 import natural, {
   AfinnLanguage,
@@ -21,9 +21,68 @@ import crypto from "crypto";
 import {Page} from "puppeteer";
 
 import cheerio from 'cheerio';
+import {ObjectId} from "mongodb";
 import moment from "moment";
 
 export interface HelperContract {
+  rsAstralRange: string;
+  rsComboMarksRange: string;
+  reComboHalfMarksRange: string;
+  rsComboSymbolsRange: string;
+  rsComboMarksExtendedRange: string;
+  rsComboMarksSupplementRange: string;
+  rsComboRange: string;
+  rsDingbatRange: string;
+  rsLowerRange: string;
+  rsMathOpRange: string;
+  rsNonCharRange: string;
+  rsPunctuationRange: string;
+  rsSpaceRange: string;
+  rsUpperRange: string;
+  rsVarRange: string;
+  rsBreakRange: string;
+  rsApos: string;
+  rsBreak: string;
+  rsCombo: string;
+  rsDigit: string;
+  rsDingbat: string;
+  rsLower: string;
+  rsMisc: string;
+  rsFitz: string;
+  rsModifier: string;
+  rsNonAstral: string;
+  rsRegional: string;
+  rsSurrPair: string;
+  rsUpper: string;
+  rsZWJ: string;
+  rsMiscLower: string;
+  rsMiscUpper: string;
+  rsOptContrLower: string;
+  rsOptContrUpper: string;
+  reOptMod: string;
+  rsOptVar: string;
+  rsOptJoin: string;
+  rsOrdLower: string;
+  rsOrdUpper: string;
+  rsSeq: string;
+  rsEmoji: string;
+  reUnicodeWords: RegExp;
+  hasUnicodeWord: (string: string) => boolean;
+  reAsciiWord: RegExp;
+  urlRE: RegExp;
+  domainRE: RegExp;
+  ONE_SECOND: number;
+  ONE_MINUTE: number;
+  ONE_HOUR: number;
+  ONE_DAY: number;
+  ONE_WEEK: number;
+  ONE_MONTH: number;
+  ONE_YEAR: number;
+  dateTimeFormat: string;
+  dateFormat: string;
+  stringMonthFormat: string;
+  EQUATORIAL_RADIUS_KM: number;
+
   pythonSerializedToJson(pythonObj: string): string;
 
   cleanText(text: string): string;
@@ -45,108 +104,6 @@ export interface HelperContract {
   detectLanguage(text: string | string[]): Promise<Language | null>;
 
   isNotFalsy<T>(value: T | any): boolean;
-
-  rsAstralRange: string;
-
-  rsComboMarksRange: string;
-
-  reComboHalfMarksRange: string;
-
-  rsComboSymbolsRange: string;
-
-  rsComboMarksExtendedRange: string;
-
-  rsComboMarksSupplementRange: string;
-
-  rsComboRange: string;
-
-  rsDingbatRange: string;
-
-  rsLowerRange: string;
-
-  rsMathOpRange: string;
-
-  rsNonCharRange: string;
-
-  rsPunctuationRange: string;
-
-  rsSpaceRange: string;
-
-  rsUpperRange: string;
-
-  rsVarRange: string;
-
-  rsBreakRange: string;
-
-  rsApos: string;
-
-  rsBreak: string;
-
-  rsCombo: string;
-
-  rsDigit: string;
-
-  rsDingbat: string;
-
-  rsLower: string;
-
-  rsMisc: string;
-
-  rsFitz: string;
-
-  rsModifier: string;
-
-  rsNonAstral: string;
-
-  rsRegional: string;
-
-  rsSurrPair: string;
-
-  rsUpper: string;
-
-  rsZWJ: string;
-
-  rsMiscLower: string;
-
-  rsMiscUpper: string;
-
-  rsOptContrLower: string;
-
-  rsOptContrUpper: string;
-
-  reOptMod: string;
-
-  rsOptVar: string;
-
-  rsOptJoin: string;
-
-  rsOrdLower: string;
-
-  rsOrdUpper: string;
-
-  rsSeq: string;
-
-  rsEmoji: string;
-
-  reUnicodeWords: RegExp;
-
-  hasUnicodeWord: (string: string) => boolean;
-
-  reAsciiWord: RegExp;
-  urlRE: RegExp;
-  domainRE: RegExp;
-  ONE_SECOND: number;
-  ONE_MINUTE: number;
-  ONE_HOUR: number;
-  ONE_DAY: number;
-  ONE_WEEK: number;
-  ONE_MONTH: number;
-  ONE_YEAR: number;
-  dateTimeFormat: string;
-  dateFormat: string;
-  stringMonthFormat: string;
-
-  EQUATORIAL_RADIUS_KM: number;
 
   unicodeWords(string: string): RegExpMatchArray | null;
 
@@ -252,6 +209,8 @@ export interface HelperContract {
 
   findNestedObjectAttribute(element: object, keyToMatch: string, valueToMatch?: any): any;
 
+  getNestedProperty(obj: object, path: string): any;
+
   mergeDeepNoOverwrite(target: any, ...sources: any[]): { [p: string]: any };
 
   mergeDeep(target: object, ...sources: any[]): { [p: string]: any };
@@ -266,12 +225,94 @@ export interface HelperContract {
 
   tokenizeSentence(str: string, customStopWords?: string[] | string): string[];
 
-  chunkArray<T>(array: T[], size: number): T[][];
+  camelCaseToWords(s: string): string;
 
-  getNestedProperty(obj: object, path: string): any;
+  fullAddress(address: {
+    postalCode?: string,
+    addressCountry: string,
+    addressRegion?: string,
+    province?: string,
+    streetAddress?: string,
+    addressLocality?: string,
+  }): string;
+
+  chunkArray<T>(array: T[], size: number): T[][];
 }
 
 export default class Helper implements HelperContract {
+  /** Used to compose unicode character classes. */
+  rsAstralRange = '\\ud800-\\udfff'
+  rsComboMarksRange = '\\u0300-\\u036f'
+  reComboHalfMarksRange = '\\ufe20-\\ufe2f'
+  rsComboSymbolsRange = '\\u20d0-\\u20ff'
+  rsComboMarksExtendedRange = '\\u1ab0-\\u1aff'
+  rsComboMarksSupplementRange = '\\u1dc0-\\u1dff'
+  rsComboRange = this.rsComboMarksRange + this.reComboHalfMarksRange + this.rsComboSymbolsRange + this.rsComboMarksExtendedRange + this.rsComboMarksSupplementRange
+  rsDingbatRange = '\\u2700-\\u27bf'
+  rsLowerRange = 'a-z\\xdf-\\xf6\\xf8-\\xff'
+  rsMathOpRange = '\\xac\\xb1\\xd7\\xf7'
+  rsNonCharRange = '\\x00-\\x2f\\x3a-\\x40\\x5b-\\x60\\x7b-\\xbf'
+  rsPunctuationRange = '\\u2000-\\u206f'
+  rsSpaceRange = ' \\t\\x0b\\f\\xa0\\ufeff\\n\\r\\u2028\\u2029\\u1680\\u180e\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200a\\u202f\\u205f\\u3000'
+  rsUpperRange = 'A-Z\\xc0-\\xd6\\xd8-\\xde'
+  rsVarRange = '\\ufe0e\\ufe0f'
+  rsBreakRange = this.rsMathOpRange + this.rsNonCharRange + this.rsPunctuationRange + this.rsSpaceRange
+  /** Used to compose unicode capture groups. */
+  rsApos = '[\'\u2019]'
+  rsBreak = `[${this.rsBreakRange}]`
+  rsCombo = `[${this.rsComboRange}]`
+  rsDigit = '\\d'
+  rsDingbat = `[${this.rsDingbatRange}]`
+  rsLower = `[${this.rsLowerRange}]`
+  rsMisc = `[^${this.rsAstralRange}${this.rsBreakRange + this.rsDigit + this.rsDingbatRange + this.rsLowerRange + this.rsUpperRange}]`
+  rsFitz = '\\ud83c[\\udffb-\\udfff]'
+  rsModifier = `(?:${this.rsCombo}|${this.rsFitz})`
+  rsNonAstral = `[^${this.rsAstralRange}]`
+  rsRegional = '(?:\\ud83c[\\udde6-\\uddff]){2}'
+  rsSurrPair = '[\\ud800-\\udbff][\\udc00-\\udfff]'
+  rsUpper = `[${this.rsUpperRange}]`
+  rsZWJ = '\\u200d'
+  /** Used to compose unicode regexes. */
+  rsMiscLower = `(?:${this.rsLower}|${this.rsMisc})`
+  rsMiscUpper = `(?:${this.rsUpper}|${this.rsMisc})`
+  rsOptContrLower = `(?:${this.rsApos}(?:d|ll|m|re|s|t|ve))?`
+  rsOptContrUpper = `(?:${this.rsApos}(?:D|LL|M|RE|S|T|VE))?`
+  reOptMod = `${this.rsModifier}?`
+  rsOptVar = `[${this.rsVarRange}]?`
+  rsOptJoin = `(?:${this.rsZWJ}(?:${[this.rsNonAstral, this.rsRegional, this.rsSurrPair].join('|')})${this.rsOptVar + this.reOptMod})*`
+  rsOrdLower = '\\d*(?:1st|2nd|3rd|(?![123])\\dth)(?=\\b|[A-Z_])'
+  rsOrdUpper = '\\d*(?:1ST|2ND|3RD|(?![123])\\dTH)(?=\\b|[a-z_])'
+  rsSeq = this.rsOptVar + this.reOptMod + this.rsOptJoin
+  rsEmoji = `(?:${[this.rsDingbat, this.rsRegional, this.rsSurrPair].join('|')})${this.rsSeq}`
+  reUnicodeWords = RegExp([
+    `${this.rsUpper}?${this.rsLower}+${this.rsOptContrLower}(?=${[this.rsBreak, this.rsUpper, '$'].join('|')})`,
+    `${this.rsMiscUpper}+${this.rsOptContrUpper}(?=${[this.rsBreak, this.rsUpper + this.rsMiscLower, '$'].join('|')})`,
+    `${this.rsUpper}?${this.rsMiscLower}+${this.rsOptContrLower}`,
+    `${this.rsUpper}+${this.rsOptContrUpper}`,
+    this.rsOrdUpper,
+    this.rsOrdLower,
+    `${this.rsDigit}+`,
+    this.rsEmoji
+  ].join('|'), 'g')
+  hasUnicodeWord = RegExp.prototype.test.bind(
+    /[a-z][A-Z]|[A-Z]{2}[a-z]|\d[a-zA-Z]|[a-zA-Z]\d|[^a-zA-Z0-9 ]/
+  )
+  /** Used to match words composed of alphanumeric characters. */
+  reAsciiWord = /[^\x00-\x2f\x3a-\x40\x5b-\x60\x7b-\x7f]+/g
+  urlRE = /^(?:http(s)?:\/\/)?[\w.-]+(?:\.[\w.-]+)+[\w\-._~:/?#[\]@!$&'()*+,;=.]+$/i
+  domainRE = /^(?!:\/\/)([a-zA-Z0-9-_]+\.)*[a-zA-Z0-9][a-zA-Z0-9-_]+\.[a-zA-Z]{2,11}?$/i
+  ONE_SECOND = 1
+  ONE_MINUTE = 60 * 1000
+  ONE_HOUR = this.ONE_MINUTE * 60
+  ONE_DAY = this.ONE_HOUR * 24
+  ONE_WEEK = this.ONE_DAY * 7
+  ONE_MONTH = this.ONE_DAY * 30
+  ONE_YEAR = this.ONE_DAY * 365
+  dateTimeFormat = 'YYYY-MM-DD hh:mm:ss'
+  dateFormat = 'YYYY-MM-DD'
+  stringMonthFormat = 'MMMM'
+  EQUATORIAL_RADIUS_KM = 6378.1;
+
   pythonSerializedToJson(pythonObj: string): string {
     return pythonObj.replaceAll(/'/g, '"')
       .replaceAll(/True/g, 'true')
@@ -320,8 +361,8 @@ export default class Helper implements HelperContract {
     const file = fs.readFileSync("package.json");
     const packageJson: PackageJson = JSON.parse(file.toString());
     return [
-      ...Object.keys(packageJson.dependencies ?? {}),
-      ...Object.keys(packageJson.devDependencies ?? {}),
+      ...Object.keys(packageJson.dependencies || {}),
+      ...Object.keys(packageJson.devDependencies || {}),
     ];
   }
 
@@ -329,8 +370,8 @@ export default class Helper implements HelperContract {
     const file = fs.readFileSync("package.json");
     const packageJson: PackageJson = JSON.parse(file.toString());
     return {
-      ...(packageJson.dependencies ?? {}),
-      ...(packageJson.devDependencies ?? {}),
+      ...(packageJson.dependencies || {}),
+      ...(packageJson.devDependencies || {}),
     };
   }
 
@@ -374,85 +415,6 @@ export default class Helper implements HelperContract {
   isNotFalsy<T>(value: T | any): boolean {
     return !(value === null || value === undefined || value === "" || isNaN(value));
   }
-
-  /** Used to compose unicode character classes. */
-  rsAstralRange = '\\ud800-\\udfff'
-  rsComboMarksRange = '\\u0300-\\u036f'
-  reComboHalfMarksRange = '\\ufe20-\\ufe2f'
-  rsComboSymbolsRange = '\\u20d0-\\u20ff'
-  rsComboMarksExtendedRange = '\\u1ab0-\\u1aff'
-  rsComboMarksSupplementRange = '\\u1dc0-\\u1dff'
-  rsComboRange = this.rsComboMarksRange + this.reComboHalfMarksRange + this.rsComboSymbolsRange + this.rsComboMarksExtendedRange + this.rsComboMarksSupplementRange
-  rsDingbatRange = '\\u2700-\\u27bf'
-  rsLowerRange = 'a-z\\xdf-\\xf6\\xf8-\\xff'
-  rsMathOpRange = '\\xac\\xb1\\xd7\\xf7'
-  rsNonCharRange = '\\x00-\\x2f\\x3a-\\x40\\x5b-\\x60\\x7b-\\xbf'
-  rsPunctuationRange = '\\u2000-\\u206f'
-  rsSpaceRange = ' \\t\\x0b\\f\\xa0\\ufeff\\n\\r\\u2028\\u2029\\u1680\\u180e\\u2000\\u2001\\u2002\\u2003\\u2004\\u2005\\u2006\\u2007\\u2008\\u2009\\u200a\\u202f\\u205f\\u3000'
-  rsUpperRange = 'A-Z\\xc0-\\xd6\\xd8-\\xde'
-  rsVarRange = '\\ufe0e\\ufe0f'
-  rsBreakRange = this.rsMathOpRange + this.rsNonCharRange + this.rsPunctuationRange + this.rsSpaceRange
-
-  /** Used to compose unicode capture groups. */
-  rsApos = '[\'\u2019]'
-  rsBreak = `[${this.rsBreakRange}]`
-  rsCombo = `[${this.rsComboRange}]`
-  rsDigit = '\\d'
-  rsDingbat = `[${this.rsDingbatRange}]`
-  rsLower = `[${this.rsLowerRange}]`
-  rsMisc = `[^${this.rsAstralRange}${this.rsBreakRange + this.rsDigit + this.rsDingbatRange + this.rsLowerRange + this.rsUpperRange}]`
-  rsFitz = '\\ud83c[\\udffb-\\udfff]'
-  rsModifier = `(?:${this.rsCombo}|${this.rsFitz})`
-  rsNonAstral = `[^${this.rsAstralRange}]`
-  rsRegional = '(?:\\ud83c[\\udde6-\\uddff]){2}'
-  rsSurrPair = '[\\ud800-\\udbff][\\udc00-\\udfff]'
-  rsUpper = `[${this.rsUpperRange}]`
-  rsZWJ = '\\u200d'
-
-  /** Used to compose unicode regexes. */
-  rsMiscLower = `(?:${this.rsLower}|${this.rsMisc})`
-  rsMiscUpper = `(?:${this.rsUpper}|${this.rsMisc})`
-  rsOptContrLower = `(?:${this.rsApos}(?:d|ll|m|re|s|t|ve))?`
-  rsOptContrUpper = `(?:${this.rsApos}(?:D|LL|M|RE|S|T|VE))?`
-  reOptMod = `${this.rsModifier}?`
-  rsOptVar = `[${this.rsVarRange}]?`
-  rsOptJoin = `(?:${this.rsZWJ}(?:${[this.rsNonAstral, this.rsRegional, this.rsSurrPair].join('|')})${this.rsOptVar + this.reOptMod})*`
-  rsOrdLower = '\\d*(?:1st|2nd|3rd|(?![123])\\dth)(?=\\b|[A-Z_])'
-  rsOrdUpper = '\\d*(?:1ST|2ND|3RD|(?![123])\\dTH)(?=\\b|[a-z_])'
-  rsSeq = this.rsOptVar + this.reOptMod + this.rsOptJoin
-  rsEmoji = `(?:${[this.rsDingbat, this.rsRegional, this.rsSurrPair].join('|')})${this.rsSeq}`
-
-  reUnicodeWords = RegExp([
-    `${this.rsUpper}?${this.rsLower}+${this.rsOptContrLower}(?=${[this.rsBreak, this.rsUpper, '$'].join('|')})`,
-    `${this.rsMiscUpper}+${this.rsOptContrUpper}(?=${[this.rsBreak, this.rsUpper + this.rsMiscLower, '$'].join('|')})`,
-    `${this.rsUpper}?${this.rsMiscLower}+${this.rsOptContrLower}`,
-    `${this.rsUpper}+${this.rsOptContrUpper}`,
-    this.rsOrdUpper,
-    this.rsOrdLower,
-    `${this.rsDigit}+`,
-    this.rsEmoji
-  ].join('|'), 'g')
-
-  hasUnicodeWord = RegExp.prototype.test.bind(
-    /[a-z][A-Z]|[A-Z]{2}[a-z]|\d[a-zA-Z]|[a-zA-Z]\d|[^a-zA-Z0-9 ]/
-  )
-
-  /** Used to match words composed of alphanumeric characters. */
-  reAsciiWord = /[^\x00-\x2f\x3a-\x40\x5b-\x60\x7b-\x7f]+/g
-  urlRE = /^(?:http(s)?:\/\/)?[\w.-]+(?:\.[\w.-]+)+[\w\-._~:/?#[\]@!$&'()*+,;=.]+$/i
-  domainRE = /^(?!:\/\/)([a-zA-Z0-9-_]+\.)*[a-zA-Z0-9][a-zA-Z0-9-_]+\.[a-zA-Z]{2,11}?$/i
-  ONE_SECOND = 1
-  ONE_MINUTE = 60 * 1000
-  ONE_HOUR = this.ONE_MINUTE * 60
-  ONE_DAY = this.ONE_HOUR * 24
-  ONE_WEEK = this.ONE_DAY * 7
-  ONE_MONTH = this.ONE_DAY * 30
-  ONE_YEAR = this.ONE_DAY * 365
-  dateTimeFormat = 'YYYY-MM-DD hh:mm:ss'
-  dateFormat = 'YYYY-MM-DD'
-  stringMonthFormat = 'MMMM'
-
-  EQUATORIAL_RADIUS_KM = 6378.1;
 
   /**
    * Splits a Unicode `string` into an array of its words.
@@ -639,14 +601,6 @@ export default class Helper implements HelperContract {
     return this.isNumber(a) && isFinite(a)
   }
 
-  isDate(str: any) {
-    if (typeof str !== "string") {
-      return false
-    }
-
-    return moment(str, "DD-mm-YYYY").isValid();
-  }
-
   map(a, cb) {
     const out: any = []
     for (const key in a) {
@@ -769,6 +723,8 @@ export default class Helper implements HelperContract {
   }
 
   normalizeChefName(chefName: string): string[] {
+    chefName = chefName.trim().toLowerCase().replace("'", " ").replace(/\s+/g, " ").trim();
+
     const chefsS = chefName.includes(' / ') ? chefName.split(' / ') : [];
     const chefsE = chefName.includes(' e ') ? chefName.split(' e ') : [];
     const chefsC = chefName.includes(' con ') ? chefName.split(' con ') : [];
@@ -1115,7 +1071,7 @@ export default class Helper implements HelperContract {
   }
 
   isObject(value: any) {
-    return value && typeof value === "object" && !Array.isArray(value) && !(value instanceof Date);
+    return value && typeof value === "object" && !Array.isArray(value) && !(value instanceof Date) && !(value instanceof ObjectId);
   }
 
   findNestedObjectAttribute(element: object, keyToMatch: string, valueToMatch: any = undefined): any {
@@ -1132,7 +1088,7 @@ export default class Helper implements HelperContract {
     for (const element of entries) {
       const [elementKey, elementValue] = element;
 
-      if (elementKey === keyToMatch && (valueToMatch === undefined || lodash.isEqual(elementValue, valueToMatch))) {
+      if (elementKey === keyToMatch && (valueToMatch === undefined || isEqual(elementValue, valueToMatch))) {
         return element;
       }
 
@@ -1148,8 +1104,12 @@ export default class Helper implements HelperContract {
     return null;
   }
 
+  getNestedProperty(obj: any, path: string): any {
+    return path.split('.').reduce((acc, part) => acc && acc[part], obj);
+  }
+
   mergeDeepNoOverwrite(target: any, ...sources: any[]): { [p: string]: any } {
-    if (!sources?.length) {
+    if (sources.length === 0) {
       return target;
     }
 
@@ -1157,10 +1117,14 @@ export default class Helper implements HelperContract {
 
     if (this.isObject(target)) {
       for (const key in Object.keys(source)) {
-        if (this.isObject(source[key])) {
+        if (Array.isArray(target[key])) {
+          if (Array.isArray(source[key])) {
+            target[key] = [...new Set([...target[key], ...source[key]])];
+          }
+        } else if (this.isObject(source[key])) {
           target[key] = this.mergeDeepNoOverwrite(target[key], source[key]);
-        } else {
-          if (this.isValued(target[key]) && this.isValued(source[key])) {
+        } else if (this.isValued(source[key])) {
+          if (!this.isValued(target[key])) {
             target[key] = source[key];
           }
         }
@@ -1171,23 +1135,22 @@ export default class Helper implements HelperContract {
   }
 
   mergeDeep(target: object, ...sources: any[]): { [p: string]: any } {
-    if (!sources?.length) {
+    if (sources.length === 0) {
       return target;
     }
 
     const source = sources.shift();
 
-    if (this.isObject(target) && this.isObject(source)) {
-      for (const key in source) {
-        if (this.isObject(source[key])) {
-          if (!target[key]) {
-            Object.assign(target, {[key]: {}});
+    if (this.isObject(target)) {
+      for (const key in Object.keys(source)) {
+        if (Array.isArray(target[key])) {
+          if (Array.isArray(source[key])) {
+            target[key] = [...new Set([...target[key], ...source[key]])];
           }
+        } else if (this.isObject(source[key])) {
           target[key] = this.mergeDeep(target[key], source[key]);
-        } else {
-          if (this.isValued(source[key])) {
-            Object.assign(target, {[key]: source[key]});
-          }
+        } else if (this.isValued(source[key])) {
+          target[key] = source[key];
         }
       }
     }
@@ -1212,6 +1175,14 @@ export default class Helper implements HelperContract {
     return !isNaN(str) && !isNaN(parseFloat(str));
   }
 
+  isDate(str: any) {
+    if (typeof str !== "string") {
+      return false
+    }
+
+    return moment(str, "DD-mm-YYYY").isValid();
+  }
+
   tokenizeSentence(str: string, customStopWords?: string[] | string): string[] {
     let stopWordChoosen: string[] = [];
 
@@ -1225,16 +1196,37 @@ export default class Helper implements HelperContract {
     return removeStopwords((tokenizer.tokenize(str) || []), stopWordChoosen);
   }
 
+  camelCaseToWords(s: string): string {
+    const result = s.replace(/([A-Z])/g, ' $1');
+    return result.charAt(0).toUpperCase() + result.slice(1);
+  }
+
+  fullAddress(address: {
+    postalCode?: string,
+    addressCountry: string,
+    addressRegion?: string,
+    province?: string,
+    streetAddress?: string,
+    addressLocality?: string,
+  }): string {
+    const addressParts = [
+      address.streetAddress,
+      address.addressLocality,
+      address.addressRegion,
+      address.province,
+      address.addressCountry,
+      address.postalCode,
+    ];
+
+    return addressParts.filter(this.isValued).join(" ");
+  }
+
   chunkArray<T>(array: T[], size: number): T[][] {
     const results: T[][] = [];
     while (array.length) {
       results.push(array.splice(0, size));
     }
     return results;
-  }
-
-  getNestedProperty(obj: any, path: string): any {
-    return path.split('.').reduce((acc, part) => acc && acc[part], obj);
   }
 
 }
