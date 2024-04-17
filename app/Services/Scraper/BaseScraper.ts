@@ -1,4 +1,4 @@
-import {Browser, CDPSession, defaultArgs, executablePath, Page} from "puppeteer";
+import {Browser, CDPSession, executablePath, Page} from "puppeteer";
 import {LogChannels, LoggerContract} from "App/Services/Logger/Logger";
 import Log from "@ioc:Providers/Logger";
 import {LogLevelEnum} from "App/Enums/LogLevelEnum";
@@ -75,6 +75,8 @@ export interface BaseScraperContract {
   writeTableLog(table: any[], logLevel?: LogLevelEnum): void;
 
   writeLog(level: string, message: string, ...values: unknown[]): void;
+
+  getIsHeadless(): boolean;
 }
 
 export default class BaseScraper implements BaseScraperContract {
@@ -211,6 +213,10 @@ export default class BaseScraper implements BaseScraperContract {
     return this;
   }
 
+  getIsHeadless(): boolean {
+    return this.withHeadlessChrome;
+  }
+
   registerError(error: Error | any, key: string): void {
     const newErr = new Error(key + ": " + error.message);
     newErr.stack = error.stack;
@@ -303,49 +309,41 @@ export default class BaseScraper implements BaseScraperContract {
     this.errors = [];
 
     const args = [
-      ...new Set(
-        [
-          "--single-process",
-          "--allow-running-insecure-content",
-          "--autoplay-policy=user-gesture-required",
-          "--disable-background-timer-throttling",
-          "--disable-component-update",
-          "--disable-domain-reliability",
-          "--disable-ipc-flooding-protection",
-          "--disable-print-preview",
-          "--disable-dev-shm-usage",
-          "--disable-setuid-sandbox",
-          "--disable-site-isolation-trials",
-          "--disable-speech-api",
-          "--disable-web-security",
-          "--disk-cache-size=1073741824",
-          "--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process",
-          "--enable-features=SharedArrayBuffer,NetworkService,NetworkServiceInProcess",
-          "--hide-scrollbars",
-          "--ignore-gpu-blocklist",
-          "--mute-audio",
-          "--no-default-browser-check",
-          "--no-first-run",
-          "--no-pings",
-          "--no-sandbox",
-          "--no-zygote",
-          "--window-size=1920,1080",
-          "--ignore-certificate-errors",
-          "--lang='en-US'",
-          "--enable-automation",
-          "--no-default-browser-check",
-          "--in-process-gpu",
-          ...defaultArgs({
-            headless: this.withHeadlessChrome,
-          }),
-        ]
-      ),
+      "--single-process",
+      "--allow-running-insecure-content",
+      "--autoplay-policy=user-gesture-required",
+      "--disable-background-timer-throttling",
+      "--disable-component-update",
+      "--disable-domain-reliability",
+      "--disable-ipc-flooding-protection",
+      "--disable-print-preview",
+      "--disable-dev-shm-usage",
+      "--disable-setuid-sandbox",
+      "--disable-site-isolation-trials",
+      "--disable-speech-api",
+      "--disable-web-security",
+      "--disk-cache-size=1073741824",
+      "--disable-features=AudioServiceOutOfProcess,IsolateOrigins,site-per-process",
+      "--enable-features=SharedArrayBuffer,NetworkService,NetworkServiceInProcess",
+      "--hide-scrollbars",
+      "--ignore-gpu-blocklist",
+      "--mute-audio",
+      "--no-default-browser-check",
+      "--no-first-run",
+      "--no-pings",
+      "--no-sandbox",
+      "--no-zygote",
+      "--window-size=1920,1080",
+      "--ignore-certificate-errors",
+      "--enable-automation",
+      "--no-default-browser-check",
+      "--in-process-gpu",
     ];
 
     if (this.enableProxy && Env.get("USE_PROXY", false)) {
       args.filter((arg) => !arg.includes("--proxy-server="));
       const proxyAddress = Env.get("NODE_ENV") === "development" ? "localhost" : "proxy";
-      const proxyArgs = `--proxy-server=${proxyAddress}:${Env.get("LOCAL_PROXY_PORT", 6001)}`;
+      const proxyArgs = `--proxy-server=http=${proxyAddress}:${Env.get("LOCAL_PROXY_PORT", 6001)}`;
       args.push(proxyArgs);
     }
 
@@ -361,7 +359,7 @@ export default class BaseScraper implements BaseScraperContract {
       },
       headless: this.withHeadlessChrome,
       args,
-      protocolTimeout: 300000,
+      protocolTimeout: 60000,
     };
 
     const puppeteer = (await import("puppeteer-extra")).default;
