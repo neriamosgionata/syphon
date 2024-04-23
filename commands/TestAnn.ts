@@ -60,7 +60,23 @@ export default class TestAnn extends BaseCommand {
           batchInputShape: [null, dataFeaturesLength],
         },
         {
-          units: dataFeaturesLength * 2,
+          units: dataFeaturesLength + 2,
+          activation: "relu",
+        },
+        {
+          units: dataFeaturesLength + 4,
+          activation: "relu",
+        },
+        {
+          units: dataFeaturesLength + 6,
+          activation: "relu",
+        },
+        {
+          units: dataFeaturesLength + 4,
+          activation: "relu",
+        },
+        {
+          units: dataFeaturesLength + 2,
           activation: "relu",
         },
         {
@@ -124,7 +140,7 @@ export default class TestAnn extends BaseCommand {
       x_train,
       y_train,
       {
-        batchSize: 192,
+        batchSize: 32,
         epochs: 1000,
         verbose: 2,
       },
