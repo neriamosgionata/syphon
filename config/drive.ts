@@ -5,7 +5,6 @@
  * file.
  */
 
-import Env from '@ioc:Adonis/Core/Env'
 import {driveConfig} from '@adonisjs/core/build/config'
 import Application from "@ioc:Adonis/Core/Application";
 import path from "path";
@@ -29,7 +28,7 @@ export default driveConfig({
   | the `DRIVE_DISK` environment variable.
   |
   */
-  disk: Env.get('DRIVE_DISK'),
+  disk: "local-storage",
 
   disks: {
     /*
@@ -54,7 +53,7 @@ export default driveConfig({
       | files.
       |
       */
-      root: path.join(Application.appRoot, Env.get("DATA_FOLDER", "storage/data")),
+      root: path.join(Application.appRoot, "storage"),
 
       /*
       |--------------------------------------------------------------------------
@@ -66,7 +65,7 @@ export default driveConfig({
       | storage services that has inbuilt capabilities to serve files.
       |
       */
-      serveFiles: true,
+      serveFiles: false,
 
       /*
       |--------------------------------------------------------------------------
@@ -78,7 +77,47 @@ export default driveConfig({
       | you are not registering routes with this prefix.
       |
       */
-      basePath: '/uploads',
+      basePath: '/',
+    },
+
+    "local-storage": {
+      driver: 'local-storage',
+      visibility: 'public',
+
+      /*
+      |--------------------------------------------------------------------------
+      | Storage root - Local driver only
+      |--------------------------------------------------------------------------
+      |
+      | Define an absolute path to the storage directory from where to read the
+      | files.
+      |
+      */
+      root: path.join(Application.appRoot, "storage"),
+
+      /*
+      |--------------------------------------------------------------------------
+      | Serve files - Local driver only
+      |--------------------------------------------------------------------------
+      |
+      | When this is set to true, AdonisJS will configure a files server to serve
+      | files from the disk root. This is done to mimic the behavior of cloud
+      | storage services that has inbuilt capabilities to serve files.
+      |
+      */
+      serveFiles: false,
+
+      /*
+      |--------------------------------------------------------------------------
+      | Base path - Local driver only
+      |--------------------------------------------------------------------------
+      |
+      | Base path is always required when "serveFiles = true". Also make sure
+      | the `basePath` is unique across all the disks using "local" driver and
+      | you are not registering routes with this prefix.
+      |
+      */
+      basePath: '/',
     },
 
     /*
