@@ -1,7 +1,6 @@
 import {args, BaseCommand} from '@adonisjs/core/build/standalone'
-import {JobContract} from "App/Services/Jobs/Jobs";
-import {AppContainerAliasesEnum} from "App/Enums/AppContainerAliasesEnum";
 import {ScrapeYahooFinanceForTickersJobParameters} from "App/Jobs/ScrapeYahooFinanceForTickersJob";
+import Jobs from "@ioc:Providers/Jobs";
 
 export default class ScrapeYahooFinance extends BaseCommand {
   /**
@@ -34,15 +33,11 @@ export default class ScrapeYahooFinance extends BaseCommand {
   public numOfThreads: string | undefined;
 
   public async run() {
-    const Jobs: JobContract = this.application.container.use(AppContainerAliasesEnum.Jobs);
-
-    await Jobs.waitUntilDone(
-      await Jobs.dispatch<ScrapeYahooFinanceForTickersJobParameters>(
-        "ScrapeYahooFinanceForTickersJob",
-        {
-          numOfThreads: this.numOfThreads ? parseInt(this.numOfThreads) : 2
-        }
-      )
+    await Jobs.runWithoutDispatch<ScrapeYahooFinanceForTickersJobParameters>(
+      "ScrapeYahooFinanceForTickersJob",
+      {
+        numOfThreads: this.numOfThreads ? parseInt(this.numOfThreads) : 2
+      }
     );
   }
 }
