@@ -4,6 +4,7 @@ import type {MessagePort, Worker} from "worker_threads";
 import {LogLevelEnum} from "App/Enums/LogLevelEnum";
 import {isEqual} from "lodash";
 import {EmitEventType, EmitEventTypeData} from "App/Services/Socket/SocketTypes";
+import {LogChannels} from "App/Services/Logger/Logger";
 
 export const retriveWorkerThreadsData = <T extends BaseJobParameters>(): {
   parentPort: MessagePort,
@@ -39,9 +40,10 @@ export const loadJobParameters = <T extends BaseJobParameters>(): T => {
 };
 
 export const logMessage = <T extends BaseJobParameters>(
+  logChannel: LogChannels,
   logMessage: string,
   logParameters: any[],
-  logLevel: LogLevelEnum = LogLevelEnum.INFO,
+  logLevel: LogLevelEnum,
   logTable?: any[],
   logTableColumnNames?: string[],
   logLevelWriteTo: LogLevelEnum = LogLevelEnum.INFO,
@@ -51,6 +53,7 @@ export const logMessage = <T extends BaseJobParameters>(
     status: JobMessageEnum.LOGGING,
     id: workerData.id,
     tags: workerData.tags,
+    logChannel,
     logMessage,
     logParameters,
     logLevel,
@@ -60,7 +63,7 @@ export const logMessage = <T extends BaseJobParameters>(
   } as JobMessage);
 };
 
-export const messageToParent = <T extends BaseJobParameters>(payload: any) => {
+export const payloadToParent = <T extends BaseJobParameters>(payload: any) => {
   const {parentPort, workerData} = retriveWorkerThreadsData<T>();
   parentPort?.postMessage({
     status: JobMessageEnum.MESSAGE,
@@ -86,9 +89,9 @@ export const configureJob = (mainHandler: () => void | Promise<void>): RunJobFun
 export const progressBarOn = <T extends BaseJobParameters>(progressBarIndex?: string, total?: number, title?: string): Promise<string> => {
   const {parentPort, workerData} = retriveWorkerThreadsData<T>();
 
-  const uuid = require("uuid").v4();
-
   return new Promise((resolve) => {
+
+    const uuid = require("uuid").v4();
 
     const listener = (message: JobMessage) => {
       if (

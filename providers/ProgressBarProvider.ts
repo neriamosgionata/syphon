@@ -16,5 +16,6 @@ export default class ProgressBarProvider {
   }
 
   public async shutdown() {
+    this.app.container.use(AppContainerAliasesEnum.ProgressBar).finishCurrentServiceBars();
   }
 }

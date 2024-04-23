@@ -40,16 +40,16 @@ const scrapeNpmPackages = async (packageNames: string[], progressBarIndex: strin
 }
 
 const scrapeNpmRegistryJob = async () => {
-  Log.info("Loading installed packages..");
+  await Log.info("Loading installed packages..");
   let packageNames = Helper.loadInstalledPackageNames();
 
-  Log.info("Loaded packages: " + packageNames.length);
+  await Log.info("Loaded packages: " + packageNames.length);
   packageNames = await verifyPackageToSearch(packageNames);
 
-  Log.info("Packages to search: " + packageNames.length);
+  await Log.info("Packages to search: " + packageNames.length);
   const progressBarIndex = await ProgressBar.newBar(packageNames.length, "Scraping packages");
 
-  Log.table(packageNames);
+  await Log.table(packageNames);
 
   Console.log("Scraping packages...");
 

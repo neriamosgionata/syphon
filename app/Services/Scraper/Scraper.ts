@@ -48,9 +48,9 @@ export interface ScraperContract extends BaseScraperContract {
 
   registerError(error: Error | any, key: string): void;
 
-  writeTableLog(table: any[]): void;
+  writeTableLog(table: any[]): Promise<void>;
 
-  writeLog(level: string, message: string, ...values: unknown[]): void;
+  writeLog(level: string, message: string, ...values: unknown[]): Promise<void>;
 
   addEventListener(event: string, callback: (args: {
     type: string,

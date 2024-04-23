@@ -12,6 +12,7 @@ import {
   progressBarSetProgress,
   progressBarUpdate
 } from "App/Services/Jobs/JobHelpers";
+import {v4} from "uuid";
 
 export interface ProgressBarContract {
   newBar(length: number, title?: string, index?: string, color?: string): Promise<string>;
@@ -35,6 +36,8 @@ export interface ProgressBarContract {
     progress: number;
     eta: number;
   }[];
+
+  finishCurrentServiceBars(): void;
 }
 
 export default class ProgressBar implements ProgressBarContract {
@@ -80,9 +83,14 @@ export default class ProgressBar implements ProgressBarContract {
 
     const newTitle = this.calculateTitle(title);
 
-    const finalIndex = index ?? require("uuid").v4();
+    if (!index) {
+      do {
+        index = v4();
+      }
+      while (this.bars[index]);
+    }
 
-    const bar = this.multibarService.create(
+    this.bars[index] = this.multibarService.create(
       length,
       0,
       null,
@@ -93,23 +101,17 @@ export default class ProgressBar implements ProgressBarContract {
       }
     );
 
-    if (this.bars[finalIndex]) {
-      await this.finish(finalIndex);
-    }
-
-    this.bars[finalIndex] = bar;
-
-    this.currentLength[finalIndex] = 0;
-    this.barColor[finalIndex] = color;
-    this.titles[finalIndex] = newTitle;
-    this.length[finalIndex] = length;
-    this.eta[finalIndex] = Infinity;
+    this.currentLength[index] = 0;
+    this.barColor[index] = color;
+    this.titles[index] = newTitle;
+    this.length[index] = length;
+    this.eta[index] = Infinity;
 
     try {
       Application.container.use(AppContainerAliasesEnum.Socket).emitToAdmins(
         EmitEventType.PROGRESS_BAR_ON,
         {
-          id: finalIndex,
+          id: index,
           title: newTitle,
           length: length,
           eta: Infinity,
@@ -118,7 +120,7 @@ export default class ProgressBar implements ProgressBarContract {
     } catch (e) {
     }
 
-    return finalIndex;
+    return index;
   }
 
   async increment(index: string, steps: number = 1): Promise<void> {
@@ -129,7 +131,11 @@ export default class ProgressBar implements ProgressBarContract {
 
     this.currentLength[index] += steps;
 
-    this.bars[index].update(this.currentLength[index]);
+    try {
+      this.bars[index].update(this.currentLength[index]);
+    } catch (e) {
+
+    }
 
     // @ts-ignore
     this.eta[index] = this.bars[index].eta.getTime();
@@ -155,7 +161,11 @@ export default class ProgressBar implements ProgressBarContract {
 
     this.currentLength[index] -= steps;
 
-    this.bars[index].update(this.currentLength[index]);
+    try {
+      this.bars[index].update(this.currentLength[index]);
+    } catch (e) {
+
+    }
 
     // @ts-ignore
     this.eta[index] = this.bars[index].eta.getTime();
@@ -173,15 +183,12 @@ export default class ProgressBar implements ProgressBarContract {
     }
   }
 
-  async finish(index: string): Promise<void> {
-    if (!isMainThread) {
-      progressBarOff(index);
-      return;
+  private finishBar(index: string): void {
+    try {
+      this.bars[index].stop();
+      this.multibarService.remove(this.bars[index]);
+    } catch (e) {
     }
-
-    this.bars[index].stop();
-
-    this.multibarService.remove(this.bars[index]);
 
     delete this.bars[index];
     delete this.currentLength[index];
@@ -201,13 +208,26 @@ export default class ProgressBar implements ProgressBarContract {
     }
   }
 
+  async finish(index: string): Promise<void> {
+    if (!isMainThread) {
+      progressBarOff(index);
+      return;
+    }
+
+    this.finishBar(index);
+  }
+
   async finishAll(): Promise<void> {
     if (!isMainThread) {
       progressBarOffAll();
       return;
     }
 
-    this.multibarService.stop();
+    try {
+      this.multibarService.stop();
+    } catch (e) {
+
+    }
 
     this.bars = {};
     this.currentLength = {};
@@ -258,7 +278,11 @@ export default class ProgressBar implements ProgressBarContract {
 
     this.currentLength[index] = progress;
 
-    this.bars[index].update(progress);
+    try {
+      this.bars[index].update(progress);
+    } catch (e) {
+
+    }
 
     // @ts-ignore
     this.eta[index] = this.bars[index].eta.getTime();
@@ -304,5 +328,11 @@ export default class ProgressBar implements ProgressBarContract {
     }
 
     return bars;
+  }
+
+  finishCurrentServiceBars(): void {
+    for (const index in Object.keys(this.bars)) {
+      this.finishBar(index);
+    }
   }
 }

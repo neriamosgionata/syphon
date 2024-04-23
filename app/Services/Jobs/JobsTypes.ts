@@ -1,6 +1,7 @@
 import {JobList, JobListForFrontend} from "App/Jobs";
 import {JobMessageEnum} from "App/Enums/JobMessageEnum";
 import {LogLevelEnum} from "App/Enums/LogLevelEnum";
+import {LogChannels} from "App/Services/Logger/Logger";
 
 export type JobName = keyof typeof JobList;
 export type JobNameForFrontend = typeof JobListForFrontend;
@@ -19,6 +20,7 @@ export interface JobMessage {
   uuid?: string;
   payload?: any;
   error?: Error;
+  logChannel?: LogChannels;
   logMessage?: string;
   logLevel?: LogLevelEnum;
   logParameters?: any[];

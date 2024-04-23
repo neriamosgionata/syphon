@@ -131,7 +131,7 @@ export interface HelperContract {
 
   pick(object: any, keys: string[]): any;
 
-  qs(params: any): string;
+  qs(params: object): string;
 
   cutout(string: string): string;
 
@@ -211,9 +211,7 @@ export interface HelperContract {
 
   getNestedProperty(obj: object, path: string): any;
 
-  mergeDeepNoOverwrite(target: any, ...sources: any[]): { [p: string]: any };
-
-  mergeDeep(target: object, ...sources: any[]): { [p: string]: any };
+  mergeDeepNoOverwrite(target: object, ...sources: any[]): { [p: string]: any };
 
   rad2degr(rad: number): number;
 
@@ -528,9 +526,9 @@ export default class Helper implements HelperContract {
     }, {});
   }
 
-  qs(params) {
+  qs(params: object) {
     let qs = Object.getOwnPropertyNames(params).length ? '?' : ''
-    for (const key in params) {
+    for (const key of Object.keys(params)) {
       if (params[key] !== undefined && params[key] !== null) {
         qs += key + '=' + params[key] + '&'
       }
@@ -691,7 +689,7 @@ export default class Helper implements HelperContract {
   }
 
   replaceSymbols(str: string) {
-    return str.replace(/[\[\]*!\-_/\\?:.,()^;]/g, "");
+    return str.replaceAll(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]+/g, "");
   }
 
   substituteAccentedLetters(str: string) {
@@ -1108,54 +1106,36 @@ export default class Helper implements HelperContract {
     return path.split('.').reduce((acc, part) => acc && acc[part], obj);
   }
 
-  mergeDeepNoOverwrite(target: any, ...sources: any[]): { [p: string]: any } {
+  mergeDeepNoOverwrite(target: object, ...sources: object[]): { [p: string]: any } {
+    if (!this.isObject(target)) {
+      target = {};
+    }
+
     if (sources.length === 0) {
       return target;
     }
 
-    const source = sources.shift();
+    const source = sources.shift() as object;
 
-    if (this.isObject(target)) {
-      for (const key in Object.keys(source)) {
-        if (Array.isArray(target[key])) {
-          if (Array.isArray(source[key])) {
-            target[key] = [...new Set([...target[key], ...source[key]])];
-          }
-        } else if (this.isObject(source[key])) {
-          target[key] = this.mergeDeepNoOverwrite(target[key], source[key]);
-        } else if (this.isValued(source[key])) {
-          if (!this.isValued(target[key])) {
-            target[key] = source[key];
-          }
+    if (!this.isObject(source)) {
+      throw new Error("source is not an object");
+    }
+
+    for (const key of Object.keys(source)) {
+      if (Array.isArray(target[key])) {
+        if (Array.isArray(source[key])) {
+          target[key] = [...new Set([...target[key], ...source[key]])];
         }
-      }
-    }
-
-    return this.mergeDeepNoOverwrite(target, ...sources);
-  }
-
-  mergeDeep(target: object, ...sources: any[]): { [p: string]: any } {
-    if (sources.length === 0) {
-      return target;
-    }
-
-    const source = sources.shift();
-
-    if (this.isObject(target)) {
-      for (const key in Object.keys(source)) {
-        if (Array.isArray(target[key])) {
-          if (Array.isArray(source[key])) {
-            target[key] = [...new Set([...target[key], ...source[key]])];
-          }
-        } else if (this.isObject(source[key])) {
-          target[key] = this.mergeDeep(target[key], source[key]);
-        } else if (this.isValued(source[key])) {
+      } else if (this.isObject(source[key])) {
+        target[key] = this.mergeDeepNoOverwrite(target[key], source[key]);
+      } else if (this.isValued(source[key])) {
+        if (!this.isValued(target[key])) {
           target[key] = source[key];
         }
       }
     }
 
-    return this.mergeDeep(target, ...sources);
+    return this.mergeDeepNoOverwrite(target, ...sources);
   }
 
   rad2degr(rad: number) {

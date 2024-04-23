@@ -19,6 +19,8 @@ import {
   JobRunInfo,
   JobWorkerData
 } from "App/Services/Jobs/JobsTypes";
+import {LogChannels} from "App/Services/Logger/Logger";
+import {LogLevelEnum} from "App/Enums/LogLevelEnum";
 
 export interface JobContract {
   dispatch<T extends BaseJobParameters>(
@@ -121,6 +123,11 @@ export default class Jobs implements JobContract {
   private async catchJobMessage(message: JobMessage) {
 
     if (message.status === JobMessageEnum.FAILED || message.status === JobMessageEnum.STOPPED || message.status === JobMessageEnum.COMPLETED) {
+      if (message.status === JobMessageEnum.FAILED) {
+        Application.container.use(AppContainerAliasesEnum.Logger)
+          .error(message.error?.message as string, message.error?.stack as string);
+      }
+
       await Job
         .query()
         .where("id", message.id)
@@ -159,16 +166,16 @@ export default class Jobs implements JobContract {
     }
 
     if (message.status === JobMessageEnum.LOGGING) {
-      if (message.logLevel === "table") {
-        Application.container.use(AppContainerAliasesEnum.Logger)
-          .table(message.logTable as any[], message.logTableColumnNames, message.logLevelWriteTo);
-        return;
-      }
-
-      Application.container.use(AppContainerAliasesEnum.Logger)[message.logLevel ?? "info"](
-        message.logMessage as string,
-        ...(message.logParameters ?? [])
-      );
+      Application.container.use(AppContainerAliasesEnum.Logger)
+        .logFromThread(
+          message.logChannel as LogChannels,
+          message.logMessage as string,
+          message.logParameters as any[],
+          message.logLevel as LogLevelEnum,
+          message.logTable,
+          message.logTableColumnNames,
+          message.logLevelWriteTo,
+        );
       return;
     }
 
@@ -322,6 +329,8 @@ export default class Jobs implements JobContract {
       .update({
         status: JobMessageEnum.RUNNING,
         startedAt: DateTime.now().toISO(),
+        error: null,
+        errorStack: null,
       })
       .exec();
 
@@ -409,7 +418,6 @@ export default class Jobs implements JobContract {
 
     const messageListener = (worker: Worker, message: JobMessage) => {
       if (message.status === JobMessageEnum.COMPLETED || message.status === JobMessageEnum.FAILED) {
-        resolver();
         return;
       }
 
@@ -417,8 +425,6 @@ export default class Jobs implements JobContract {
     };
 
     const errorListener = (err: Error) => {
-      resolver(err);
-
       if (errorCallback) {
         errorCallback(err, actualId, tags)
       }
@@ -431,6 +437,8 @@ export default class Jobs implements JobContract {
       worker.removeAllListeners();
 
       this.runningJobs.delete(actualId);
+
+      resolver();
     });
 
     const err = await promise;
@@ -505,6 +513,7 @@ export default class Jobs implements JobContract {
       .update({
         status: JobMessageEnum.STOPPED,
         error: "Job was stopped",
+        errorStack: null,
         finishedAt: DateTime.now().toISO()
       })
       .exec();
@@ -519,11 +528,7 @@ export default class Jobs implements JobContract {
       throw new Error("Job is already running");
     }
 
-    if (job.status === JobMessageEnum.COMPLETED) {
-      throw new Error("Job is already completed");
-    }
-
-    this.dispatch(job.name, JSON.parse(job.parameters || "{}"), job.tags?.split(",") || [], undefined, undefined, job.id)
+    this.dispatch(job.name, job.parameters || {}, job.tags?.split(",") || [], undefined, undefined, job.id)
       .then(() => {
       })
       .catch(() => {

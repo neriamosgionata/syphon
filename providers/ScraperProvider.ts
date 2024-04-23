@@ -6,7 +6,7 @@ export default class ScraperProvider {
   }
 
   public register() {
-    this.app.container.singleton(AppContainerAliasesEnum.Scraper, () => new (require("App/Services/Scraper/Scraper").default)());
+    this.app.container.bind(AppContainerAliasesEnum.Scraper, () => new (require("App/Services/Scraper/Scraper").default)());
   }
 
   public async boot() {
@@ -16,5 +16,10 @@ export default class ScraperProvider {
   }
 
   public async shutdown() {
+    try {
+      await this.app.container.use(AppContainerAliasesEnum.Scraper).end();
+    } catch (e) {
+
+    }
   }
 }

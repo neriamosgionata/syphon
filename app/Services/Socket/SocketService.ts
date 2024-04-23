@@ -67,7 +67,11 @@ export default class SocketService implements SocketContract {
       );
 
       this.socketServer.on("connect_error", (err) => {
-        this.logger.error("Socket server error: " + err.message);
+        this.logger.error("Socket server error: " + err.message)
+          .then(() => {
+          })
+          .catch(() => {
+          });
       });
 
       const socketPort = Env.get("SOCKET_PORT", 3312);
@@ -113,7 +117,12 @@ export default class SocketService implements SocketContract {
   }
 
   addStartupEmitEvent<K extends EmitEventType>(event: K, listener: (() => EmitEventTypeData[K] | Promise<EmitEventTypeData[K]>)): void {
-    this.logger.info("Adding startup emit event: " + event);
+    this.logger.info("Adding startup emit event: " + event)
+      .then(() => {
+      })
+      .catch(() => {
+      });
+
     this.registeredStartupEvents.set(event, () => listener());
   }
 
@@ -132,14 +141,18 @@ export default class SocketService implements SocketContract {
       }
 
       this.socketServer.on("connection", (socket) => {
-        this.logger.info("Admin connected id: " + socket.id);
+        this.logger.info("Admin connected id: " + socket.id)
+          .then(() => {
+          })
+          .catch(() => {
+          });
 
         socket.request.headers.authorization = socket.handshake.auth?.authorization;
         socket.request.headers.Authorization = socket.handshake.auth?.authorization;
 
         try {
           const ctx = HttpContext.create(
-            "/api/v1/charts",
+            "/api/restaurants",
             {} as Record<string, any>,
             socket.request,
           );
@@ -163,21 +176,37 @@ export default class SocketService implements SocketContract {
 
               this.registeredAdminSockets.set(socket.id, socket);
 
-              this.logger.info("Admin connected id: " + socket.id);
+              this.logger.info("Admin connected id: " + socket.id)
+                .then(() => {
+                })
+                .catch(() => {
+                });
 
               socket.on("disconnect", () => {
-                this.logger.info("Admin disconnected id: " + socket.id);
+                this.logger.info("Admin disconnected id: " + socket.id)
+                  .then(() => {
+                  })
+                  .catch(() => {
+                  });
 
                 this.registeredAdminSockets.delete(socket.id);
               });
             })
             .catch(() => {
               socket.disconnect();
-              this.logger.error("Admin not authenticated");
+              this.logger.error("Admin not authenticated")
+                .then(() => {
+                })
+                .catch(() => {
+                });
             });
         } catch (e) {
           socket.disconnect();
-          this.logger.error("Admin not authenticated");
+          this.logger.error("Admin not authenticated")
+            .then(() => {
+            })
+            .catch(() => {
+            });
           return;
         }
       });
@@ -190,7 +219,7 @@ export default class SocketService implements SocketContract {
         const res = await listener();
         socket.emit(event, res);
       } catch (e) {
-        this.logger.error(e.message, e.stack);
+        await this.logger.error(e.message, e.stack);
       }
     }
   }
@@ -219,7 +248,11 @@ export default class SocketService implements SocketContract {
     this.addStartupEmitEvent(
       EmitEventType.ALL_JOBS,
       () => {
-        this.logger.info("Getting all jobs");
+        this.logger.info("Getting all jobs")
+          .then(() => {
+          })
+          .catch(() => {
+          });
         return Job
           .query()
           .orderBy("created_at", "desc")
@@ -230,7 +263,11 @@ export default class SocketService implements SocketContract {
     this.addStartupEmitEvent(
       EmitEventType.ALL_AVAILABLE_JOBS,
       () => {
-        this.logger.info("Getting all available jobs");
+        this.logger.info("Getting all available jobs")
+          .then(() => {
+          })
+          .catch(() => {
+          });
         return JobListForFrontend;
       },
     );
@@ -238,7 +275,11 @@ export default class SocketService implements SocketContract {
     this.addStartupEmitEvent(
       EmitEventType.GET_ALL_PROGRESS_BARS,
       () => {
-        this.logger.info("Getting all progress bars");
+        this.logger.info("Getting all progress bars")
+          .then(() => {
+          })
+          .catch(() => {
+          });
         return Application.container.use(AppContainerAliasesEnum.ProgressBar).getAllBarsConfigAndStatus();
       },
     );
@@ -246,7 +287,11 @@ export default class SocketService implements SocketContract {
     this.addStartupEmitEvent(
       EmitEventType.ALL_AVAILABLE_LOGS,
       () => {
-        this.logger.info("Getting all available logs");
+        this.logger.info("Getting all available logs")
+          .then(() => {
+          })
+          .catch(() => {
+          });
         return Application.container.use(AppContainerAliasesEnum.Logger).getAllAvailableLogs();
       },
     );
@@ -257,7 +302,11 @@ export default class SocketService implements SocketContract {
       {
         event: ListenEventType.START_JOB,
         listener: (data: ListenEventTypeData[ListenEventType.START_JOB]) => {
-          this.logger.info("Starting job: " + data.jobName);
+          this.logger.info("Starting job: " + data.jobName)
+            .then(() => {
+            })
+            .catch(() => {
+            });
 
           Application.container.use(AppContainerAliasesEnum.Jobs)
             .dispatch(data.jobName, data.parameters, data.tags)
@@ -268,10 +317,18 @@ export default class SocketService implements SocketContract {
                 .use(AppContainerAliasesEnum.Jobs)
                 .waitUntilDone(job)
                 .then(() => {
-                  this.logger.info("Job done: " + job.id);
+                  this.logger.info("Job done: " + job.id)
+                    .then(() => {
+                    })
+                    .catch(() => {
+                    });
                 })
                 .catch(() => {
-                  this.logger.error("Job failed: " + job.id);
+                  this.logger.error("Job failed: " + job.id)
+                    .then(() => {
+                    })
+                    .catch(() => {
+                    });
                 });
 
               Job
@@ -282,13 +339,25 @@ export default class SocketService implements SocketContract {
                   this.emitToAdmins(EmitEventType.STARTED_JOB, job);
                 })
                 .catch(() => {
-                  this.logger.error("Job not found: " + job.id);
+                  this.logger.error("Job not found: " + job.id)
+                    .then(() => {
+                    })
+                    .catch(() => {
+                    });
                 });
 
-              this.logger.info("Job started: " + job.id);
+              this.logger.info("Job started: " + job.id)
+                .then(() => {
+                })
+                .catch(() => {
+                });
             })
             .catch((e) => {
-              this.logger.error(e.message, e.stack);
+              this.logger.error(e.message, e.stack)
+                .then(() => {
+                })
+                .catch(() => {
+                });
             })
         }
       },
@@ -296,17 +365,29 @@ export default class SocketService implements SocketContract {
       {
         event: ListenEventType.STOP_JOB,
         listener: (data: ListenEventTypeData[ListenEventType.STOP_JOB]) => {
-          this.logger.info("Stopping job: " + data.id);
+          this.logger.info("Stopping job: " + data.id)
+            .then(() => {
+            })
+            .catch(() => {
+            });
 
           Application.container.use(AppContainerAliasesEnum.Jobs)
             .stopJob(data.id)
             .then((job) => {
-              this.logger.info("Job stopped: " + job.id);
+              this.logger.info("Job stopped: " + job.id)
+                .then(() => {
+                })
+                .catch(() => {
+                });
 
               this.emitToAdmins(EmitEventType.JOB_STATUS, job);
             })
             .catch((e) => {
-              this.logger.error(e.message, e.stack);
+              this.logger.error(e.message, e.stack)
+                .then(() => {
+                })
+                .catch(() => {
+                });
             })
         }
       },
@@ -314,17 +395,29 @@ export default class SocketService implements SocketContract {
       {
         event: ListenEventType.RESTART_JOB,
         listener: (data: ListenEventTypeData[ListenEventType.RESTART_JOB]) => {
-          this.logger.info("Restarting job: " + data.id);
+          this.logger.info("Restarting job: " + data.id)
+            .then(() => {
+            })
+            .catch(() => {
+            });
 
           Application.container.use(AppContainerAliasesEnum.Jobs)
             .restartJob(data.id)
             .then((job) => {
-              this.logger.info("Job restarted: " + job.id);
+              this.logger.info("Job restarted: " + job.id)
+                .then(() => {
+                })
+                .catch(() => {
+                });
 
               this.emitToAdmins(EmitEventType.JOB_STATUS, job);
             })
             .catch((e) => {
-              this.logger.error(e.message, e.stack);
+              this.logger.error(e.message, e.stack)
+                .then(() => {
+                })
+                .catch(() => {
+                });
             })
         }
       },
@@ -332,17 +425,29 @@ export default class SocketService implements SocketContract {
       {
         event: ListenEventType.DELETE_JOB,
         listener: (data: ListenEventTypeData[ListenEventType.DELETE_JOB]) => {
-          this.logger.info("Deleting job: " + data.id);
+          this.logger.info("Deleting job: " + data.id)
+            .then(() => {
+            })
+            .catch(() => {
+            });
 
           Application.container.use(AppContainerAliasesEnum.Jobs)
             .deleteJob(data.id)
             .then((job) => {
-              this.logger.info("Job deleted: " + job.id);
+              this.logger.info("Job deleted: " + job.id)
+                .then(() => {
+                })
+                .catch(() => {
+                });
 
               this.emitToAdmins(EmitEventType.JOB_DELETED, job);
             })
             .catch((e) => {
-              this.logger.error(e.message, e.stack);
+              this.logger.error(e.message, e.stack)
+                .then(() => {
+                })
+                .catch(() => {
+                });
             })
         }
       },
@@ -350,17 +455,29 @@ export default class SocketService implements SocketContract {
       {
         event: ListenEventType.GET_JOB_STATUS,
         listener: (data: ListenEventTypeData[ListenEventType.GET_JOB_STATUS]) => {
-          this.logger.info("Getting job status: " + data.id);
+          this.logger.info("Getting job status: " + data.id)
+            .then(() => {
+            })
+            .catch(() => {
+            });
 
           Application.container.use(AppContainerAliasesEnum.Jobs)
             .getSingleJob(data.id)
             .then((job) => {
-              this.logger.info("Got job status: " + job.id);
+              this.logger.info("Got job status: " + job.id)
+                .then(() => {
+                })
+                .catch(() => {
+                });
 
               this.emitToAdmins(EmitEventType.JOB_STATUS, job);
             })
             .catch((e) => {
-              this.logger.error(e.message, e.stack);
+              this.logger.error(e.message, e.stack)
+                .then(() => {
+                })
+                .catch(() => {
+                });
             });
         }
       },
@@ -375,7 +492,11 @@ export default class SocketService implements SocketContract {
               this.emitToAdmins(EmitEventType.ALL_JOBS, jobs);
             })
             .catch((e) => {
-              this.logger.error(e.message, e.stack);
+              this.logger.error(e.message, e.stack)
+                .then(() => {
+                })
+                .catch(() => {
+                });
             });
         }
       },
@@ -383,7 +504,11 @@ export default class SocketService implements SocketContract {
       {
         event: ListenEventType.SELECT_LOG,
         listener: (data: ListenEventTypeData[ListenEventType.SELECT_LOG]) => {
-          this.logger.info("Selecting log: " + data.name);
+          this.logger.info("Selecting log: " + data.name)
+            .then(() => {
+            })
+            .catch(() => {
+            });
 
           Application.container.use(AppContainerAliasesEnum.Logger)
             .tailLog(
@@ -401,7 +526,11 @@ export default class SocketService implements SocketContract {
       {
         event: ListenEventType.DELETE_LOG,
         listener: (data: ListenEventTypeData[ListenEventType.DELETE_LOG]) => {
-          this.logger.info("Deleting log: " + data.name);
+          this.logger.info("Deleting log: " + data.name)
+            .then(() => {
+            })
+            .catch(() => {
+            });
 
           Application.container.use(AppContainerAliasesEnum.Logger)
             .deleteLog(data.name);
@@ -411,8 +540,12 @@ export default class SocketService implements SocketContract {
       {
         event: ListenEventType.GET_ALL_LOGS,
         listener: () => {
-          const logs = Application.container.use(AppContainerAliasesEnum.Logger).getAllAvailableLogs();
-          this.emitToAdmins(EmitEventType.ALL_AVAILABLE_LOGS, logs);
+
+          Application.container.use(AppContainerAliasesEnum.Logger)
+            .getAllAvailableLogs()
+            .then((logs) => {
+              this.emitToAdmins(EmitEventType.ALL_AVAILABLE_LOGS, logs);
+            });
         }
       }
     ];

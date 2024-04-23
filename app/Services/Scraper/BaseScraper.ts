@@ -3,9 +3,9 @@ import {LogChannels, LoggerContract} from "App/Services/Logger/Logger";
 import Log from "@ioc:Providers/Logger";
 import {LogLevelEnum} from "App/Enums/LogLevelEnum";
 import Env from "@ioc:Adonis/Core/Env";
-import fs from "fs";
 import * as uuid from "uuid";
 import Console from "@ioc:Providers/Console";
+import Drive from "@ioc:Adonis/Core/Drive";
 
 export type ScraperTestFunction = (_browser: Browser, _page: Page) => Promise<boolean>;
 
@@ -72,24 +72,14 @@ export interface BaseScraperContract {
 
   registerError(error: Error | any, key: string): void;
 
-  writeTableLog(table: any[], logLevel?: LogLevelEnum): void;
+  writeTableLog(table: any[], logLevel?: LogLevelEnum): Promise<void>;
 
-  writeLog(level: string, message: string, ...values: unknown[]): void;
+  writeLog(level: string, message: string, ...values: unknown[]): Promise<void>;
 
   getIsHeadless(): boolean;
 }
 
 export default class BaseScraper implements BaseScraperContract {
-  protected defaultStatus: any = {};
-
-  protected scraperStatus: {
-    name: string;
-    status: any;
-  } = {
-    name: "",
-    status: {}
-  };
-
   protected errors: Error[] = [];
   protected results: any = {};
 
@@ -223,12 +213,12 @@ export default class BaseScraper implements BaseScraperContract {
     this.errors.push(error);
   }
 
-  writeTableLog(table: any[], logLevel: LogLevelEnum = LogLevelEnum.INFO): void {
-    this.logger.table(table, [], logLevel);
+  async writeTableLog(table: any[], logLevel: LogLevelEnum = LogLevelEnum.INFO): Promise<void> {
+    await this.logger.table(table, [], logLevel);
   }
 
-  writeLog(level: LogLevelEnum, message: string, ...values: unknown[]): void {
-    this.logger[level.trim()](message, ...values);
+  async writeLog(level: LogLevelEnum, message: string, ...values: unknown[]): Promise<void> {
+    await this.logger[level.trim()](message, ...values);
   }
 
   private getErrors(): Error[] {
@@ -251,7 +241,7 @@ export default class BaseScraper implements BaseScraperContract {
     try {
       await this.start();
     } catch (e) {
-      this.registerError(e, "Start");
+      await this.registerError(e, "Start");
       await this.end();
       return this.getRunResult<T>();
     }
@@ -259,12 +249,12 @@ export default class BaseScraper implements BaseScraperContract {
     try {
       const isOk = await this.test();
       if (!isOk) {
-        this.registerError(new Error('Initial test was not successful!'), "Tests");
+        await this.registerError(new Error('Initial test was not successful!'), "Tests");
         await this.end();
         return this.getRunResult<T>();
       }
     } catch (e) {
-      this.registerError(e, "Test");
+      await this.registerError(e, "Test");
       await this.end();
       return this.getRunResult<T>();
     }
@@ -436,7 +426,7 @@ export default class BaseScraper implements BaseScraperContract {
       }
 
       if (this.errors.length > 0) {
-        this.writeLog(LogLevelEnum.ERROR, "Errors during execution:");
+        await this.writeLog(LogLevelEnum.ERROR, "Errors during execution:");
 
         const errorTable: any = this.errors.reduce((acc, error) => {
           acc.push(
@@ -448,7 +438,7 @@ export default class BaseScraper implements BaseScraperContract {
           return acc;
         }, [] as any[]);
 
-        this.writeTableLog(
+        await this.writeTableLog(
           errorTable,
           LogLevelEnum.ERROR,
         );
@@ -471,7 +461,7 @@ export default class BaseScraper implements BaseScraperContract {
           result = {...result, ...res};
         }
       } catch (err) {
-        this.registerError(err, "Handler_failed_" + funcIndex);
+        await this.registerError(err, "Handler_failed_" + funcIndex);
         break;
       }
     }
@@ -483,11 +473,11 @@ export default class BaseScraper implements BaseScraperContract {
     for (const funcIndex in this.registeredTests) {
       try {
         if (!(await this.registeredTests[funcIndex](this.browser, this.page))) {
-          this.registerError(new Error('Test failed, func index: ' + funcIndex), "Test_failed_" + funcIndex);
+          await this.registerError(new Error('Test failed, func index: ' + funcIndex), "Test_failed_" + funcIndex);
           return false;
         }
       } catch (err) {
-        this.registerError(err, "Test");
+        await this.registerError(err, "Test");
         return false;
       }
     }
@@ -497,18 +487,14 @@ export default class BaseScraper implements BaseScraperContract {
 
   protected async captureScreenshot(name?: string): Promise<void> {
     if (this.enableTakeScreenshot) {
-
-      const realPath = fs.realpathSync('storage/screenshots');
       const folder = Date.now();
-
-      if (!fs.existsSync(`${realPath}/${folder}`)) {
-        fs.mkdirSync(`${realPath}/${folder}`, {recursive: true});
-      }
 
       let fileName = (name || (uuid.v4() + "_" + Date.now())) + ".png";
 
+      await Drive.put(`screenshots/${folder}/${fileName}`, "");
+
       await this.page.screenshot({
-        path: `${realPath}/${folder}/${fileName}`,
+        path: `screenshots/${folder}/${fileName}`,
         captureBeyondViewport: true,
         fullPage: true,
       });
@@ -516,8 +502,10 @@ export default class BaseScraper implements BaseScraperContract {
       for (const page of this.extraOpenedPages) {
         fileName = (name || (uuid.v4() + "_" + Date.now())) + ".png";
 
+        await Drive.put(`screenshots/${folder}/${fileName}`, "");
+
         await page.screenshot({
-          path: `${realPath}/${folder}/${fileName}`,
+          path: `screenshots/${folder}/${fileName}`,
           captureBeyondViewport: true,
           fullPage: true,
         });
@@ -532,8 +520,6 @@ export default class BaseScraper implements BaseScraperContract {
       });
 
       await page.evaluateOnNewDocument((type) => {
-        console.log("Adding event listener: ", type);
-
         window.addEventListener(
           type,
           (e) => {

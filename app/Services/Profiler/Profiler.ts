@@ -1,7 +1,7 @@
 import Env from "@ioc:Adonis/Core/Env";
 import axios, {AxiosInstance} from "axios";
 import Helper from "@ioc:Providers/Helper";
-import Logger from "@ioc:Providers/Logger";
+import Log from "@ioc:Providers/Logger";
 import {trim} from "lodash";
 
 export interface ProfilerContract {
@@ -79,7 +79,7 @@ export default class Profiler implements ProfilerContract {
 
       return res.data as ProfilerChatResponse;
     } catch (e) {
-      Logger.error(e.message, e.stack);
+      await Log.error(e.message, e.stack);
       return null;
     }
   }
@@ -98,7 +98,7 @@ export default class Profiler implements ProfilerContract {
 
       return res.data as string;
     } catch (e) {
-      Logger.error(e.message, e.stack);
+      await Log.error(e.message, e.stack);
       return null;
     }
   }

@@ -3,7 +3,7 @@ import TickerChart from "App/Models/TickerChart";
 import {ChartResultArray, ChartResultArrayQuote} from "yahoo-finance2/dist/esm/src/modules/chart";
 import {configureJob, loadJobParameters} from "App/Services/Jobs/JobHelpers";
 import {ChartInterval} from "App/Services/Finance/Finance";
-import Logger from "@ioc:Providers/Logger";
+import Log from "@ioc:Providers/Logger";
 import {BaseJobParameters} from "App/Services/Jobs/JobsTypes";
 import {DateTime} from "luxon";
 
@@ -64,7 +64,7 @@ const handler = async () => {
         parameters.interval
       );
     } catch (e) {
-      Logger.error(`Error importing chart data for ${ticker}: ${e.message}`);
+      await Log.error(`Error importing chart data for ${ticker}: ${e.message}`);
     }
   }
 };

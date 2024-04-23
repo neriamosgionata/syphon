@@ -1,5 +1,4 @@
 import Config from "@ioc:Adonis/Core/Config";
-import fs from "fs";
 import moment from "moment";
 import {LogChannelEnum} from "App/Enums/LogChannelEnum";
 import {LogLevelEnum} from "App/Enums/LogLevelEnum";
@@ -10,11 +9,14 @@ import {table as T} from "table";
 import {logger} from "Config/app";
 import {Tail} from "tail";
 import Helper from "@ioc:Providers/Helper";
+import Application from "@ioc:Adonis/Core/Application";
+import {AppContainerAliasesEnum} from "App/Enums/AppContainerAliasesEnum";
+import Drive from "@ioc:Adonis/Core/Drive";
+import path from "path";
 
 export type LogChannels = keyof typeof logger.log_channels;
 
 export interface LoggerContract {
-  removeOneTimeLog(): void;
 
   changeLogger(logChannelName: LogChannels, writeToConsole?: boolean): void;
 
@@ -24,29 +26,43 @@ export interface LoggerContract {
 
   getCurrentChannelName(): LogChannels;
 
-  debug(message: string, ...parameters: unknown[]): true | Error;
+  debug(message: string, ...parameters: unknown[]): Promise<void>;
 
-  info(message: string, ...parameters: unknown[]): true | Error;
+  info(message: string, ...parameters: unknown[]): Promise<void>;
 
-  warn(message: string, ...parameters: unknown[]): true | Error;
+  warn(message: string, ...parameters: unknown[]): Promise<void>;
 
-  error(message: string, ...parameters: unknown[]): true | Error;
+  error(message: string, ...parameters: unknown[]): Promise<void>;
 
-  fatal(message: string, ...parameters: unknown[]): true | Error;
+  fatal(message: string, ...parameters: unknown[]): Promise<void>;
 
-  log(message: string, ...parameters: unknown[]): true | Error;
+  log(message: string, ...parameters: unknown[]): Promise<void>;
 
-  table(table: any[], columnNames?: string[], logLevelTo?: LogLevelEnum): true | Error;
+  table(table: any[], columnNames?: string[], logLevelTo?: LogLevelEnum): Promise<void>;
 
   tailLog(name: string, callbackTail: Function, callbackGet: Function): void;
 
-  getCurrentLog(fileName?: string): { logs: string[], name: string };
+  getCurrentLog(fileName?: string): Promise<{ logs: string[], name: string }>;
 
   getLogFileName(logFileLevel: LogLevelEnum): string;
 
-  getAllAvailableLogs(): { logs: string[] };
+  getAllAvailableLogs(): Promise<{ logs: string[] }>;
 
-  deleteLog(name: string): void;
+  deleteLog(name: string): Promise<void>;
+
+  logFromThread(
+    channel: LogChannels,
+    message: string,
+    parameters: any[],
+    level?: LogLevelEnum,
+    table?: any[],
+    tableColumnNames?: string[],
+    levelWriteTo?: LogLevelEnum,
+  ): void;
+
+  isDailyLogChannel(): boolean;
+
+  getCurrentConfig(): { baseName: string, lifeTime: number, permissions: number, type: LogChannelEnum };
 }
 
 export default class Logger implements LoggerContract {
@@ -57,7 +73,7 @@ export default class Logger implements LoggerContract {
     type: LogChannelEnum,
   };
 
-  private readonly logFolder: string;
+  private readonly logFolder: string = "logs";
 
   private LOG_LEVEL_TO_FILE = {
     [LogLevelEnum.DEBUG]: "info",
@@ -69,11 +85,12 @@ export default class Logger implements LoggerContract {
 
   private tailer!: any;
 
+  private mainThreadLoggers: { [p: LogChannels]: LoggerContract } = {};
+
   constructor(
     private logChannelName: LogChannels = "daily",
     private writeToConsole: boolean = false,
   ) {
-    this.logFolder = Config.get("app.logger.log_folder");
     this.writeToConsole = writeToConsole;
 
     if (logChannelName) {
@@ -82,15 +99,19 @@ export default class Logger implements LoggerContract {
     }
 
     if (!this.config || !logChannelName) {
-      this.warn("Log channel used doesn't exist, reverting back to default");
+      this.warn("Log channel used doesn't exist, reverting back to default")
+        .then(() => {
+        })
+        .catch(() => {
+        });
       this.logChannelName = "daily";
       this.config = Config.get("app.logger.log_channels.daily");
     }
-
-    this.removeOneTimeLog();
   }
 
   changeLogger(logChannelName: LogChannels = "daily", writeToConsole: boolean = false) {
+    Application.container.singleton(AppContainerAliasesEnum.Logger, () => this.logger(logChannelName, writeToConsole));
+
     this.writeToConsole = writeToConsole;
 
     if (logChannelName) {
@@ -99,106 +120,140 @@ export default class Logger implements LoggerContract {
     }
 
     if (!this.config || !logChannelName) {
-      this.warn("Log channel doesn't exist, reverting back to daily");
+      this.warn("Log channel used doesn't exist, reverting back to default")
+        .then(() => {
+        })
+        .catch(() => {
+        });
       this.logChannelName = "daily";
       this.config = Config.get("app.logger.log_channels.daily");
     }
-
-    this.removeOneTimeLog();
   }
 
   logger(logChannelName: LogChannels = "daily", writeToConsole: boolean = false): LoggerContract {
     return new Logger(logChannelName, writeToConsole);
   }
 
-  removeOneTimeLog(): void {
-    if (this.config.type === LogChannelEnum.ONETIME) {
-      const logFileNameInfo = this.getLogFileName(LogLevelEnum.INFO);
-
-      if (fs.existsSync(logFileNameInfo)) {
-        fs.rmSync(logFileNameInfo);
-      }
-
-      const logFileNameError = this.getLogFileName(LogLevelEnum.ERROR);
-
-      if (fs.existsSync(logFileNameError)) {
-        fs.rmSync(logFileNameError);
-      }
-    }
-  }
-
   getCurrentChannelName(): LogChannels {
     return this.logChannelName;
   }
 
-  debug(message: string, ...parameters: unknown[]): true | Error {
+  debug(message: string, ...parameters: unknown[]): Promise<void> {
     if (!isMainThread) {
-      logMessage(message, parameters, LogLevelEnum.DEBUG);
-      return true;
+      logMessage(this.logChannelName, message, parameters, LogLevelEnum.DEBUG);
+      return Promise.resolve();
     }
 
     const logLine = this.attachParametersToMessage(message, parameters);
     return this.writeLine(LogLevelEnum.DEBUG, logLine);
   }
 
-  info(message: string, ...parameters: unknown[]): true | Error {
+  info(message: string, ...parameters: unknown[]): Promise<void> {
     if (!isMainThread) {
-      logMessage(message, parameters, LogLevelEnum.INFO);
-      return true;
+      logMessage(this.logChannelName, message, parameters, LogLevelEnum.INFO);
+      return Promise.resolve();
     }
 
     const logLine = this.attachParametersToMessage(message, parameters);
     return this.writeLine(LogLevelEnum.INFO, logLine);
   }
 
-  warn(message: string, ...parameters: unknown[]): true | Error {
+  warn(message: string, ...parameters: unknown[]): Promise<void> {
     if (!isMainThread) {
-      logMessage(message, parameters, LogLevelEnum.WARN);
-      return true;
+      logMessage(this.logChannelName, message, parameters, LogLevelEnum.WARN);
+      return Promise.resolve();
     }
 
     const logLine = this.attachParametersToMessage(message, parameters);
     return this.writeLine(LogLevelEnum.WARN, logLine);
   }
 
-  error(message: string, ...parameters: unknown[]): true | Error {
+  error(message: string, ...parameters: unknown[]): Promise<void> {
     if (!isMainThread) {
-      logMessage(message, parameters, LogLevelEnum.ERROR);
-      return true;
+      logMessage(this.logChannelName, message, parameters, LogLevelEnum.ERROR);
+      return Promise.resolve();
     }
 
     const logLine = this.attachParametersToMessage(message, parameters);
     return this.writeLine(LogLevelEnum.ERROR, logLine);
   }
 
-  fatal(message: string, ...parameters: unknown[]): true | Error {
+  fatal(message: string, ...parameters: unknown[]): Promise<void> {
     if (!isMainThread) {
-      logMessage(message, parameters, LogLevelEnum.FATAL);
-      return true;
+      logMessage(this.logChannelName, message, parameters, LogLevelEnum.FATAL);
+      return Promise.resolve();
     }
 
     const logLine = this.attachParametersToMessage(message, parameters);
     return this.writeLine(LogLevelEnum.FATAL, logLine);
   }
 
-  log(message: string, ...parameters: unknown[]): true | Error {
+  log(message: string, ...parameters: unknown[]): Promise<void> {
     if (!isMainThread) {
-      logMessage(message, parameters, LogLevelEnum.INFO);
-      return true;
+      logMessage(this.logChannelName, message, parameters, LogLevelEnum.INFO);
+      return Promise.resolve();
     }
 
     const logLine = this.attachParametersToMessage(message, parameters);
     return this.writeLine(LogLevelEnum.INFO, logLine);
   }
 
-  table(table: any[], columnNames: string[] = [], logLevelTo: LogLevelEnum = LogLevelEnum.INFO): true | Error {
+  table(table: any[], columnNames?: string[], logLevelTo: LogLevelEnum = LogLevelEnum.INFO): Promise<void> {
     if (!isMainThread) {
-      logMessage("", [], LogLevelEnum.TABLE, table, columnNames, logLevelTo);
-      return true;
+      logMessage(this.logChannelName, "", [], LogLevelEnum.TABLE, table, columnNames, logLevelTo);
+      return Promise.resolve();
     }
 
     const logLine = this.createTableLog(table, columnNames);
     return this.writeLine(logLevelTo, logLine);
+  }
+
+  isDailyLogChannel(): boolean {
+    return this.config.type === LogChannelEnum.DAILY;
+  }
+
+  getCurrentConfig(): { baseName: string, lifeTime: number, permissions: number, type: LogChannelEnum } {
+    return this.config;
+  }
+
+  private retriveMainThreadLogger(channel: LogChannels): LoggerContract {
+    return this.mainThreadLoggers[channel] || (this.mainThreadLoggers[channel] = this.logger(channel));
+  }
+
+  logFromThread(
+    channel: LogChannels,
+    message: string,
+    parameters: any[],
+    level: LogLevelEnum,
+    table?: any[],
+    tableColumnNames?: string[],
+    levelWriteTo: LogLevelEnum = LogLevelEnum.INFO
+  ): void {
+    if (!isMainThread) {
+      logMessage(
+        channel,
+        message,
+        parameters,
+        level,
+        table,
+        tableColumnNames,
+        levelWriteTo
+      );
+      return;
+    }
+
+    const logger = this.retriveMainThreadLogger(channel);
+
+    if (level === "table") {
+      logger.table(table as any[], tableColumnNames, levelWriteTo)
+        .then(() => {
+        })
+        .catch(() => {
+        });
+      return;
+    }
+
+    logger[level](message as string, ...(parameters || []));
   }
 
   private getLogLineAnnotation(): string {
@@ -229,12 +284,10 @@ export default class Logger implements LoggerContract {
     return this.logFolder + "/" + logFileName + "-" + this.LOG_LEVEL_TO_FILE[logFileLevel] + ".log";
   }
 
-  private saveLog(logFileName: string, logLine: string): true | Error {
+  private async saveLog(logFileName: string, logLine: string): Promise<void> {
     try {
-      fs.appendFileSync(logFileName, logLine);
-      return true;
+      await Drive.put(logFileName, logLine, {flag: 'a'});
     } catch (e) {
-      return e;
     }
   }
 
@@ -243,11 +296,10 @@ export default class Logger implements LoggerContract {
   }
 
   private getFullNowTime(): string {
-    return moment().format("DD/MM/YYYY HH:mm:ss");
+    return moment().format("DD/MM/YYYY HH:mm:ss.SSSSSSSSS");
   }
 
-  private writeLine(level: LogLevelEnum, logLine: string): true | Error {
-
+  private writeLine(level: LogLevelEnum, logLine: string): Promise<void> {
     const logFileName = this.getLogFileName(level);
     const logLineWithAnnotation = this.getLogLine(level, logLine);
 
@@ -302,7 +354,7 @@ export default class Logger implements LoggerContract {
 
     const nametemp = namesplit.join("-").split("-date-");
 
-    let logChannel: string | undefined = "";
+    let logChannel: string | undefined;
 
     if (nametemp.length > 1) {
       logChannel = nametemp.shift();
@@ -324,52 +376,90 @@ export default class Logger implements LoggerContract {
 
     const logFileName = this.logFolder + "/" + name;
 
-    if (fs.existsSync(logFileName)) {
-      const config = this.retrieveConfigFromFileName(name);
-      const logger = this.logger(config.logChannel);
-      const computedFileName = logger.getLogFileName(config.logLevel);
-      callbackGet(this.getCurrentLog(computedFileName));
+    Drive.exists(logFileName)
+      .then((exists) => {
+        if (exists) {
+          const config = this.retrieveConfigFromFileName(name);
+          const logger = this.logger(config.logChannel);
+          const computedFileName = logger.getLogFileName(config.logLevel);
 
-      const tailer = new Tail(logFileName);
-      tailer.on("line", (data) => {
-        callbackTail(data);
+          this.getCurrentLog(computedFileName)
+            .then((data) => {
+              callbackGet(data);
+
+              const tailer = new Tail(path.resolve("storage/" + logFileName));
+
+              tailer.on("line", (data: any) => {
+                callbackTail(data);
+              });
+
+              tailer.on("error", (err: Error) => {
+                this.error(err.message, err.stack)
+                  .then(() => {
+                  })
+                  .catch(() => {
+                  });
+              });
+
+              this.tailer = tailer;
+            });
+
+          return;
+        }
+
+        this.error("tailLog: Log file doesn't exist")
+          .then(() => {
+          })
+          .catch(() => {
+          });
+      })
+      .catch(() => {
+
       });
-      tailer.on("error", (err) => {
-        this.error(err.message, err.stack);
-      });
-      this.tailer = tailer;
-
-      return;
-    }
-
-    this.error("tailLog: Log file doesn't exist");
   }
 
-  getCurrentLog(fileName?: string): { logs: string[], name: string } {
+  async getCurrentLog(fileName?: string): Promise<{ logs: string[], name: string }> {
     const logFileName = fileName || this.getLogFileName(LogLevelEnum.INFO);
 
-    if (fs.existsSync(logFileName)) {
+    try {
+      const exists = await Drive.exists(logFileName);
+
+      if (exists) {
+        return {
+          logs: (await Drive.get(logFileName)).toString().split("\n").splice(-100),
+          name: logFileName,
+        };
+      }
+
+      this.error("getCurrentLog: Log file doesn't exist")
+        .then(() => {
+        })
+        .catch(() => {
+        });
+
       return {
-        logs: fs.readFileSync(logFileName).toString().split("\n").splice(-100),
+        logs: [],
+        name: logFileName,
+      };
+    } catch (e) {
+      this.error("getCurrentLog: Log file doesn't exist", e)
+        .then(() => {
+        })
+        .catch(() => {
+        });
+
+      return {
+        logs: [],
         name: logFileName,
       };
     }
-
-    this.error("getCurrentLog: Log file doesn't exist");
-
-    return {
-      logs: [],
-      name: logFileName,
-    };
   }
 
-  getAllAvailableLogs(): { logs: string[] } {
+  async getAllAvailableLogs(): Promise<{ logs: string[] }> {
     return {
-      logs: fs.readdirSync(this.logFolder)
-        .filter((name) => name.endsWith(".log"))
-        .map((name) => {
-          return name.replace(this.logFolder + "/", "");
-        }),
+      logs: (await Drive.list(this.logFolder).toArray())
+        .filter((name) => name.location.includes(".log"))
+        .map((name) => name.location.replace(this.logFolder + "/", "")),
     };
   }
 
@@ -378,11 +468,7 @@ export default class Logger implements LoggerContract {
     return this;
   }
 
-  deleteLog(name: string): void {
-    const logFileName = this.logFolder + "/" + name;
-
-    if (fs.existsSync(logFileName)) {
-      fs.rmSync(logFileName);
-    }
+  async deleteLog(name: string): Promise<void> {
+    await Drive.delete(this.logFolder + "/" + name);
   }
 }

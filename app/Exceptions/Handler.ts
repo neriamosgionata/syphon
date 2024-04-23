@@ -16,7 +16,7 @@
 import Logger from '@ioc:Adonis/Core/Logger'
 import HttpExceptionHandler from '@ioc:Adonis/Core/HttpExceptionHandler'
 import {HttpContextContract} from "@ioc:Adonis/Core/HttpContext";
-import Logger2 from "@ioc:Providers/Logger";
+import Log from "@ioc:Providers/Logger";
 
 export default class ExceptionHandler extends HttpExceptionHandler {
   constructor() {
@@ -24,12 +24,14 @@ export default class ExceptionHandler extends HttpExceptionHandler {
   }
 
   report(error: any, ctx: HttpContextContract) {
-    Logger2.error(error.message, error.stack);
+    Log.error(error.message, error.stack)
+      .then(() => {})
+      .catch(() => {});
     super.report(error, ctx);
   }
 
   async handle(error: any, ctx: HttpContextContract) {
-    Logger2.error(error.message, error.stack);
+    await Log.error(error.message, error.stack);
     await super.handle(error, ctx);
   }
 }

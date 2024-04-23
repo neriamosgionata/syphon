@@ -4,13 +4,13 @@ import Jobs from "@ioc:Providers/Jobs";
 import {ImportProfileDataJobParameters} from "App/Jobs/ImportProfileDataJob";
 import {ImportChartDataJobParameters} from "App/Jobs/ImportChartDataJob";
 import {DateTime} from "luxon";
-import Logger from "@ioc:Providers/Logger";
+import Log from "@ioc:Providers/Logger";
 import ProgressBar from "@ioc:Providers/ProgressBar";
 import {BaseJobParameters} from "App/Services/Jobs/JobsTypes";
 import Profile from "App/Models/Profile";
 
 const importTickers = async (tickers: string[], numOfThreads: number) => {
-  Logger.info("Importing total tickers data: " + tickers.length);
+  await Log.info("Importing total tickers data: " + tickers.length);
 
   for (const tickerIndex in tickers) {
     let ticker = tickers[tickerIndex];
@@ -52,14 +52,14 @@ const importTickers = async (tickers: string[], numOfThreads: number) => {
 
     await ProgressBar.increment(index, batch.length);
 
-    Logger.info("Imported tickers data for: " + batch);
+    await Log.info("Imported tickers data for: " + batch);
   }
 
-  Logger.info("Importing tickers data done");
+  await Log.info("Importing tickers data done");
 }
 
 const importCharts = async (tickers: string[], numOfThreads: number) => {
-  Logger.info("Importing charts for total tickers: " + tickers.length);
+  await Log.info("Importing charts for total tickers: " + tickers.length);
 
   const index = await ProgressBar.newBar(tickers.length, "Importing charts...");
 
@@ -88,18 +88,18 @@ const importCharts = async (tickers: string[], numOfThreads: number) => {
 
     await ProgressBar.increment(index, batch.length);
 
-    Logger.info("Imported tickers charts for: " + batch);
+    await Log.info("Imported tickers charts for: " + batch);
   }
 
-  Logger.info("Importing charts for tickers done");
+  await Log.info("Importing charts for tickers done");
 }
 
 const scrapeYahooFinance = async (numOfThreads: number) => {
-  Logger.info("Scraping Yahoo Finance for tickers");
+  await Log.info("Scraping Yahoo Finance for tickers");
 
   const tickers = await Finance.scrapeYahooFinanceForTickerListEtfs();
 
-  Logger.info("Scraping Yahoo Finance for tickers done");
+  await Log.info("Scraping Yahoo Finance for tickers done");
 
   await importTickers([...tickers], numOfThreads);
   await importCharts([...tickers], numOfThreads);
