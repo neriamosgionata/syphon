@@ -118,6 +118,18 @@
       "aliases": [],
       "flags": []
     },
+    "purge:profile_data": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/PurgeProfileData",
+      "commandName": "purge:profile_data",
+      "description": "",
+      "args": [],
+      "aliases": [],
+      "flags": []
+    },
     "purge:ticker_chart_data": {
       "settings": {
         "loadApp": true,
