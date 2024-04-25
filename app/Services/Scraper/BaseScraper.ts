@@ -1,4 +1,4 @@
-import {Browser, CDPSession, executablePath, Page} from "puppeteer";
+import {Browser, executablePath, Page} from "puppeteer";
 import {LogChannels, LoggerContract} from "App/Services/Logger/Logger";
 import Log from "@ioc:Providers/Logger";
 import {LogLevelEnum} from "App/Enums/LogLevelEnum";
@@ -88,10 +88,8 @@ export default class BaseScraper implements BaseScraperContract {
   protected browser!: Browser;
 
   protected page!: Page;
-  protected cdpClient!: CDPSession;
 
   protected extraOpenedPages: Page[] = [];
-  protected extraCdpClient!: CDPSession[];
 
   protected registeredTests: ScraperTestFunction[] = [];
   protected registeredHandlers: ScraperHandlerFunction<any>[] = [];
@@ -243,7 +241,7 @@ export default class BaseScraper implements BaseScraperContract {
     try {
       await this.start();
     } catch (e) {
-      await this.registerError(e, "Start");
+      this.registerError(e, "Start");
       await this.end();
       return this.getRunResult<T>();
     }
@@ -251,12 +249,12 @@ export default class BaseScraper implements BaseScraperContract {
     try {
       const isOk = await this.test();
       if (!isOk) {
-        await this.registerError(new Error('Initial test was not successful!'), "Tests");
+        this.registerError(new Error('Initial test was not successful!'), "Tests");
         await this.end();
         return this.getRunResult<T>();
       }
     } catch (e) {
-      await this.registerError(e, "Test");
+      this.registerError(e, "Test");
       await this.end();
       return this.getRunResult<T>();
     }
@@ -272,20 +270,10 @@ export default class BaseScraper implements BaseScraperContract {
     const page = await this.browser.newPage();
 
     if (this.writeOnConsole && this.debugConsole) {
-      page.on('console', async (msg) => {
-        try {
-          const msgArgs = msg.args();
-          for (const element of msgArgs) {
-            Console.log(await element.jsonValue());
-          }
-        } catch (e) {
-
-        }
-      });
+      this.logConsole(page);
     }
 
     this.extraOpenedPages.push(page);
-    this.extraCdpClient.push(await page.target().createCDPSession());
 
     await this.addEventListenersToPage(page, this.extraOpenedPages.length - 1);
 
@@ -371,22 +359,25 @@ export default class BaseScraper implements BaseScraperContract {
 
     this.browser = await puppeteer.launch(launchArgs);
     this.page = await this.browser.newPage();
-    this.cdpClient = await this.page.target().createCDPSession();
 
     if (this.writeOnConsole && this.debugConsole) {
-      this.page.on('console', async (msg) => {
-        try {
-          const msgArgs = msg.args();
-          for (const element of msgArgs) {
-            Console.log(await element.jsonValue());
-          }
-        } catch (e) {
-
-        }
-      });
+      this.logConsole(this.page);
     }
 
     await this.addEventListenersToPage(this.page, 0);
+  }
+
+  private logConsole(page: Page) {
+    page.on('console', async (msg) => {
+      try {
+        const msgArgs = msg.args();
+        for (const element of msgArgs) {
+          Console.log(await element.jsonValue());
+        }
+      } catch (e) {
+
+      }
+    });
   }
 
   async end(): Promise<void> {
@@ -396,34 +387,25 @@ export default class BaseScraper implements BaseScraperContract {
       await this.captureScreenshot();
 
       if (this.closeOnExit) {
-        if (this.page && this.page.close && !this.page.isClosed()) {
-          if (this.removeUserDataOnExit) {
-            await this.cdpClient.send('Network.clearBrowserCookies');
-            await this.cdpClient.send('Network.clearBrowserCache');
-          }
-
-          await this.cdpClient.detach();
+        try {
           await this.page.close();
+        } catch (e) {
+          await this.logger.error("Error closing page: ", e);
         }
 
         for (const pageIndex in this.extraOpenedPages) {
-          const page = this.extraOpenedPages[pageIndex];
-          const cdpClient = this.extraCdpClient[pageIndex];
-
-          if (this.removeUserDataOnExit) {
-            await cdpClient.send('Network.clearBrowserCookies');
-            await cdpClient.send('Network.clearBrowserCache');
-          }
-
-          await cdpClient.detach();
-
-          if (page && page.close && !page.isClosed()) {
+          try {
+            const page = this.extraOpenedPages[pageIndex];
             await page.close();
+          } catch (e) {
+            await this.logger.error("Error closing extra page: ", e);
           }
         }
 
-        if (this.browser && this.browser.close && this.browser.connected) {
+        try {
           await this.browser.close();
+        } catch (e) {
+          await this.logger.error("Error closing browser: ", e);
         }
       }
 
@@ -448,13 +430,17 @@ export default class BaseScraper implements BaseScraperContract {
 
       this.registeredHandlers = [];
       this.registeredTests = [];
-      this.extraCdpClient = [];
       this.extraOpenedPages = [];
     }
   }
 
   protected async handle(): Promise<void> {
     let result = {} as any;
+
+    this.args = {
+      ...this.args,
+      sendEvent: this.sendEvent,
+    };
 
     for (const funcIndex in this.registeredHandlers) {
       try {
@@ -463,7 +449,7 @@ export default class BaseScraper implements BaseScraperContract {
           result = {...result, ...res};
         }
       } catch (err) {
-        await this.registerError(err, "Handler_failed_" + funcIndex);
+        this.registerError(err, "Handler_failed_" + funcIndex);
         break;
       }
     }
@@ -475,11 +461,11 @@ export default class BaseScraper implements BaseScraperContract {
     for (const funcIndex in this.registeredTests) {
       try {
         if (!(await this.registeredTests[funcIndex](this.browser, this.page))) {
-          await this.registerError(new Error('Test failed, func index: ' + funcIndex), "Test_failed_" + funcIndex);
+          this.registerError(new Error('Test failed, func index: ' + funcIndex), "Test_failed_" + funcIndex);
           return false;
         }
       } catch (err) {
-        await this.registerError(err, "Test");
+        this.registerError(err, "Test");
         return false;
       }
     }
@@ -489,39 +475,45 @@ export default class BaseScraper implements BaseScraperContract {
 
   protected async captureScreenshot(name?: string): Promise<void> {
     if (this.enableTakeScreenshot) {
-      const folder = Date.now();
+      try {
+        const folder = Date.now();
 
-      let fileName = (name || (uuid.v4() + "_" + Date.now())) + ".png";
-
-      await Drive.put(`screenshots/${folder}/${fileName}`, "");
-
-      await this.page.screenshot({
-        path: `screenshots/${folder}/${fileName}`,
-        captureBeyondViewport: true,
-        fullPage: true,
-      });
-
-      for (const page of this.extraOpenedPages) {
-        fileName = (name || (uuid.v4() + "_" + Date.now())) + ".png";
+        let fileName = (name || (uuid.v4() + "_" + Date.now())) + ".png";
 
         await Drive.put(`screenshots/${folder}/${fileName}`, "");
 
-        await page.screenshot({
+        await this.page.screenshot({
           path: `screenshots/${folder}/${fileName}`,
           captureBeyondViewport: true,
           fullPage: true,
         });
+
+        for (const page of this.extraOpenedPages) {
+          fileName = (name || (uuid.v4() + "_" + Date.now())) + ".png";
+
+          await Drive.put(`screenshots/${folder}/${fileName}`, "");
+
+          await page.screenshot({
+            path: `screenshots/${folder}/${fileName}`,
+            captureBeyondViewport: true,
+            fullPage: true,
+          });
+        }
+      } catch (e) {
+        await this.logger.error("Error taking screenshot: ", e);
       }
     }
   }
 
   protected async addEventListenersToPage(page: Page, pageIndex: number): Promise<void> {
     for (const listener of this.registeredListeners) {
-      await page.exposeFunction(listener.event, (args) => {
+      await page.exposeFunction(listener.event, (args: any) => {
         listener.callback({...args, pageIndex});
       });
 
       await page.evaluateOnNewDocument((type) => {
+        console.log("Adding event listener: ", type);
+
         window.addEventListener(
           type,
           (e) => {
