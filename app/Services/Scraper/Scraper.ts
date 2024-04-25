@@ -94,6 +94,8 @@ export interface ScraperContract extends BaseScraperContract {
   autoScroll(maxScrolls?: number): ScraperHandlerFunction<void>;
 
   waitForNavigation(timeoutMs?: number): ScraperHandlerFunction<void>;
+
+  sendEvent(_originalPage: Page, progressEventName: string): Promise<void>;
 }
 
 export default class Scraper extends BaseScraper implements ScraperContract {

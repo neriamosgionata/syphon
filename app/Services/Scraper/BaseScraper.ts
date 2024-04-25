@@ -77,6 +77,8 @@ export interface BaseScraperContract {
   writeLog(level: string, message: string, ...values: unknown[]): Promise<void>;
 
   getIsHeadless(): boolean;
+
+  sendEvent(_originalPage: Page, progressEventName: string): Promise<void>;
 }
 
 export default class BaseScraper implements BaseScraperContract {
@@ -528,5 +530,11 @@ export default class BaseScraper implements BaseScraperContract {
         );
       }, listener.event);
     }
+  }
+
+  async sendEvent(_originalPage: Page, progressEventName: string): Promise<void> {
+    await _originalPage.evaluate((e) => {
+      window.dispatchEvent(new Event(e));
+    }, progressEventName);
   }
 }
