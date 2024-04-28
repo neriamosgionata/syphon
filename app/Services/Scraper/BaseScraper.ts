@@ -95,7 +95,7 @@ export default class BaseScraper implements BaseScraperContract {
   protected registeredHandlers: ScraperHandlerFunction<any>[] = [];
   protected registeredListeners: {
     event: string,
-    callback: (args: { type: string, pageIndex: number, event: Event }) => void
+    callback: (args: { type: string, pageIndex: number, event: Event }) => (void | Promise<void>)
   }[] = [];
   protected logger: LoggerContract;
   protected args: { [p: string]: any } = {};
@@ -507,8 +507,8 @@ export default class BaseScraper implements BaseScraperContract {
 
   protected async addEventListenersToPage(page: Page, pageIndex: number): Promise<void> {
     for (const listener of this.registeredListeners) {
-      await page.exposeFunction(listener.event, (args: any) => {
-        listener.callback({...args, pageIndex});
+      await page.exposeFunction(listener.event, async (args: any) => {
+        await listener.callback({...args, pageIndex});
       });
 
       await page.evaluateOnNewDocument((type) => {
