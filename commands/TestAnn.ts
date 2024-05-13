@@ -130,7 +130,7 @@ export default class TestAnn extends BaseCommand {
 
     Console.log("Batch size: " + ANN.calculateBatchSizeFromNumberOfSamples(dataSampleLength));
 
-    Console.log("Epochs: 100");
+    Console.log("Epochs: 1000");
 
     Console.log("X train shape: " + x_train.length);
 
