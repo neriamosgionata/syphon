@@ -59,6 +59,18 @@
       "aliases": [],
       "flags": []
     },
+    "create:test_csv": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/CreateAnnTestingCsv",
+      "commandName": "create:test_csv",
+      "description": "",
+      "args": [],
+      "aliases": [],
+      "flags": []
+    },
     "delete:old_jobs": {
       "settings": {
         "loadApp": true,
@@ -68,53 +80,6 @@
       "commandName": "delete:old_jobs",
       "description": "",
       "args": [],
-      "aliases": [],
-      "flags": []
-    },
-    "import:chart_data": {
-      "settings": {
-        "loadApp": true,
-        "stayAlive": false
-      },
-      "commandPath": "./commands/ImportChartData",
-      "commandName": "import:chart_data",
-      "description": "",
-      "args": [
-        {
-          "type": "string",
-          "propertyName": "ticker",
-          "name": "ticker",
-          "required": true,
-          "description": "Ticker"
-        },
-        {
-          "type": "string",
-          "propertyName": "fromDate",
-          "name": "fromDate",
-          "required": false,
-          "description": "From date"
-        }
-      ],
-      "aliases": [],
-      "flags": []
-    },
-    "import:profile_data": {
-      "settings": {
-        "loadApp": true,
-        "stayAlive": false
-      },
-      "commandPath": "./commands/ImportProfileData",
-      "commandName": "import:profile_data",
-      "description": "",
-      "args": [
-        {
-          "type": "string",
-          "propertyName": "ticker",
-          "name": "ticker",
-          "required": true,
-          "description": "Ticker"
-        }
-      ],
       "aliases": [],
       "flags": []
     },

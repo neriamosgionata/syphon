@@ -3,10 +3,10 @@ import TickerChart from "App/Models/TickerChart";
 import Console from "@ioc:Providers/Console";
 import ANN from "@ioc:Providers/ANN";
 import * as dfd from "danfojs-node";
-import {model_selection} from "machinelearn";
 import {ConfusionMatrix} from "ml-confusion-matrix";
 import Profile from "App/Models/Profile";
-import type {ArrayType2D} from "danfojs-node/dist/danfojs-base/shared/types";
+import {train_test_split} from "machinelearn/model_selection";
+import {Rank, Tensor} from "@tensorflow/tfjs-core";
 
 export default class TestAnn extends BaseCommand {
   /**
@@ -38,11 +38,11 @@ export default class TestAnn extends BaseCommand {
   public async run() {
     Console.log("Loading data...");
 
-    const profile = await Profile.all();
+    const tickers = (await Profile.all()).map((p) => p.ticker);
 
-    const first_100_ticks = profile.map((p) => p.ticker).slice(0, 100);
+    Console.log("Analysing Tickers: " + tickers.length);
 
-    const data = await TickerChart.TickerChartToANNData("2022-01-01", undefined, first_100_ticks);
+    const data = await TickerChart.TickerChartToANNData("2022-01-01", undefined, tickers);
 
     const dataSampleLength = data.shape[0];
     const dataFeaturesLength = data.shape[1];
@@ -50,33 +50,49 @@ export default class TestAnn extends BaseCommand {
     Console.log(`Data samples length: ${dataSampleLength}`);
     Console.log(`Data features length: ${dataFeaturesLength}`);
 
-    Console.log("Running ANN training...");
+    Console.log("Preparing dataset...");
 
-    const ann = await ANN.createANN(
+    const x_set = data.iloc({columns: ["0:" + (dataFeaturesLength - 2)]}).values as number[][];
+    const y_set = data.iloc({columns: [(dataFeaturesLength - 2) + ":" + (dataFeaturesLength - 1)]}).values.map((v: any) => v[0]) as number[];
+
+    Console.log("Splitting dataset...");
+
+    const res = train_test_split(
+      x_set,
+      y_set,
+      {
+        test_size: 0.2,
+        train_size: 0.8,
+        random_state: 42,
+        clone: true,
+      }
+    );
+
+    let x_train = res.xTrain as number[][];
+    let y_train = res.yTrain as number[];
+
+    let x_test = res.xTest as number[][];
+    let y_test = res.yTest as number[];
+
+    Console.log("Normalizing dataset...");
+
+    const standardScaler = new dfd.StandardScaler();
+    standardScaler.fit(x_train);
+
+    x_train = standardScaler.transform(x_train);
+    x_test = standardScaler.transform(x_test);
+
+    Console.log("Preparing ANN...");
+
+    const configuredAnn = await ANN.createANN(
       [
         {
           units: dataFeaturesLength,
           activation: "relu",
-          batchInputShape: [null, dataFeaturesLength],
+          batchInputShape: [x_train.length, x_train[0].length],
         },
         {
-          units: dataFeaturesLength + 2,
-          activation: "relu",
-        },
-        {
-          units: dataFeaturesLength + 4,
-          activation: "relu",
-        },
-        {
-          units: dataFeaturesLength + 6,
-          activation: "relu",
-        },
-        {
-          units: dataFeaturesLength + 4,
-          activation: "relu",
-        },
-        {
-          units: dataFeaturesLength + 2,
+          units: dataFeaturesLength * 2,
           activation: "relu",
         },
         {
@@ -91,72 +107,28 @@ export default class TestAnn extends BaseCommand {
       },
     );
 
-    Console.log("Preparing dataset...");
+    Console.log("Running ANN training...");
 
-    const x_set = data.iloc({columns: ["0:" + (dataFeaturesLength - 2)]}).values as ArrayType2D;
-    const y_set = data.iloc({columns: [":" + (dataFeaturesLength - 1)]}).values as ArrayType2D;
-
-    Console.log("X set shape: " + x_set.length);
-    Console.log("Y set shape: " + y_set.length);
-
-    Console.log("Splitting dataset...");
-
-    const res = model_selection.train_test_split(
-      x_set,
-      y_set,
-      {
-        test_size: 0.2,
-        train_size: 0.8,
-        random_state: 0,
-        clone: true,
-      }
-    );
-
-    let x_train = res.xTrain;
-    let y_train = res.yTrain;
-    let x_test = res.xTest;
-    let y_test = res.yTest;
-
-    Console.log("Normalizing dataset...");
-
-    const standardScaler = new dfd.StandardScaler();
-
-    standardScaler.fit(x_train);
-
-    x_train = standardScaler.transform(x_train);
-    x_test = standardScaler.transform(x_test);
-
-    Console.log("Fitting ANN...");
-
-    Console.log("Batch size: " + ANN.calculateBatchSizeFromNumberOfSamples(dataSampleLength));
-
-    Console.log("Epochs: 1000");
-
-    Console.log("X train shape: " + x_train.length);
-
-    Console.log("Y train shape: " + y_train.length);
-
-    const _history = await ann.fit(
+    const history = await ANN.trainANN(
+      configuredAnn,
       x_train,
       y_train,
       {
-        batchSize: 32,
+        batchSize: 100,
         epochs: 1000,
-        verbose: 2,
+        verbose: 1,
       },
     );
 
-    Console.log(_history);
+    Console.log("Training history: ", history);
 
     Console.log("Predicting next results...");
 
-    const y_pred = ann.predict(x_test);
+    const y_pred = ANN.predictANN(configuredAnn, x_test) as Tensor<Rank>;
 
-    Console.log("Predicted results:");
+    Console.log(y_pred, y_test);
 
-    Console.log(y_pred);
-
-    const cm = ConfusionMatrix.fromLabels(y_test as any, y_pred as any);
+    const cm = ConfusionMatrix.fromLabels(y_test, y_pred.arraySync() as number[]);
 
     Console.log("Accuracy: " + cm.getAccuracy());
 

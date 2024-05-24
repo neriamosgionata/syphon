@@ -164,19 +164,19 @@ export default class Profile extends BaseModel {
     };
   }
 
-  toANNData() {
+  toANNData(): (string | number)[] {
     return [
       this.ticker,
-      this.language,
-      this.region,
+      (this.language || "en-US").toString(),
+      (this.region || "US").toString(),
       this.quoteType as ProfileQuoteTypeEnum,
-      this.currency || "USD",
+      (this.currency || "USD").toString(),
       this.marketState as ProfileMarketStateEnum,
       this.tradeable ? 1 : 0,
       this.cryptoTradeable ? 1 : 0,
-      this.exchangeTimezoneName,
-      this.exchangeTimezoneShortName,
-      this.market,
+      this.exchangeTimezoneName || "America/New_York",
+      this.exchangeTimezoneShortName || "EDT",
+      this.market || "us_market",
       this.trailingAnnualDividendRate || 0,
       this.trailingPE || 0,
       this.trailingAnnualDividendYield || 0,
@@ -187,49 +187,70 @@ export default class Profile extends BaseModel {
       this.sharesOutstanding || 0,
       this.bookValue || 0,
       this.marketCap || 0,
-      this.financialCurrency || "USD",
+      (this.financialCurrency || "USD").toString(),
       this.averageDailyVolume3Month || 0,
       this.averageDailyVolume10Day || 0,
       this.ytdReturn || 0,
-      this.averageAnalystRating || "N/A",
+      (this.averageAnalystRating || "N/A").toString(),
       this.openInterest || 0,
     ];
   }
 
-  static async allProfilesToANNData() {
-    const profiles = await Profile.all();
+  static async getTickers(ticker?: string | string[]) {
+    if (ticker) {
+      ticker = Array.isArray(ticker) ? ticker : [ticker];
+    } else {
+      ticker = undefined;
+    }
 
-    Console.log("Retrieved " + profiles.length + " profiles from db...");
+    return ticker ? await Profile.query().whereIn("ticker", ticker).exec() : await Profile.all();
+  }
+
+  static async allProfilesToANNData(ticker?: string | string[]): Promise<{ ticker: string; data: number[] }[]> {
+    const profiles = await this.getTickers(ticker);
 
     const mappedProfiles = profiles.map((profile) => profile.toANNData());
 
     Console.log("Mapping profiles...");
 
     const indexesOfNonNumericColumn = mappedProfiles[0]
-      .filter((value) => typeof value !== "number")
-      .map((_, index) => index);
+      .reduce((acc, value, index) => {
+        if (typeof value !== "number") {
+          acc.push(index);
+        }
 
-    const finalProfiles: { ticker: string, data: number[] }[] = [];
+        return acc;
+      }, [] as number[]);
+
+    const finalData: {
+      ticker: string,
+      data: number[],
+    } [] = [];
+
+    const tickers = mappedProfiles.reduce((acc, profile) => {
+      return [...acc, profile[0]];
+    }, []) as string[];
 
     for (const index of indexesOfNonNumericColumn) {
-      const series = new dfd.Series(mappedProfiles.map((row, index) => row[index]));
+      const fitting_series = mappedProfiles.reduce((acc, row) => ([...acc, row[index]]), []);
+
       const encoder = new dfd.LabelEncoder();
-      encoder.fit(series);
+      encoder.fit(fitting_series);
 
-      for (const mappedProfile of mappedProfiles) {
-        const ticker = mappedProfile[0] as string;
-
-        mappedProfile[index] = encoder.transform([mappedProfile[index]])[0] as number;
-
-        finalProfiles.push({
-          ticker: ticker,
-          data: mappedProfile as number[],
-        });
+      for (const mappedProfileIndex in mappedProfiles) {
+        mappedProfiles[mappedProfileIndex][index] = encoder.transform([mappedProfiles[mappedProfileIndex][index]])[0];
       }
     }
 
-    Console.log("Mapping profiles... Done");
+    for (const mappedProfileIndex in mappedProfiles) {
+      finalData.push({
+        ticker: tickers[mappedProfileIndex],
+        data: mappedProfiles[mappedProfileIndex] as number[],
+      });
+    }
 
-    return finalProfiles;
+    Console.log("Mapped profiles: " + mappedProfiles.length + " profiles...");
+
+    return finalData;
   }
 }

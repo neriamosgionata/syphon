@@ -83,65 +83,57 @@ export default class TickerChart extends BaseModel {
     return query.exec();
   }
 
+  static async TickerChartTable(
+    fromDate?: string,
+    toDate?: string,
+    ticker?: string | string[],
+    interval?: string,
+  ): Promise<number[][]> {
+    const allProfiles = await Profile.allProfilesToANNData(ticker);
+
+    Console.log("Mapping final data...");
+
+    const finalData = [] as number[][];
+
+    const tickerChartsData = await TickerChart.getTickerChart(fromDate, toDate, ticker, interval, "date", "asc");
+
+    for (const profile of allProfiles) {
+      const tickerCharts = tickerChartsData.filter((row) => row.ticker === profile.ticker)
+        .map((row) => ([row.high || 0]))
+        .reduce((acc, row) => ([...acc, row[0]]), []);
+
+      finalData.push([
+        ...profile.data,
+        ...tickerCharts,
+      ]);
+    }
+
+    let smallest = 999999999999;
+
+    for (const row of finalData) {
+      if (row.length < smallest) {
+        smallest = row.length;
+      }
+    }
+
+    for (const row in finalData) {
+      finalData[row] = finalData[row].slice(0, smallest);
+    }
+
+    Console.log("Mapping final data... Done");
+
+    return finalData;
+  }
+
   static async TickerChartToANNData(
     fromDate?: string,
     toDate?: string,
     ticker?: string | string[],
     interval?: string,
   ) {
-    const data = await TickerChart.getTickerChart(fromDate, toDate, ticker, interval, "date", "asc");
+    const table = await this.TickerChartTable(fromDate, toDate, ticker, interval);
 
-    Console.log("Retrieved " + data.length + " ticker chart data...");
-
-    const allProfiles = await Profile.allProfilesToANNData();
-
-    Console.log("Retrieved " + allProfiles.length + " mapped profiles...");
-
-    const mappedData = data
-      .filter((row) => allProfiles.find((profile) => profile.ticker === row.ticker))
-      .map((row) => ([
-        row.ticker,
-        row.high || 0,
-        row.close || 0,
-        row.low || 0,
-        row.open || 0,
-        row.adjclose || 0,
-        row.volume || 0,
-        (row.date as DateTime).toJSDate().getTime(),
-      ]))
-      // @ts-ignore
-      .sort((a, b) => (a[7] - b[7])) as [string, number, number, number, number, number, number, number][];
-
-    Console.log("Mapping final data...");
-
-    let finalData = allProfiles
-      .map((profile) => ([
-        ...profile.data,
-        ...mappedData
-          .filter((row) => row[0] === profile.ticker)
-          .map((row) => row[1]),
-      ]));
-
-    const longestArrayLength = finalData
-      .reduce((currentLength, currentArray) =>
-        currentArray.length > currentLength ? currentArray.length : currentLength, 0);
-
-    for (const i in finalData) {
-      if (finalData[i].length < longestArrayLength) {
-        const missing_length = longestArrayLength - finalData[i].length;
-        finalData[i] = [
-          ...finalData[i].splice(0, allProfiles[0].data.length),
-          ...Array(missing_length).fill(0),
-          ...finalData[i]
-        ];
-      }
-    }
-
-    finalData = finalData.filter((row) => row.length === longestArrayLength);
-
-    Console.log("Mapping final data... Done");
-
-    return new dfd.DataFrame(finalData);
+    return new dfd.DataFrame(table);
   }
 
   static createObjectFromYahoo(ticker: string, interval: ChartInterval, entry: ChartResultArrayQuote): Partial<TickerChart> {

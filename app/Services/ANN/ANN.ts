@@ -1,23 +1,30 @@
-import * as tf from "@tensorflow/tfjs-node";
 import {DenseLayerArgs} from "@tensorflow/tfjs-layers/dist/layers/core";
 import {ModelCompileArgs} from "@tensorflow/tfjs-layers/dist/engine/training";
 import Console from "@ioc:Providers/Console";
 
-export interface ANNContract {
-  createANN(layersStructure: DenseLayerArgs[], compileOptions: ModelCompileArgs): Promise<tf.Sequential>;
+import * as tfjs from "@tensorflow/tfjs-node";
+import {ModelFitArgs} from "@tensorflow/tfjs-layers/dist/engine/training_tensors";
 
-  calculateBatchSizeFromNumberOfSamples(numberOfSamples: number): number;
+
+export interface ANNContract {
+  createANN(layersStructure: DenseLayerArgs[], compileOptions: ModelCompileArgs): Promise<tfjs.Sequential>;
+
+  trainANN(model: tfjs.Sequential, xSet: number[][], ySet: number[], args: ModelFitArgs): Promise<tfjs.History>;
+
+  predictANN(model: tfjs.Sequential, xTestSet: number[][]): tfjs.Tensor<tfjs.Rank> | tfjs.Tensor[];
 }
 
 export default class ANN implements ANNContract {
 
-  async createANN(layersStructure: DenseLayerArgs[], compileOptions: ModelCompileArgs): Promise<tf.Sequential> {
+  async createANN(layersStructure: DenseLayerArgs[], compileOptions: ModelCompileArgs): Promise<tfjs.Sequential> {
+    const tf = require("@tensorflow/tfjs-node");
+
     await tf.setBackend("tensorflow");
     await tf.ready();
 
-    Console.log("Tensorflow version: " + JSON.stringify(tf.version));
+    Console.log("ANN Structure: " + JSON.stringify(layersStructure));
 
-    Console.log("Creating ANN with backend: " + tf.getBackend());
+    Console.log("ANN Compilation options: " + JSON.stringify(compileOptions));
 
     const model = tf.sequential();
 
@@ -32,8 +39,28 @@ export default class ANN implements ANNContract {
     return model;
   }
 
-  calculateBatchSizeFromNumberOfSamples(numberOfSamples: number): number {
-    return numberOfSamples > 500000 ? Math.floor(numberOfSamples / 5) : numberOfSamples;
+  async trainANN(model: tfjs.Sequential, xSet: number[][], ySet: number[], args: ModelFitArgs): Promise<tfjs.History> {
+    Console.log("ANN fitting arguments: " + JSON.stringify(args));
+
+    const history = await model.fit(
+      tfjs.tensor2d(xSet),
+      tfjs.tensor1d(ySet),
+      args,
+    );
+
+    Console.log("ANN trained");
+
+    return history;
+  }
+
+  predictANN(model: tfjs.Sequential, xTestSet: number[][]): tfjs.Tensor<tfjs.Rank> | tfjs.Tensor[] {
+    Console.log("Predicting ANN...");
+
+    const prediction = model.predict(tfjs.tensor2d(xTestSet));
+
+    Console.log("ANN predicted");
+
+    return prediction;
   }
 
 }

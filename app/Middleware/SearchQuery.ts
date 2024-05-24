@@ -9,8 +9,8 @@ export default class SearchQueryMiddleware {
 
     let {query, perPage, page, sort, order} = request.qs();
 
-    perPage = perPage ?? 25;
-    page = page ?? 1;
+    perPage = perPage || 25;
+    page = page || 1;
 
     if (!baseModel) {
       return response.badRequest("No base model provided");
