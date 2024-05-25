@@ -77,10 +77,26 @@ export default class TestAnn extends BaseCommand {
     Console.log("Normalizing dataset...");
 
     const standardScaler = new dfd.StandardScaler();
-    standardScaler.fit(x_train);
-
-    x_train = standardScaler.transform(x_train);
+    x_train = standardScaler.fitTransform(x_train);
     x_test = standardScaler.transform(x_test);
+
+    for (const a in x_train) {
+      for (const b in x_train[a]) {
+        if (isNaN(x_train[a][b])) {
+          x_train[a][b] = 0;
+        }
+      }
+    }
+
+    for (const a in x_test) {
+      for (const b in x_test[a]) {
+        if (isNaN(x_test[a][b])) {
+          x_test[a][b] = 0;
+        }
+      }
+    }
+
+    Console.log("Dataset ready");
 
     Console.log("Preparing ANN...");
 
@@ -92,8 +108,8 @@ export default class TestAnn extends BaseCommand {
           batchInputShape: [x_train.length, x_train[0].length],
         },
         {
-          units: dataFeaturesLength * 2,
-          activation: "relu",
+          units: dataFeaturesLength,
+          activation: "relu"
         },
         {
           units: 1,
@@ -114,8 +130,8 @@ export default class TestAnn extends BaseCommand {
       x_train,
       y_train,
       {
-        batchSize: 100,
-        epochs: 1000,
+        batchSize: 50,
+        epochs: 100,
         verbose: 1,
       },
     );
