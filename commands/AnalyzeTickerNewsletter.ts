@@ -1,5 +1,5 @@
 import {args, BaseCommand} from "@adonisjs/core/build/standalone";
-import {AnalyzeNewsletterForTickerJobParameters} from "App/Jobs/AnalyzeNewsletterForTickerJob";
+import {AnalyzeNewsletterForTickerJobParameters} from "App/Jobs/AnalyzeNewsletterByTickerJob";
 import Jobs from "@ioc:Providers/Jobs";
 
 export default class AnalyzeTickerNewsletter extends BaseCommand {
