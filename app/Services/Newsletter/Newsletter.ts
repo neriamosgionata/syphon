@@ -62,8 +62,6 @@ export default class Newsletter implements NewsletterContract {
       .setWithStealthPlugin(true)
       .setHandlers([
         Scraper.goto("https://news.google.com/"),
-        Scraper.waitRandom(),
-        Scraper.removeGPDR(),
         ...Scraper.searchAndEnter("input:not([aria-hidden=\"true\"])", searchQuery),
         Scraper.autoScroll(50),
         this.getArticlesUrls(searchQuery),
@@ -79,9 +77,7 @@ export default class Newsletter implements NewsletterContract {
       .setWithStealthPlugin(true)
       .setHandlers([
         Scraper.goto(articleUrl),
-        Scraper.removeGPDR(),
         Scraper.waitForNavigation(),
-        Scraper.waitRandom(),
         this.getArticleContent(),
       ])
       .run<{

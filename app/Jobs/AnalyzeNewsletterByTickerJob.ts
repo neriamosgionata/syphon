@@ -15,18 +15,16 @@ const handler = async () => {
 
   //RUN GOOGLE NEWS SCRAPING
 
-  await Jobs.waitUntilDone(
-    await Jobs.dispatch<ScrapeGoogleNewsJobParameters>(
-      "ScrapeGoogleNewsJob",
-      {
-        searchQuery: data.ticker,
-      },
-      [],
-      (jobMessage) => {
-        const payload = jobMessage.payload as ScraperRunReturn<{ articlesUrl: string[] }>;
-        articleUrls.push(...payload.results.articlesUrl);
-      }
-    )
+  await Jobs.runWithoutDispatch<ScrapeGoogleNewsJobParameters>(
+    "ScrapeGoogleNewsJob",
+    {
+      searchQuery: data.ticker,
+    },
+    [],
+    (jobMessage) => {
+      const payload = jobMessage.payload as ScraperRunReturn<{ articlesUrl: string[] }>;
+      articleUrls.push(...payload.results.articlesUrl);
+    }
   );
 
   //RUN ARTICLE SCRAPING
