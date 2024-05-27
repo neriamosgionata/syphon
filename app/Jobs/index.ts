@@ -3,14 +3,14 @@ import ScrapeNpmRegistryJob from "App/Jobs/ScrapeNpmRegistryJob";
 import ScrapeSingleNpmPackageJob from "App/Jobs/ScrapeSingleNpmPackageJob";
 import UpdateNpmPackagesJob from "App/Jobs/UpdateNpmPackagesJob";
 
-import AnalyzeNewsletterForTickerJob from "App/Jobs/AnalyzeNewsletterByTickerJob";
+import AnalyzeNewsletterByTickerJob from "App/Jobs/AnalyzeNewsletterByTickerJob";
 import DeleteAllJobsJob from "App/Jobs/DeleteAllJobsJob";
 import ScrapeGoogleNewsJob from "App/Jobs/ScrapeGoogleNewsJob";
 import ScrapeNewsArticleJob from "App/Jobs/ScrapeNewsArticleJob";
 import ScrapeYahooFinanceForTickersJob from "App/Jobs/ScrapeYahooFinanceForTickersJob";
 
 export const JobList = {
-  AnalyzeNewsletterForTickerJob,
+  AnalyzeNewsletterByTickerJob,
   DeleteAllJobsJob,
   DeleteOldJobsJob,
   ScrapeGoogleNewsJob,

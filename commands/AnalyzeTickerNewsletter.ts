@@ -37,7 +37,7 @@ export default class AnalyzeTickerNewsletter extends BaseCommand {
 
     await Jobs.waitUntilDone(
       await Jobs.dispatch<AnalyzeNewsletterForTickerJobParameters>(
-        "AnalyzeNewsletterForTickerJob",
+        "AnalyzeNewsletterByTickerJob",
         {
           ticker: this.ticker,
         },
