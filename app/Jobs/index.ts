@@ -5,16 +5,14 @@ import UpdateNpmPackagesJob from "App/Jobs/UpdateNpmPackagesJob";
 
 import AnalyzeNewsletterByTickerJob from "App/Jobs/AnalyzeNewsletterByTickerJob";
 import DeleteAllJobsJob from "App/Jobs/DeleteAllJobsJob";
-import ScrapeGoogleNewsJob from "App/Jobs/ScrapeGoogleNewsJob";
-import ScrapeNewsArticleJob from "App/Jobs/ScrapeNewsArticleJob";
 import ScrapeYahooFinanceForTickersJob from "App/Jobs/ScrapeYahooFinanceForTickersJob";
+import ScrapeNewsArticleJob from "App/Jobs/ScrapeNewsArticleJob";
 
 export const JobList = {
+  ScrapeNewsArticleJob,
   AnalyzeNewsletterByTickerJob,
   DeleteAllJobsJob,
   DeleteOldJobsJob,
-  ScrapeGoogleNewsJob,
-  ScrapeNewsArticleJob,
   ScrapeNpmRegistryJob,
   ScrapeSingleNpmPackageJob,
   ScrapeYahooFinanceForTickersJob,
@@ -22,12 +20,11 @@ export const JobList = {
 };
 
 export const JobListForFrontend = {
+  "ScrapeNewsArticleJob": {name: "ScrapeNewsArticleJob", params: {}},
   "AnalyzeNewsletterForTickerJob": {name: "AnalyzeNewsletterForTickerJob", params: {}},
   "DeleteAllJobsJob": {name: "DeleteAllJobsJob", params: {}},
   "DeleteOldJobsJob": {name: "DeleteOldJobsJob", params: {}},
   "ScrapeGoogleNewsJob": {name: "ScrapeGoogleNewsJob", params: {}},
-  "ScrapeNewsArticleJob": {name: "ScrapeNewsArticleJob", params: {}},
-  "ScrapeNpmRegistryJob": {name: "ScrapeNpmRegistryJob", params: {}},
   "ScrapeSingleNpmPackageJob": {name: "ScrapeSingleNpmPackageJob", params: {}},
   "ScrapeYahooFinanceForTickersJob": {name: "ScrapeYahooFinanceForTickersJob", params: {}},
   "UpdateNpmPackagesJob": {name: "UpdateNpmPackagesJob", params: {}},

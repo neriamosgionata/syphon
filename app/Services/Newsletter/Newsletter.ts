@@ -2,29 +2,27 @@ import Scraper from "@ioc:Providers/Scraper";
 import {ScraperHandlerFunction, ScraperRunReturn} from "App/Services/Scraper/BaseScraper";
 
 export interface NewsletterContract {
-  getGoogleNewsArticlesFor(searchQuery: string): Promise<ScraperRunReturn<{ articlesUrl: string[] }>>;
+  getGoogleNewsArticlesBySearchQuery(searchQuery: string): Promise<ScraperRunReturn<{ articlesUrl: string[] }>>;
 
   getArticle(articleUrl: string): Promise<ScraperRunReturn<{ title?: string, content?: string }>>;
 }
 
 export default class Newsletter implements NewsletterContract {
 
-  private getArticlesUrls(searchQuery: string): ScraperHandlerFunction<{ articlesUrl: string[] }> {
-    return Scraper.evaluate((sQ: string) => {
-      const container = document.querySelector('div[data-n-ca-it^="' + sQ + '"]')
-      if (!container) {
-        return {articlesUrl: []};
-      }
-      const articles = container.querySelectorAll("article");
+  private getArticlesUrls(): ScraperHandlerFunction<{ articlesUrl: string[] }> {
+    return Scraper.evaluate(() => {
+      const articles = document.querySelectorAll("article");
       const articlesUrl: string[] = [];
+
       for (const article of articles) {
         const url = article.querySelector("a")?.getAttribute("href");
         if (url) {
           articlesUrl.push("https://news.google.com/" + url.replace("./", ""));
         }
       }
+
       return {articlesUrl};
-    }, searchQuery);
+    });
   }
 
   private getArticleContent(): ScraperHandlerFunction<{ title?: string, content?: string }> {
@@ -50,21 +48,31 @@ export default class Newsletter implements NewsletterContract {
 
       } catch (e) {
 
-      }
+        return {title: "", content: ""};
 
-      return {title: "", content: ""};
+      }
     });
   }
 
-  async getGoogleNewsArticlesFor(searchQuery: string): Promise<ScraperRunReturn<{ articlesUrl: string[] }>> {
+  async getGoogleNewsArticlesBySearchQuery(searchQuery: string): Promise<ScraperRunReturn<{ articlesUrl: string[] }>> {
     return await Scraper
       .setWithAdblockerPlugin(true)
       .setWithStealthPlugin(true)
       .setHandlers([
         Scraper.goto("https://news.google.com/"),
+        Scraper.waitForNavigation(),
+        Scraper.waitRandom(),
+        Scraper.removeGPDR(),
+        Scraper.waitForNavigation(),
+        Scraper.waitRandom(),
         ...Scraper.searchAndEnter("input:not([aria-hidden=\"true\"])", searchQuery),
-        Scraper.autoScroll(50),
-        this.getArticlesUrls(searchQuery),
+        Scraper.waitForNavigation(),
+        Scraper.waitRandom(),
+        Scraper.autoScroll(),
+        Scraper.removeGPDR(),
+        Scraper.waitForNavigation(),
+        Scraper.waitRandom(),
+        this.getArticlesUrls(),
       ])
       .run<{
         articlesUrl: string[],
@@ -78,6 +86,10 @@ export default class Newsletter implements NewsletterContract {
       .setHandlers([
         Scraper.goto(articleUrl),
         Scraper.waitForNavigation(),
+        Scraper.waitRandom(),
+        Scraper.removeGPDR(),
+        Scraper.waitForNavigation(),
+        Scraper.waitRandom(),
         this.getArticleContent(),
       ])
       .run<{

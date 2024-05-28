@@ -1,17 +1,19 @@
-import {loadJobParameters, payloadToParent, configureJob} from "App/Services/Jobs/JobHelpers";
-import Newsletter from "@ioc:Providers/Newsletter";
+import {configureJob, loadJobParameters, payloadToParent} from "App/Services/Jobs/JobHelpers";
 import {BaseJobParameters} from "App/Services/Jobs/JobsTypes";
-
-const scraperNewsArticle = async (articleUrl: string) => {
-  return await Newsletter.getArticle(articleUrl);
-}
+import Newsletter from "@ioc:Providers/Newsletter";
+import Helper from "@ioc:Providers/Helper";
 
 const handler = async () => {
-  const parameters = loadJobParameters<ScrapeNewsArticleJobParameters>();
+  const {articleUrl} = loadJobParameters<ScrapeNewsArticleJobParameters>();
 
-  const res = await scraperNewsArticle(parameters.articleUrl);
+  const res = await Newsletter.getArticle(articleUrl);
 
-  payloadToParent(res);
+  if (Helper.isNotFalsy(res.results.title) && Helper.isNotFalsy(res.results.content)) {
+    payloadToParent({
+      title: res.results.title,
+      content: res.results.content
+    });
+  }
 };
 
 export interface ScrapeNewsArticleJobParameters extends BaseJobParameters {

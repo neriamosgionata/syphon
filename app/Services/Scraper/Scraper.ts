@@ -238,7 +238,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
       if (_page) {
         const path = "screenshots";
 
-        const fullPath = path + "/" + (name || "screenshot-") + Date.now() + ".png";
+        const fullPath = path + "/" + (name || "screenshot") + "_" + Date.now() + ".png";
         const img = await _page.screenshot();
 
         await Drive.put(fullPath, img);
@@ -286,7 +286,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  autoScroll(maxScrolls: number = 50): ScraperHandlerFunction<void> {
+  autoScroll(maxScrolls: number = 100): ScraperHandlerFunction<void> {
     return async (_browser, _page) => {
       await _page.evaluate(async (maxScrolls) => {
 
@@ -306,7 +306,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
               clearInterval(timer);
               resolve();
             }
-          }, 450);
+          }, 750);
 
         });
 

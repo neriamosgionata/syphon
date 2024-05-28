@@ -339,7 +339,7 @@ export default class BaseScraper implements BaseScraperContract {
       },
       headless: this.withHeadlessChrome,
       args,
-      protocolTimeout: 60000,
+      protocolTimeout: 120000,
     };
 
     const puppeteer = (await import("puppeteer-extra")).default;

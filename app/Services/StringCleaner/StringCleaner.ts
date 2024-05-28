@@ -53,6 +53,8 @@ export interface StringCleanerContract {
   aposToLexForm(): StringCleanerContract;
 
   fixSpellingErrors(): StringCleanerContract;
+
+  sanitizeWords(words: string): string;
 }
 
 export default class StringCleaner implements StringCleanerContract {
@@ -205,5 +207,16 @@ export default class StringCleaner implements StringCleanerContract {
   fixSpellingErrors(): StringCleanerContract {
     this.s = spellingCorrector(this.s);
     return this;
+  }
+
+  sanitizeWords(words: string): string {
+    return this
+      .setString(words)
+      .stripHtml()
+      .removeHtmlEntities()
+      .removeDashes()
+      .removeEscapeCharacters()
+      .replace(/[^a-zA-Z\s]+/g, "")
+      .valueOf()
   }
 }

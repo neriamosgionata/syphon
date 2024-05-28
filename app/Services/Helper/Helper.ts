@@ -12,7 +12,6 @@ import natural, {
   Stemmer
 } from "natural";
 
-import StringCleaner from "@ioc:Providers/StringCleaner";
 import fs from "fs";
 import PackageJson from "App/Models/PackageJson";
 import {PatternLanguage, SenticonLanguage} from "natural/lib/natural/sentiment";
@@ -84,10 +83,6 @@ export interface HelperContract {
   EQUATORIAL_RADIUS_KM: number;
 
   pythonSerializedToJson(pythonObj: string): string;
-
-  cleanText(text: string): string;
-
-  sanitizeWords(words: string): string;
 
   removeStopwordsJoined(text: string, customStops?: string[]): string;
 
@@ -319,30 +314,6 @@ export default class Helper implements HelperContract {
       .replaceAll(/\\n/g, '\n')
       .replaceAll(/\\'/g, "'")
       .replaceAll(/\\"/g, '"')
-  }
-
-  cleanText(text: string): string {
-    return StringCleaner
-      .setString(text)
-      .stripHtml()
-      .removeHtmlEntities()
-      .removeDashes()
-      .aposToLexForm()
-      .replace(/[^a-zA-Z\s]+/g, "")
-      .fixSpellingErrors()
-      .toLowerCase()
-      .valueOf()
-  }
-
-  sanitizeWords(words: string): string {
-    return StringCleaner
-      .setString(words)
-      .stripHtml()
-      .removeHtmlEntities()
-      .removeDashes()
-      .removeEscapeCharacters()
-      .replace(/[^a-zA-Z\s]+/g, "")
-      .valueOf()
   }
 
   removeStopwordsJoined(text: string, customStops?: LanguageCode[]): string {

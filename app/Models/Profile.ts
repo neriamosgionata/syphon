@@ -5,7 +5,7 @@ import {ProfileMarketStateEnum} from "App/Enums/ProfileMarketStateEnum";
 import {Quote} from "yahoo-finance2/dist/esm/src/modules/quote";
 import * as dfd from "danfojs-node";
 import Console from "@ioc:Providers/Console";
-import Helper from "@ioc:Providers/Helper";
+import StringCleaner from "@ioc:Providers/StringCleaner";
 
 export default class Profile extends BaseModel {
   @column({isPrimary: true})
@@ -114,6 +114,9 @@ export default class Profile extends BaseModel {
   @column()
   openInterest: number | null;
 
+  @column()
+  isInteresting: number;
+
   // @ts-ignore
   @column.dateTime()
   indexDate: DateTime | string;
@@ -130,14 +133,14 @@ export default class Profile extends BaseModel {
       language: profile.language,
       region: profile.region,
       quoteType: profile.quoteType as ProfileQuoteTypeEnum,
-      quoteSourceName: profile.quoteSourceName ? Helper.sanitizeWords(profile.quoteSourceName) : null,
+      quoteSourceName: profile.quoteSourceName ? StringCleaner.sanitizeWords(profile.quoteSourceName) : null,
       currency: profile.currency || null,
       marketState: profile.marketState as ProfileMarketStateEnum,
       tradeable: profile.tradeable,
       cryptoTradeable: profile.cryptoTradeable || null,
       exchange: profile.exchange,
-      shortName: profile.shortName ? Helper.sanitizeWords(profile.shortName) : null,
-      longName: profile.longName ? Helper.sanitizeWords(profile.longName) : null,
+      shortName: profile.shortName ? StringCleaner.sanitizeWords(profile.shortName) : null,
+      longName: profile.longName ? StringCleaner.sanitizeWords(profile.longName) : null,
       exchangeTimezoneName: profile.exchangeTimezoneName,
       exchangeTimezoneShortName: profile.exchangeTimezoneShortName,
       market: profile.market,
@@ -154,9 +157,9 @@ export default class Profile extends BaseModel {
       financialCurrency: profile.financialCurrency || null,
       averageDailyVolume3Month: profile.averageDailyVolume3Month || null,
       averageDailyVolume10Day: profile.averageDailyVolume10Day || null,
-      displayName: profile.displayName ? Helper.sanitizeWords(profile.displayName) : null,
+      displayName: profile.displayName ? StringCleaner.sanitizeWords(profile.displayName) : null,
       ytdReturn: profile.ytdReturn || null,
-      prevName: profile.prevName ? Helper.sanitizeWords(profile.prevName) : null,
+      prevName: profile.prevName ? StringCleaner.sanitizeWords(profile.prevName) : null,
       averageAnalystRating: profile.averageAnalystRating || null,
       openInterest: profile.openInterest || null,
       dividendDate: profile.dividendDate ? DateTime.fromISO(profile.dividendDate.toISOString()).toSQL({includeOffset: false}) : null,
@@ -164,7 +167,7 @@ export default class Profile extends BaseModel {
     };
   }
 
-  toANNData(): (string | number)[] {
+  toANNData(): (string | ProfileQuoteTypeEnum | ProfileMarketStateEnum | number)[] {
     return [
       this.ticker,
       (this.language || "en-US").toString(),
@@ -193,6 +196,7 @@ export default class Profile extends BaseModel {
       this.ytdReturn || 0,
       (this.averageAnalystRating || "N/A").toString(),
       this.openInterest || 0,
+      this.isInteresting,
     ];
   }
 
@@ -209,7 +213,7 @@ export default class Profile extends BaseModel {
   static async allProfilesToANNData(ticker?: string | string[]): Promise<{ ticker: string; data: number[] }[]> {
     const profiles = await this.getTickers(ticker);
 
-    const mappedProfiles = profiles.map((profile) => profile.toANNData());
+    const mappedProfiles = profiles.map((profile: Profile) => profile.toANNData());
 
     Console.log("Mapping profiles...");
 

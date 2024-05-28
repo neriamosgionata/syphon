@@ -1,90 +1,90 @@
 import {configureJob, loadJobParameters} from "App/Services/Jobs/JobHelpers";
-import {ScrapeGoogleNewsJobParameters} from "App/Jobs/ScrapeGoogleNewsJob";
-import {ScraperRunReturn} from "App/Services/Scraper/BaseScraper";
 import ProgressBar from "@ioc:Providers/ProgressBar";
-import {ScrapeNewsArticleJobParameters} from "App/Jobs/ScrapeNewsArticleJob";
 import Helper from "@ioc:Providers/Helper";
-import Jobs from "@ioc:Providers/Jobs";
 import Console from "@ioc:Providers/Console";
-import {JobMessageEnum} from "App/Enums/JobMessageEnum";
 import {BaseJobParameters} from "App/Services/Jobs/JobsTypes";
+import Newsletter from "@ioc:Providers/Newsletter";
+import Jobs from "@ioc:Providers/Jobs";
+import {ScrapeNewsArticleJobParameters} from "App/Jobs/ScrapeNewsArticleJob";
+import StringCleaner from "@ioc:Providers/StringCleaner";
 
 const handler = async () => {
   let data = loadJobParameters<AnalyzeNewsletterForTickerJobParameters>();
-  const articleUrls: string[] = [];
 
   //RUN GOOGLE NEWS SCRAPING
 
-  await Jobs.runWithoutDispatch<ScrapeGoogleNewsJobParameters>(
-    "ScrapeGoogleNewsJob",
-    {
-      searchQuery: data.ticker,
-    },
-    [],
-    (jobMessage) => {
-      const payload = jobMessage.payload as ScraperRunReturn<{ articlesUrl: string[] }>;
-      articleUrls.push(...payload.results.articlesUrl);
-    }
-  );
+  const res = await Newsletter.getGoogleNewsArticlesBySearchQuery(data.ticker);
 
-  //RUN ARTICLE SCRAPING
+  const articlesUrl = res.results.articlesUrl;
 
   const articleData: Map<string, { title: string; content: string }> = new Map();
-  let chunk: (() => Promise<JobMessageEnum>)[] = [];
-  let index = await ProgressBar.newBar(articleUrls.length, "Scraping articles");
+
+  const index = await ProgressBar.newBar(articlesUrl.length, "Scraping articles");
 
   do {
-    let articles: string[] = articleUrls.splice(0, 2);
-
-    chunk = articles.map((articleUrl) =>
-      async () => await Jobs.waitUntilDone(
-        await Jobs.dispatch<ScrapeNewsArticleJobParameters>(
+    const running = articlesUrl.splice(0, 8)
+      .map((articleUrl) => Jobs.runWithoutDispatch<ScrapeNewsArticleJobParameters>(
           "ScrapeNewsArticleJob",
           {
-            articleUrl,
+            articleUrl
           },
           [],
-          (jobMessage) => {
-            if (Helper.isNotFalsy(jobMessage.payload.results.title) && Helper.isNotFalsy(jobMessage.payload.results.content)) {
-              articleData.set(
-                articleUrl,
-                jobMessage.payload.results as { title: string; content: string },
-              );
-            }
-          }
+          (message) => {
+            articleData.set(
+              articleUrl,
+              message.payload,
+            );
+          },
         )
-      )
-    );
+      );
 
-    await Promise.all(chunk.map((job) => job()));
+    await Promise.all(running);
 
-    await ProgressBar.increment(index, articles.length);
+    await ProgressBar.increment(index, running.length);
+  } while (articlesUrl.length > 0);
 
-  } while (articleUrls.length > 0);
+  //RUN ARTICLE SCRAPING
 
   await ProgressBar.finishAll();
 
   try {
+    let index = await ProgressBar.newBar(articleData.size, "Cleaning articles");
 
-    const cleanedArticles: string[][] = [];
+    const cleanedArticles: string[] = [];
 
     for (const article of articleData.entries()) {
       cleanedArticles.push(
-        Helper.removeStopwords(
-          Helper.cleanText(article[1].content)
-        )
+          StringCleaner
+            .setString(article[1].content)
+            .removeHtmlEntities()
+            .removeDashes()
+            .removeEscapeCharacters()
+            .stripHtml()
+            .stripEmails()
+            .stripPhoneNumbers()
+            .toString()
       );
+
+      await ProgressBar.increment(index, 1);
     }
+
+    await ProgressBar.finishAll();
 
     Console.log("Articles cleaned.");
 
     const loadedSentiments: number[] = [];
 
+    index = await ProgressBar.newBar(cleanedArticles.length, "Analyzing sentiments");
+
     for (const articleToAnalyze of cleanedArticles) {
       loadedSentiments.push(
         await Helper.analyzeUnknownTextSentiment(articleToAnalyze)
       );
+
+      await ProgressBar.increment(index, 1);
     }
+
+    await ProgressBar.finishAll();
 
     Console.log("Sentiments calculated: ");
 
