@@ -1,12 +1,11 @@
-import {args, BaseCommand} from '@adonisjs/core/build/standalone'
-import {ScrapeYahooFinanceForTickersJobParameters} from "App/Jobs/ScrapeYahooFinanceForTickersJob";
+import {BaseCommand} from '@adonisjs/core/build/standalone'
 import Jobs from "@ioc:Providers/Jobs";
 
-export default class ScrapeYahooFinance extends BaseCommand {
+export default class JobQueue extends BaseCommand {
   /**
    * Command name is used to run the command
    */
-  public static commandName = 'scrape:yahoo_finance'
+  public static commandName = 'job:queue'
 
   /**
    * Command description is displayed in the "help" output
@@ -29,17 +28,7 @@ export default class ScrapeYahooFinance extends BaseCommand {
     stayAlive: false,
   }
 
-  @args.string({description: "Num of threads to use", required: false})
-  public numOfThreads: string | undefined;
-
   public async run() {
-    const dispatched = await Jobs.dispatch<ScrapeYahooFinanceForTickersJobParameters>(
-      "ScrapeYahooFinanceForTickersJob",
-      {
-        numOfThreads: this.numOfThreads ? parseInt(this.numOfThreads) : 2
-      }
-    );
-
-    await Jobs.waitUntilDone(dispatched);
+    await Jobs.runJobQueue();
   }
 }

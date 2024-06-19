@@ -7,7 +7,6 @@ import path from "path";
 import {DateTime} from "luxon";
 import Env from "@ioc:Adonis/Core/Env";
 import {sendToWorker, socketEmit} from "App/Services/Jobs/JobHelpers";
-import Helper from "@ioc:Providers/Helper";
 import {AppContainerAliasesEnum} from "App/Enums/AppContainerAliasesEnum";
 import {EmitEventType, EmitEventTypeData} from "App/Services/Socket/SocketTypes";
 import {
@@ -21,22 +20,23 @@ import {
 } from "App/Services/Jobs/JobsTypes";
 import {LogChannels} from "App/Services/Logger/Logger";
 import {LogLevelEnum} from "App/Enums/LogLevelEnum";
+import Helper from "@ioc:Providers/Helper";
 
 export interface JobContract {
   dispatch<T extends BaseJobParameters>(
     jobName: JobName,
     parameters: T,
     tags?: string[],
-    payloadCallback?: (message: JobMessage) => void,
-    errorCallback?: (error: Error, id: string, tags: string[]) => void,
     idEx?: string
   ): Promise<{ id: string, tags: string[] }>;
 
-  runWithoutDispatch<T extends BaseJobParameters>(
+  runJobQueue(): Promise<void>;
+
+  dispatchSync<T extends BaseJobParameters>(
     jobName: JobName,
     parameters: T,
     tags?: string[],
-    payloadCallback?: (message: JobMessage) => void,
+    messageCallback?: (message: JobMessage) => void,
     errorCallback?: (error: Error, id: string, tags: string[]) => void,
     id?: string
   ): Promise<{ id: string, tags: string[], error?: Error }>;
@@ -159,9 +159,9 @@ export default class Jobs implements JobContract {
 
   }
 
-  private defaultCallback(worker: Worker, message: JobMessage, payloadCallback?: Callback, isDispatched?: boolean) {
-    if (payloadCallback && message.status === JobMessageEnum.MESSAGE) {
-      payloadCallback(message);
+  private defaultCallback(worker: Worker, message: JobMessage, messageCallback?: Callback, isDispatched?: boolean) {
+    if (messageCallback && message.status === JobMessageEnum.MESSAGE) {
+      messageCallback(message);
       return;
     }
 
@@ -288,12 +288,82 @@ export default class Jobs implements JobContract {
     }
   }
 
+  async runJobQueue(): Promise<void> {
+    while (true) {
+
+      const jobsWaiting = await Job
+        .query()
+        .where("status", JobMessageEnum.DISPATCHED)
+        .orderBy("created_at", "asc")
+        .exec();
+
+      const maxParallelJobs = Env.get("MAX_PARALLEL_JOBS") as number;
+
+      const jobsToRun = jobsWaiting.splice(0, maxParallelJobs - this.runningJobs.size);
+
+      for (const job of jobsToRun) {
+        const parameters = typeof job.parameters === "object" ? job.parameters : JSON.parse(job.parameters || "{}");
+        const tags = Array.isArray(job.tags) ? job.tags : (job.tags?.split(",") || []);
+
+        const worker = new Worker(
+          path.join(Application.appRoot, "jobRunner.js"),
+          {
+            workerData: {
+              jobName: job.name,
+              id: job.id,
+              tags: tags,
+              jobPath: this.getJobPath(job.name),
+              ...parameters
+            } as JobWorkerData<any>
+          }
+        );
+
+        await Job
+          .query()
+          .where("id", job.id)
+          .update({
+            status: JobMessageEnum.RUNNING,
+            startedAt: DateTime.now().toISO(),
+            error: null,
+            errorStack: null,
+          })
+          .exec();
+
+        this.runningJobs.set(job.id, worker);
+
+        const onlineListener = () => {
+          Application.container.use(AppContainerAliasesEnum.Console).info(`Job ${job.id} - ${job.name} started`);
+        };
+
+        const messageListener = (worker: Worker, message: JobMessage) => {
+          return this.defaultCallback(worker, message, undefined, true);
+        };
+
+        const errorListener = (err: Error) => {
+          this.defaultErrorCallback(err, job.id, tags, undefined);
+        };
+
+        worker.on("online", onlineListener);
+        worker.on("message", (m: JobMessage) => messageListener(worker, m));
+        worker.on("error", errorListener);
+        worker.on("exit", () => {
+          Application.container.use(AppContainerAliasesEnum.Console).info(`Job ${job.id} - ${job.name} Finished`);
+
+          worker.removeAllListeners();
+
+          this.runningJobs.delete(job.id);
+        });
+
+      }
+
+      await Application.container.use(AppContainerAliasesEnum.Helper).wait(2000);
+    }
+  }
+
   async dispatch<T extends BaseJobParameters>(
     jobName: JobName,
     parameters: T,
     tags: string[] = [],
-    payloadCallback?: Callback,
-    errorCallback?: ErrorCallback,
     idEx?: string,
   ): Promise<JobRunInfo> {
     if (!await this.jobIsRegistered(jobName)) {
@@ -312,63 +382,18 @@ export default class Jobs implements JobContract {
         tags: tags.join(","),
         parameters: JSON.stringify(parameters)
       });
+    } else {
+      await Job
+        .query()
+        .where("id", id)
+        .update({
+          name: jobName,
+          status: JobMessageEnum.DISPATCHED,
+          tags: tags.join(","),
+          parameters: JSON.stringify(parameters)
+        })
+        .exec();
     }
-
-    let jobCountRunning = await this.getAllRunningJobs();
-
-    const maxParallelJobs = Env.get("MAX_PARALLEL_JOBS") as number;
-
-    while (jobCountRunning.length > maxParallelJobs) {
-      await Helper.wait(2000);
-      jobCountRunning = await this.getAllRunningJobs();
-    }
-
-    await Job
-      .query()
-      .where("id", id)
-      .update({
-        status: JobMessageEnum.RUNNING,
-        startedAt: DateTime.now().toISO(),
-        error: null,
-        errorStack: null,
-      })
-      .exec();
-
-    const worker = new Worker(
-      path.join(Application.appRoot, "jobRunner.js"),
-      {
-        workerData: {
-          jobName,
-          id,
-          tags,
-          jobPath: this.getJobPath(jobName),
-          ...parameters
-        } as JobWorkerData<any>
-      }
-    );
-
-    this.runningJobs.set(id, worker);
-
-    const onlineListener = () => {
-
-    };
-
-    const messageListener = (worker: Worker, message: JobMessage) => {
-      return this.defaultCallback(worker, message, payloadCallback, true);
-    };
-
-    const errorListener = (err: Error) => {
-      this.defaultErrorCallback(err, id, tags, errorCallback);
-    };
-
-    worker.on("online", onlineListener);
-    worker.on("message", (m: JobMessage) => messageListener(worker, m));
-    worker.on("error", errorListener);
-    worker.on("exit", () => {
-      worker.removeAllListeners();
-
-      this.runningJobs.delete(id);
-    });
 
     return {
       id,
@@ -377,11 +402,11 @@ export default class Jobs implements JobContract {
     };
   }
 
-  async runWithoutDispatch<T extends BaseJobParameters>(
+  async dispatchSync<T extends BaseJobParameters>(
     jobName: JobName,
     parameters: T,
     tags: string[] = [],
-    payloadCallback?: Callback,
+    messageCallback?: Callback,
     errorCallback?: ErrorCallback,
     id?: string,
   ): Promise<JobRunInfo> {
@@ -421,7 +446,7 @@ export default class Jobs implements JobContract {
         return;
       }
 
-      return this.defaultCallback(worker, message, payloadCallback, false);
+      return this.defaultCallback(worker, message, messageCallback, false);
     };
 
     const errorListener = (err: Error) => {
@@ -481,7 +506,7 @@ export default class Jobs implements JobContract {
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      await new Promise(r => setTimeout(r, 2000));
+      await Helper.wait(2000);
 
       const found = await Job
         .query()
@@ -528,11 +553,7 @@ export default class Jobs implements JobContract {
       throw new Error("Job is already running");
     }
 
-    this.dispatch(job.name, job.parameters || {}, job.tags?.split(",") || [], undefined, undefined, job.id)
-      .then(() => {
-      })
-      .catch(() => {
-      });
+    await this.dispatch(job.name, job.parameters || {}, job.tags?.split(",") || [], job.id);
 
     return job;
   }

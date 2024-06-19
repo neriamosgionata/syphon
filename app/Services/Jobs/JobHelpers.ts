@@ -197,11 +197,6 @@ export const socketEmit = <T extends BaseJobParameters, K extends EmitEventType>
   } as JobMessage);
 }
 
-export const registerCallbackToParentMessage = <T extends BaseJobParameters>(callback: (parentMessage: JobMessage) => void) => {
-  const {parentPort} = retriveWorkerThreadsData<T>();
-  parentPort?.on("message", callback);
-}
-
 export const sendToWorker = (worker: Worker, message: JobMessage) => {
   worker.postMessage(message);
 }

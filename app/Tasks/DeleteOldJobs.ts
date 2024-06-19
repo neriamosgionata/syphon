@@ -12,9 +12,11 @@ export default class DeleteOldJobs extends BaseTask {
   }
 
   public async handle() {
-    await Jobs.runWithoutDispatch<DeleteOldJobsJobParameters>(
+    const dispatched = await Jobs.dispatch<DeleteOldJobsJobParameters>(
       "DeleteOldJobsJob",
       {}
     );
+
+    await Jobs.waitUntilDone(dispatched);
   }
 }

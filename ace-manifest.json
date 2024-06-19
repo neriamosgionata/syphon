@@ -83,6 +83,18 @@
       "aliases": [],
       "flags": []
     },
+    "job:queue": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/JobQueue",
+      "commandName": "job:queue",
+      "description": "",
+      "args": [],
+      "aliases": [],
+      "flags": []
+    },
     "purge:profile_data": {
       "settings": {
         "loadApp": true,

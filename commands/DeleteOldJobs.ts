@@ -30,9 +30,11 @@ export default class DeleteOldJobs extends BaseCommand {
   }
 
   public async run() {
-    await Jobs.runWithoutDispatch<DeleteOldJobsJobParameters>(
+    const dispatched = await Jobs.dispatch<DeleteOldJobsJobParameters>(
       "DeleteOldJobsJob",
       {}
     );
+
+    await Jobs.waitUntilDone(dispatched);
   }
 }

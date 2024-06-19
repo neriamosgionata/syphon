@@ -22,8 +22,8 @@ const handler = async () => {
   const index = await ProgressBar.newBar(articlesUrl.length, "Scraping articles");
 
   do {
-    const running = articlesUrl.splice(0, 14)
-      .map((articleUrl) => Jobs.runWithoutDispatch<ScrapeNewsArticleJobParameters>(
+    const running = articlesUrl.splice(0, 8)
+      .map((articleUrl) => Jobs.dispatchSync<ScrapeNewsArticleJobParameters>(
           "ScrapeNewsArticleJob",
           {
             articleUrl
