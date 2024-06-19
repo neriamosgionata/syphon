@@ -286,7 +286,7 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  autoScroll(maxScrolls: number = 100): ScraperHandlerFunction<void> {
+  autoScroll(maxScrolls: number = 50): ScraperHandlerFunction<void> {
     return async (_browser, _page) => {
       await _page.evaluate(async (maxScrolls) => {
 

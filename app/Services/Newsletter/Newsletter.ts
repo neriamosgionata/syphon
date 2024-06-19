@@ -11,7 +11,7 @@ export default class Newsletter implements NewsletterContract {
 
   private getArticlesUrls(): ScraperHandlerFunction<{ articlesUrl: string[] }> {
     return Scraper.evaluate(() => {
-      const articles = document.querySelectorAll("article");
+      const articles = document.querySelectorAll("main > article");
       const articlesUrl: string[] = [];
 
       for (const article of articles) {
@@ -27,29 +27,26 @@ export default class Newsletter implements NewsletterContract {
 
   private getArticleContent(): ScraperHandlerFunction<{ title?: string, content?: string }> {
     return Scraper.evaluate(() => {
-      try {
-        const title = (document.querySelector("h1") || document.querySelector("h2"))?.innerText;
+      const selectors = [
+        'article',
+        '*[class*="article" i]',
+        '*[class*="article-body" i]',
+        '*[class*="content" i]',
+        '*[class*="body" i]',
+      ];
 
-        for (const articleBodySelector of [
-          'article > *[class*=body]',
-          'article > *[class*=content]',
-          'article',
-          '*[class*="article" i]',
-          '*[class*="content" i]',
-        ]) {
-          const element = document.querySelector(articleBodySelector) as HTMLElement | null;
+      try {
+        for (const selector of selectors) {
+          const element = document.querySelector(selector) as HTMLElement | null;
 
           if (element?.innerText) {
-            return {title, content: element.innerText};
+            return {content: element.innerText};
           }
         }
 
-        return {title, content: ""};
-
+        return {content: ""};
       } catch (e) {
-
-        return {title: "", content: ""};
-
+        return {content: ""};
       }
     });
   }

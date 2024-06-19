@@ -2,17 +2,17 @@ import {configureJob, loadJobParameters, payloadToParent} from "App/Services/Job
 import {BaseJobParameters} from "App/Services/Jobs/JobsTypes";
 import Newsletter from "@ioc:Providers/Newsletter";
 import Helper from "@ioc:Providers/Helper";
+import Console from "@ioc:Providers/Console";
 
 const handler = async () => {
   const {articleUrl} = loadJobParameters<ScrapeNewsArticleJobParameters>();
 
   const res = await Newsletter.getArticle(articleUrl);
 
-  if (Helper.isNotFalsy(res.results.title) && Helper.isNotFalsy(res.results.content)) {
-    payloadToParent({
-      title: res.results.title,
-      content: res.results.content
-    });
+  if (Helper.isNotFalsy(res.results.content)) {
+    payloadToParent(res.results);
+  } else {
+    Console.error("No content found for article", articleUrl);
   }
 };
 

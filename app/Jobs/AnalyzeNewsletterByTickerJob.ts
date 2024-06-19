@@ -17,12 +17,12 @@ const handler = async () => {
 
   const articlesUrl = res.results.articlesUrl;
 
-  const articleData: Map<string, { title: string; content: string }> = new Map();
+  const articleData: Map<string, string> = new Map();
 
   const index = await ProgressBar.newBar(articlesUrl.length, "Scraping articles");
 
   do {
-    const running = articlesUrl.splice(0, 8)
+    const running = articlesUrl.splice(0, 14)
       .map((articleUrl) => Jobs.runWithoutDispatch<ScrapeNewsArticleJobParameters>(
           "ScrapeNewsArticleJob",
           {
@@ -32,7 +32,7 @@ const handler = async () => {
           (message) => {
             articleData.set(
               articleUrl,
-              message.payload,
+              message.payload.content,
             );
           },
         )
@@ -54,15 +54,14 @@ const handler = async () => {
 
     for (const article of articleData.entries()) {
       cleanedArticles.push(
-          StringCleaner
-            .setString(article[1].content)
-            .removeHtmlEntities()
-            .removeDashes()
-            .removeEscapeCharacters()
-            .stripHtml()
-            .stripEmails()
-            .stripPhoneNumbers()
-            .toString()
+        StringCleaner
+          .setString(article[1])
+          .removeHtmlEntities()
+          .removeDashes()
+          .removeEscapeCharacters()
+          .stripEmails()
+          .stripPhoneNumbers()
+          .toString()
       );
 
       await ProgressBar.increment(index, 1);
