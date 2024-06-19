@@ -5,7 +5,7 @@ import Profile from "App/Models/Profile";
 export interface NewsletterContract {
   getGoogleNewsArticlesByTickerProfile(profile: Profile): Promise<ScraperRunReturn<{ articlesUrl: string[] }>>;
 
-  getArticle(articleUrl: string): Promise<ScraperRunReturn<{ title?: string, content?: string }>>;
+  getArticle(articleUrl: string): Promise<ScraperRunReturn<{ content?: string }>>;
 }
 
 export default class Newsletter implements NewsletterContract {
@@ -25,12 +25,16 @@ export default class Newsletter implements NewsletterContract {
         Scraper.waitForNavigation(),
         Scraper.removeGPDR(),
         Scraper.waitForNavigation(),
-        Scraper.autoScroll(50, 2000),
+        Scraper.autoScroll(10, 2000),
         Scraper.evaluate(() => {
-          const articles = document.querySelectorAll("main article");
+          const articles = document.querySelectorAll("main c-wiz article");
           const articlesUrl: string[] = [];
 
           for (const article of articles) {
+            if (article.classList.length <= 1) { // Filter only visible articles
+              continue;
+            }
+
             const url = article.querySelector("a")?.getAttribute("href");
             if (url) {
               articlesUrl.push("https://news.google.com/" + url.replace("./", ""));
@@ -45,7 +49,7 @@ export default class Newsletter implements NewsletterContract {
       }>();
   }
 
-  async getArticle(articleUrl: string): Promise<ScraperRunReturn<{ title?: string, content?: string }>> {
+  async getArticle(articleUrl: string): Promise<ScraperRunReturn<{ content?: string }>> {
     return await Scraper
       .setWithAdblockerPlugin(true)
       .setWithStealthPlugin(true)
@@ -56,20 +60,18 @@ export default class Newsletter implements NewsletterContract {
         Scraper.waitForNavigation(),
         Scraper.evaluate(() => {
           const selectors = [
+            'article p',
             'article',
-            '*[class*="article" i]',
-            '*[class*="article-body" i]',
-            '*[class*="content" i]',
-            '*[class*="body" i]',
           ];
 
           try {
             for (const selector of selectors) {
-              const element = document.querySelector(selector) as HTMLElement | null;
+              const element = [...document.querySelectorAll(selector)] as HTMLElement[];
 
-              if (element?.innerText) {
-                return {content: element.innerText};
+              if (element.length > 0) {
+                return {content: element.map((el) => el.innerText).join("\n")};
               }
+
             }
 
             return {content: ""};
@@ -79,7 +81,6 @@ export default class Newsletter implements NewsletterContract {
         }),
       ])
       .run<{
-        title?: string,
         content?: string,
       }>();
   }

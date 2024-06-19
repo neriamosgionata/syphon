@@ -1,7 +1,6 @@
 import {configureJob, loadJobParameters, payloadToParent} from "App/Services/Jobs/JobHelpers";
 import {BaseJobParameters} from "App/Services/Jobs/JobsTypes";
 import Newsletter from "@ioc:Providers/Newsletter";
-import Helper from "@ioc:Providers/Helper";
 import Console from "@ioc:Providers/Console";
 
 const handler = async () => {
@@ -9,11 +8,12 @@ const handler = async () => {
 
   const res = await Newsletter.getArticle(articleUrl);
 
-  if (Helper.isNotFalsy(res.results.content)) {
+  if (res.results.content) {
     payloadToParent(res.results);
-  } else {
-    Console.error("No content found for article", articleUrl);
+    return;
   }
+
+  Console.error("No content found for article", articleUrl);
 };
 
 export interface ScrapeNewsArticleJobParameters extends BaseJobParameters {
