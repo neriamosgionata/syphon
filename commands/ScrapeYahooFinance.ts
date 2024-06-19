@@ -33,13 +33,11 @@ export default class ScrapeYahooFinance extends BaseCommand {
   public numOfThreads: string | undefined;
 
   public async run() {
-    const dispatched = await Jobs.dispatch<ScrapeYahooFinanceForTickersJobParameters>(
+    await Jobs.dispatch<ScrapeYahooFinanceForTickersJobParameters>(
       "ScrapeYahooFinanceForTickersJob",
       {
         numOfThreads: this.numOfThreads ? parseInt(this.numOfThreads) : 2
       }
     );
-
-    await Jobs.waitUntilDone(dispatched);
   }
 }

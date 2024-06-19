@@ -12,11 +12,9 @@ export default class ScrapeYahoo extends BaseTask {
   }
 
   public async handle() {
-    const dispatched = await Jobs.dispatch<ScrapeYahooFinanceForTickersJobParameters>(
+    await Jobs.dispatch<ScrapeYahooFinanceForTickersJobParameters>(
       "ScrapeYahooFinanceForTickersJob",
       {}
     );
-
-    await Jobs.waitUntilDone(dispatched);
   }
 }

@@ -35,14 +35,12 @@ export default class AnalyzeTickerNewsletter extends BaseCommand {
   public async run() {
     //RUN GOOGLE NEWS SCRAPING
 
-    const dispatched = await Jobs.dispatch<AnalyzeNewsletterForTickerJobParameters>(
+    await Jobs.dispatch<AnalyzeNewsletterForTickerJobParameters>(
       "AnalyzeNewsletterByTickerJob",
       {
         ticker: this.ticker,
       },
       [],
     );
-
-    await Jobs.waitUntilDone(dispatched);
   }
 }
