@@ -69,7 +69,7 @@
     "phone-regex": "2.1.0",
     "pino-pretty": "11.2.1",
     "proxy-addr": "2.0.7",
-    "puppeteer": "22.11.2",
+    "puppeteer": "^22.11.2",
     "puppeteer-extra": "3.3.6",
     "puppeteer-extra-plugin-adblocker": "2.13.6",
     "puppeteer-extra-plugin-recaptcha": "3.6.8",

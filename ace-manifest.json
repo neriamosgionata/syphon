@@ -95,6 +95,18 @@
       "aliases": [],
       "flags": []
     },
+    "purge:job": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/PurgeJob",
+      "commandName": "purge:job",
+      "description": "",
+      "args": [],
+      "aliases": [],
+      "flags": []
+    },
     "purge:profile_data": {
       "settings": {
         "loadApp": true,
@@ -215,6 +227,18 @@
           "description": "Ticker"
         }
       ],
+      "aliases": [],
+      "flags": []
+    },
+    "test:newsletter": {
+      "settings": {
+        "loadApp": true,
+        "stayAlive": false
+      },
+      "commandPath": "./commands/TestNewsletters",
+      "commandName": "test:newsletter",
+      "description": "",
+      "args": [],
       "aliases": [],
       "flags": []
     },

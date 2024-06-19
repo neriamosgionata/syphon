@@ -257,4 +257,8 @@ export default class Profile extends BaseModel {
 
     return finalData;
   }
+
+  getSearchQuery() {
+    return (this.longName || this.shortName || this.displayName) + " - " + this.ticker;
+  }
 }

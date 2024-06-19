@@ -480,24 +480,24 @@ export default class BaseScraper implements BaseScraperContract {
 
         let fileName = (name || (uuid.v4() + "_" + Date.now())) + ".png";
 
-        await Drive.put(`screenshots/${folder}/${fileName}`, "");
-
-        await this.page.screenshot({
-          path: `screenshots/${folder}/${fileName}`,
-          captureBeyondViewport: true,
-          fullPage: true,
-        });
+        await Drive.put(
+          `screenshots/${folder}/${fileName}`,
+          await this.page.screenshot({
+            captureBeyondViewport: true,
+            fullPage: true,
+          })
+        );
 
         for (const page of this.extraOpenedPages) {
           fileName = (name || (uuid.v4() + "_" + Date.now())) + ".png";
 
-          await Drive.put(`screenshots/${folder}/${fileName}`, "");
-
-          await page.screenshot({
-            path: `screenshots/${folder}/${fileName}`,
-            captureBeyondViewport: true,
-            fullPage: true,
-          });
+          await Drive.put(
+            `screenshots/${folder}/${fileName}`,
+            await page.screenshot({
+              captureBeyondViewport: true,
+              fullPage: true,
+            })
+          );
         }
       } catch (e) {
         await this.logger.error("Error taking screenshot: ", e);

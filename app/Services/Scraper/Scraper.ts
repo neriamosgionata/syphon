@@ -8,6 +8,7 @@ import BaseScraper, {
 } from "App/Services/Scraper/BaseScraper";
 import Drive from "@ioc:Adonis/Core/Drive";
 import {LogChannels} from "App/Services/Logger/Logger";
+import * as uuid from "uuid";
 
 export interface ScraperContract extends BaseScraperContract {
   end(): Promise<void>;
@@ -91,7 +92,7 @@ export interface ScraperContract extends BaseScraperContract {
 
   repeat(fn: ScraperHandlerFunction<any>, times: number, timeoutBetweenRepetition?: number): ScraperHandlerFunction<any>;
 
-  autoScroll(maxScrolls?: number): ScraperHandlerFunction<void>;
+  autoScroll(maxScrolls?: number, timeoutBetweenScrolls?: number): ScraperHandlerFunction<void>;
 
   waitForNavigation(timeoutMs?: number): ScraperHandlerFunction<void>;
 
@@ -236,12 +237,17 @@ export default class Scraper extends BaseScraper implements ScraperContract {
   takeScreenshot(name?: string): ScraperHandlerFunction<void> {
     return async (_browser, _page) => {
       if (_page) {
-        const path = "screenshots";
+        const folder = Date.now();
+        const fileName = (name || (uuid.v4() + "_" + Date.now())) + ".png";
+        const fullPath = "screenshots/" + folder + "/" + fileName;
 
-        const fullPath = path + "/" + (name || "screenshot") + "_" + Date.now() + ".png";
-        const img = await _page.screenshot();
-
-        await Drive.put(fullPath, img);
+        await Drive.put(
+          fullPath,
+          await _page.screenshot({
+            captureBeyondViewport: true,
+            fullPage: true,
+          })
+        );
         return;
       }
       throw new Error("Page is not ready");
@@ -286,9 +292,9 @@ export default class Scraper extends BaseScraper implements ScraperContract {
     }
   }
 
-  autoScroll(maxScrolls: number = 50): ScraperHandlerFunction<void> {
+  autoScroll(maxScrolls: number = 100, timeoutBetweenScrolls: number = 750): ScraperHandlerFunction<void> {
     return async (_browser, _page) => {
-      await _page.evaluate(async (maxScrolls) => {
+      await _page.evaluate(async (ms, tbs) => {
 
         await new Promise<void>((resolve) => {
 
@@ -302,15 +308,15 @@ export default class Scraper extends BaseScraper implements ScraperContract {
             totalHeight += distance;
             scrolls++;
 
-            if (totalHeight >= scrollHeight - window.innerHeight || scrolls >= maxScrolls) {
+            if (totalHeight >= scrollHeight - window.innerHeight || scrolls >= ms) {
               clearInterval(timer);
               resolve();
             }
-          }, 750);
+          }, tbs);
 
         });
 
-      }, maxScrolls);
+      }, maxScrolls, timeoutBetweenScrolls);
     }
   }
 

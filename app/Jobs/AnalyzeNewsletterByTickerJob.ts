@@ -7,13 +7,21 @@ import Newsletter from "@ioc:Providers/Newsletter";
 import Jobs from "@ioc:Providers/Jobs";
 import {ScrapeNewsArticleJobParameters} from "App/Jobs/ScrapeNewsArticleJob";
 import StringCleaner from "@ioc:Providers/StringCleaner";
+import Profile from "App/Models/Profile";
 
 const handler = async () => {
   let data = loadJobParameters<AnalyzeNewsletterForTickerJobParameters>();
 
+  const profile = await Profile.query().where('ticker', data.ticker).firstOrFail();
+
   //RUN GOOGLE NEWS SCRAPING
 
-  const res = await Newsletter.getGoogleNewsArticlesBySearchQuery(data.ticker);
+  const res = await Newsletter.getGoogleNewsArticlesByTickerProfile(profile);
+
+  if (res.errors.length > 0) {
+    Console.error(res.errors);
+    return;
+  }
 
   const articlesUrl = res.results.articlesUrl;
 
