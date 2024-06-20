@@ -9,7 +9,7 @@ import {ModelFitArgs} from "@tensorflow/tfjs-layers/dist/engine/training_tensors
 export interface ANNContract {
   createANN(layersStructure: DenseLayerArgs[], compileOptions: ModelCompileArgs): Promise<tfjs.Sequential>;
 
-  trainANN(model: tfjs.Sequential, xSet: number[][], ySet: number[], args: ModelFitArgs): Promise<tfjs.History>;
+  trainANN(model: tfjs.Sequential, xSet: number[][], ySet: number[], args: ModelFitArgs, saveTensorboard?: boolean): Promise<tfjs.History>;
 
   predictANN(model: tfjs.Sequential, xTestSet: number[][]): tfjs.Tensor<tfjs.Rank> | tfjs.Tensor[];
 }
@@ -39,8 +39,12 @@ export default class ANN implements ANNContract {
     return model;
   }
 
-  async trainANN(model: tfjs.Sequential, xSet: number[][], ySet: number[], args: ModelFitArgs): Promise<tfjs.History> {
+  async trainANN(model: tfjs.Sequential, xSet: number[][], ySet: number[], args: ModelFitArgs, saveTensorboard?: boolean): Promise<tfjs.History> {
     Console.log("ANN fitting arguments: " + JSON.stringify(args));
+
+    if (saveTensorboard) {
+      args.callbacks = tfjs.node.tensorBoard("/tmp/ann_logs");
+    }
 
     const history = await model.fit(
       tfjs.tensor2d(xSet),

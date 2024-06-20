@@ -134,6 +134,7 @@ export default class TestAnn extends BaseCommand {
         epochs: 100,
         verbose: 1,
       },
+      true
     );
 
     Console.log("Training history: ", history);
