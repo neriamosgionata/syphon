@@ -27,10 +27,11 @@ const handler = async () => {
 
   const articleData: Map<string, string> = new Map();
 
-  const index = await ProgressBar.newBar(articlesUrl.length, "Scraping articles");
+  let index = await ProgressBar.newBar(articlesUrl.length, "Scraping articles");
 
   do {
-    const running = articlesUrl.splice(0, 8)
+
+    const running = articlesUrl.splice(0, 10)
       .map((articleUrl) => Jobs.dispatchSync<ScrapeNewsArticleJobParameters>(
           "ScrapeNewsArticleJob",
           {
@@ -56,19 +57,20 @@ const handler = async () => {
   await ProgressBar.finishAll();
 
   try {
-    let index = await ProgressBar.newBar(articleData.size, "Cleaning articles");
+    index = await ProgressBar.newBar(articleData.size, "Cleaning articles");
 
     const cleanedArticles: string[] = [];
 
     for (const article of articleData.entries()) {
       cleanedArticles.push(
         StringCleaner
-          .setString(article[1])
+          .setString(article[1].replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim().replace("\\n", "").replace("\\t", "").replace("\\r", ""))
           .removeHtmlEntities()
           .removeDashes()
           .removeEscapeCharacters()
           .stripEmails()
           .stripPhoneNumbers()
+          .stripHtml()
           .toString()
       );
 
@@ -81,21 +83,17 @@ const handler = async () => {
 
     const loadedSentiments: number[] = [];
 
-    index = await ProgressBar.newBar(cleanedArticles.length, "Analyzing sentiments");
-
     for (const articleToAnalyze of cleanedArticles) {
       loadedSentiments.push(
         await Helper.analyzeUnknownTextSentiment(articleToAnalyze)
       );
-
-      await ProgressBar.increment(index, 1);
     }
-
-    await ProgressBar.finishAll();
 
     Console.log("Sentiments calculated: ");
 
-    Console.log(loadedSentiments);
+    const averageSentiment = Helper.calculateAverage(loadedSentiments);
+
+    Console.log(`Average sentiment: ${averageSentiment}`);
 
   } catch (e) {
     Console.error(e);

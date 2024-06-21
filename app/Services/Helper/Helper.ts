@@ -230,6 +230,8 @@ export interface HelperContract {
   }): string;
 
   chunkArray<T>(array: T[], size: number): T[][];
+
+  calculateAverage(loadedSentiments: number[]): number;
 }
 
 export default class Helper implements HelperContract {
@@ -357,7 +359,10 @@ export default class Helper implements HelperContract {
 
     const detectedLang = await this.detectLanguage(text);
 
-    const lang = (detectedLang?.name || "English") as "English" | "Spanish" | "Portuguese" | "Dutch" | "Italian" | "French" | "German" | "Galician" | "Catalan" | "Basque";
+    let name = (detectedLang?.name || "English").toLowerCase();
+    name = name[0].toUpperCase() + name.slice(1);
+
+    const lang = name as "English" | "Spanish" | "Portuguese" | "Dutch" | "Italian" | "French" | "German" | "Galician" | "Catalan" | "Basque";
     let type = "afinn" as "afinn" | "pattern" | "senticon";
 
     if (['English', 'Spanish', 'Portuguese'].includes(lang)) {
@@ -1178,6 +1183,10 @@ export default class Helper implements HelperContract {
       results.push(array.splice(0, size));
     }
     return results;
+  }
+
+  calculateAverage(values: number[]): number {
+    return values.reduce((acc, val) => acc + val, 0) / values.length;
   }
 
 }

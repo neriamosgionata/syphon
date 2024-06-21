@@ -95,13 +95,13 @@
       "aliases": [],
       "flags": []
     },
-    "purge:job": {
+    "purge:jobs": {
       "settings": {
         "loadApp": true,
         "stayAlive": false
       },
       "commandPath": "./commands/PurgeJob",
-      "commandName": "purge:job",
+      "commandName": "purge:jobs",
       "description": "",
       "args": [],
       "aliases": [],

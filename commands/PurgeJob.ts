@@ -6,7 +6,7 @@ export default class PurgeJob extends BaseCommand {
   /**
    * Command name is used to run the command
    */
-  public static commandName = 'purge:job'
+  public static commandName = 'purge:jobs'
 
   /**
    * Command description is displayed in the "help" output
