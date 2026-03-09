@@ -29,7 +29,11 @@ export default class Analysis extends BaseModel {
   @column()
   public confidence: number
 
-  @column()
+  @column({
+    prepare: (value: string[] | null) => (value ? JSON.stringify(value) : null),
+    consume: (value: string | string[] | null) =>
+      typeof value === 'string' ? JSON.parse(value) : value,
+  })
   public keywords: string[] | null
 
   @column()

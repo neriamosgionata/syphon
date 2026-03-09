@@ -15,6 +15,6 @@
   };
 </script>
 
-<span class="badge {sentiment}" title={score != null ? `Score: ${score.toFixed(3)}` : ''}>
+<span class="badge {sentiment}" title={score != null ? `Score: ${Number(score).toFixed(3)}` : ''}>
   {labels[sentiment] || sentiment}
 </span>

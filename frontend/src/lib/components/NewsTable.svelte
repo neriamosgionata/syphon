@@ -51,11 +51,11 @@
             <td>
               <SentimentBadge sentiment={a.sentiment} score={a.sentiment_score ?? a.sentimentScore} />
             </td>
-            <td class="num" class:positive={a.sentiment_score > 0 || a.sentimentScore > 0} class:negative={a.sentiment_score < 0 || a.sentimentScore < 0}>
-              {(a.sentiment_score ?? a.sentimentScore ?? 0).toFixed(3)}
+            <td class="num" class:positive={Number(a.sentiment_score ?? a.sentimentScore) > 0} class:negative={Number(a.sentiment_score ?? a.sentimentScore) < 0}>
+              {Number(a.sentiment_score ?? a.sentimentScore ?? 0).toFixed(3)}
             </td>
-            <td class="num">{(a.relevance_score ?? a.relevanceScore ?? 0).toFixed(3)}</td>
-            <td class="num">{((a.confidence ?? 0) * 100).toFixed(1)}%</td>
+            <td class="num">{Number(a.relevance_score ?? a.relevanceScore ?? 0).toFixed(3)}</td>
+            <td class="num">{(Number(a.confidence ?? 0) * 100).toFixed(1)}%</td>
             <td class="time">{timeAgo(a.created_at || a.createdAt)}</td>
           </tr>
         {/each}

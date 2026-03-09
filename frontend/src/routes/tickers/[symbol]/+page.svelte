@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { api } from '$lib/api';
+  import { onSSE } from '$lib/sse';
   import StatCard from '$lib/components/StatCard.svelte';
   import TickerChart from '$lib/components/TickerChart.svelte';
   import NewsTable from '$lib/components/NewsTable.svelte';
@@ -14,8 +15,8 @@
   let showTradePanel = $state(false);
   let tradeOrders: any = $state(null);
 
-  onMount(async () => {
-    const symbol = $page.params.symbol;
+  async function loadData() {
+    const symbol = $page.params.symbol!;
     try {
       const [tickerData, timelineData] = await Promise.all([
         api.ticker(symbol),
@@ -26,6 +27,18 @@
       tradeOrders = await api.tradingOrders({ symbol, limit: '10' }).catch(() => ({ data: [] }));
     } catch {}
     loading = false;
+  }
+
+  onMount(() => {
+    loadData();
+    const symbol = $page.params.symbol!;
+    const unsub1 = onSSE('ticker_match', (d: any) => {
+      if (d.ticker?.symbol === symbol) loadData();
+    });
+    const unsub2 = onSSE('order_update', (d: any) => {
+      if (d.symbol === symbol) loadData();
+    });
+    return () => { unsub1(); unsub2(); };
   });
 </script>
 

@@ -1,9 +1,8 @@
 services:
   mysql:
-    image: mysql:8.0.36
+    image: mysql:latest
     container_name: syphon-mysql
     restart: unless-stopped
-    command: --default-authentication-plugin=mysql_native_password
     environment:
       MYSQL_ROOT_PASSWORD: syphon_root_pass
       MYSQL_DATABASE: syphon
@@ -20,7 +19,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:latest
     container_name: syphon-redis
     restart: unless-stopped
     ports:
@@ -34,7 +33,7 @@ services:
       retries: 5
 
   opensearch:
-    image: opensearchproject/opensearch:3.5.0
+    image: opensearchproject/opensearch:latest
     container_name: syphon-opensearch
     restart: unless-stopped
     environment:
@@ -53,7 +52,7 @@ services:
       retries: 5
 
   opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:3.5.0
+    image: opensearchproject/opensearch-dashboards:latest
     container_name: syphon-opensearch-dashboards
     restart: unless-stopped
     environment:

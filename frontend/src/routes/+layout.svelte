@@ -1,6 +1,7 @@
 <script lang="ts">
   import '../app.css';
   import type { Snippet } from 'svelte';
+  import NotificationToast from '$lib/components/NotificationToast.svelte';
 
   interface Props {
     children: Snippet;
@@ -17,6 +18,8 @@
     { href: '/logs', label: 'Logs' },
   ];
 </script>
+
+<NotificationToast />
 
 <div class="app">
   <nav class="navbar">

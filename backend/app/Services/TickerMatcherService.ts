@@ -4,6 +4,7 @@ import Article from 'App/Models/Article'
 import Analysis from 'App/Models/Analysis'
 import SentimentService from './SentimentService'
 import OpenSearchService from './OpenSearchService'
+import NotificationService from './NotificationService'
 
 class TickerMatcherService {
   public async matchAndAnalyze(article: Article): Promise<Analysis[]> {
@@ -47,6 +48,25 @@ class TickerMatcherService {
       })
 
       results.push(analysis)
+
+      NotificationService.emit({
+        type: 'ticker_match',
+        articleId: article.id,
+        articleTitle: article.title,
+        articleUrl: article.url || null,
+        sourceName: article.sourceName || null,
+        ticker: {
+          symbol: ticker.symbol,
+          name: ticker.name,
+          currentPrice: ticker.currentPrice,
+        },
+        sentiment: sentiment.sentiment,
+        sentimentScore: sentiment.sentimentScore,
+        relevanceScore: relevance,
+        confidence: sentiment.confidence,
+        keywords: sentiment.keywords,
+        timestamp: new Date().toISOString(),
+      })
 
       Logger.debug(
         'Analysis: %s -> %s | sentiment=%s score=%.3f relevance=%.3f',

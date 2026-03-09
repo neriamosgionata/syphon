@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
+  import { onSSE } from '$lib/sse';
 
   let tickers: any = $state(null);
   let loading = $state(true);
@@ -44,7 +45,10 @@
     await api.refreshTicker(symbol).catch(() => {});
   }
 
-  onMount(load);
+  onMount(() => {
+    load();
+    return onSSE('ticker_match', () => load());
+  });
 </script>
 
 <svelte:head>

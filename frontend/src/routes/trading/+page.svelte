@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
+  import { onSSE } from '$lib/sse';
   import StatCard from '$lib/components/StatCard.svelte';
   import OrderEntry from '$lib/components/OrderEntry.svelte';
   import SentimentBadge from '$lib/components/SentimentBadge.svelte';
@@ -81,7 +82,13 @@
     }
   }
 
-  onMount(load);
+  onMount(() => {
+    load();
+    return onSSE('order_update', () => {
+      loadOrders();
+      api.tradingStats().then((s) => stats = s).catch(() => {});
+    });
+  });
 </script>
 
 <svelte:head>

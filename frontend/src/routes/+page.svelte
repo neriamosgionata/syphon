@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
+  import { onSSE } from '$lib/sse';
   import StatCard from '$lib/components/StatCard.svelte';
   import NewsTable from '$lib/components/NewsTable.svelte';
   import SentimentBadge from '$lib/components/SentimentBadge.svelte';
@@ -21,15 +22,18 @@
 
   async function triggerScrape() {
     await api.triggerScrape();
-    setTimeout(load, 2000);
   }
 
   async function triggerAnalysis() {
     await api.triggerAnalysis(100);
-    setTimeout(load, 2000);
   }
 
-  onMount(load);
+  onMount(() => {
+    load();
+    const unsub1 = onSSE('ticker_match', () => load());
+    const unsub2 = onSSE('scrape_complete', () => load());
+    return () => { unsub1(); unsub2(); };
+  });
 </script>
 
 <svelte:head>
@@ -118,8 +122,8 @@
                   <td>{t.name}</td>
                   <td>${t.current_price?.toFixed(2) || '-'}</td>
                   <td>{t.analysis_count}</td>
-                  <td class:positive={t.avg_sentiment > 0} class:negative={t.avg_sentiment < 0}>
-                    {t.avg_sentiment?.toFixed(3) || '-'}
+                  <td class:positive={Number(t.avg_sentiment) > 0} class:negative={Number(t.avg_sentiment) < 0}>
+                    {t.avg_sentiment != null ? Number(t.avg_sentiment).toFixed(3) : '-'}
                   </td>
                 </tr>
               {/each}

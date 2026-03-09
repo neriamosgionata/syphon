@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
+  import { onSSE } from '$lib/sse';
   import ArticleCard from '$lib/components/ArticleCard.svelte';
 
   let articles: any = $state(null);
@@ -41,9 +42,10 @@
     }
   }
 
-  onMount(async () => {
-    sources = await api.sources().catch(() => []);
+  onMount(() => {
+    api.sources().catch(() => []).then((s) => sources = s);
     load();
+    return onSSE('scrape_complete', () => load());
   });
 </script>
 

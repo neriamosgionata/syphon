@@ -1,6 +1,7 @@
 import { Job } from 'bullmq'
 import Logger from '@ioc:Adonis/Core/Logger'
 import Trade from 'App/Models/Trade'
+import NotificationService from 'App/Services/NotificationService'
 import QueueService, { QUEUE_NAMES } from './QueueService'
 
 const TERMINAL_STATUSES = ['filled', 'cancelled', 'error', 'inactive']
@@ -18,6 +19,18 @@ export async function processMonitorOrder(job: Job) {
       tradeId,
       trade.status,
     )
+
+    NotificationService.emit({
+      type: 'order_update',
+      tradeId: trade.id,
+      symbol: trade.symbol,
+      side: trade.side,
+      status: trade.status,
+      quantity: trade.quantity,
+      fillPrice: trade.fillPrice,
+      timestamp: new Date().toISOString(),
+    })
+
     return { done: true, status: trade.status }
   }
 

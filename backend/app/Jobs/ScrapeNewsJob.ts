@@ -2,6 +2,7 @@ import { Job } from 'bullmq'
 import Logger from '@ioc:Adonis/Core/Logger'
 import ScrapeSource from 'App/Models/ScrapeSource'
 import ScraperService from 'App/Services/ScraperService'
+import NotificationService from 'App/Services/NotificationService'
 import QueueService, { QUEUE_NAMES } from './QueueService'
 
 export async function processScrapeNews(job: Job) {
@@ -43,6 +44,13 @@ export async function processScrapeNews(job: Job) {
       await source.save()
     }
   }
+
+  NotificationService.emit({
+    type: 'scrape_complete',
+    totalSaved,
+    sourcesProcessed: sources.length,
+    timestamp: new Date().toISOString(),
+  })
 
   return { totalSaved, sourcesProcessed: sources.length }
 }

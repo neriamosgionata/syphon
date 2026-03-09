@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
+  import { onSSE } from '$lib/sse';
   import NewsTable from '$lib/components/NewsTable.svelte';
   import StatCard from '$lib/components/StatCard.svelte';
   import SentimentBadge from '$lib/components/SentimentBadge.svelte';
@@ -46,6 +47,7 @@
   onMount(() => {
     loadStats();
     loadAnalyses();
+    return onSSE('ticker_match', () => { loadStats(); loadAnalyses(); });
   });
 </script>
 

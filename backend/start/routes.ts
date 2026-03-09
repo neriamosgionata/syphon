@@ -45,4 +45,7 @@ Route.group(() => {
   // Logs
   Route.get('/logs', 'LogsController.index')
   Route.get('/logs/stats', 'LogsController.stats')
+
+  // Notifications (SSE)
+  Route.get('/notifications/stream', 'NotificationsController.stream')
 }).prefix('/api')
