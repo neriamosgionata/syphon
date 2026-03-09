@@ -1,0 +1,23 @@
+{
+  "name": "syphon",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Financial news analysis dashboard with sentiment analysis",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && node ace serve --watch",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "npm run build:backend && npm run build:frontend",
+    "build:backend": "cd backend && node ace build --production",
+    "build:frontend": "cd frontend && npm run build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

@@ -1,0 +1,40 @@
+# Dependencies
+node_modules
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Build output
+dist
+build
+backend/build
+
+# AdonisJS
+tmp
+
+# SvelteKit
+.svelte-kit
+
+# Logs
+*.log
+pino-pretty.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE/Editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Coverage/Testing
+coverage
+.nyc_output
+
+# Vite
+vite.config.ts.timestamp-*

@@ -1,0 +1,117 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { api } from '$lib/api';
+  import ArticleCard from '$lib/components/ArticleCard.svelte';
+
+  let articles: any = $state(null);
+  let loading = $state(true);
+  let searchQuery = $state('');
+  let selectedSource = $state('');
+  let analyzedFilter = $state('');
+  let page = $state(1);
+  let sources: any[] = $state([]);
+
+  async function load() {
+    loading = true;
+    try {
+      const params: Record<string, string> = { page: String(page), limit: '20' };
+      if (selectedSource) params.source = selectedSource;
+      if (analyzedFilter) params.analyzed = analyzedFilter;
+      articles = await api.articles(params);
+    } catch {
+      articles = { data: [] };
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function search() {
+    if (!searchQuery.trim()) return load();
+    loading = true;
+    try {
+      const results = await api.searchArticles({
+        q: searchQuery,
+        source: selectedSource || undefined,
+      });
+      articles = { data: results.articles, meta: { total: results.total } };
+    } catch {
+      articles = { data: [] };
+    } finally {
+      loading = false;
+    }
+  }
+
+  onMount(async () => {
+    sources = await api.sources().catch(() => []);
+    load();
+  });
+</script>
+
+<svelte:head>
+  <title>Articles - Syphon</title>
+</svelte:head>
+
+<div class="page">
+  <h1 style="margin-bottom: 1.5rem;">Articles</h1>
+
+  <div class="filters card" style="margin-bottom: 1.5rem;">
+    <div class="filter-row">
+      <input
+        type="text"
+        placeholder="Search articles..."
+        bind:value={searchQuery}
+        onkeydown={(e) => e.key === 'Enter' && search()}
+      />
+      <select bind:value={selectedSource} onchange={load}>
+        <option value="">All sources</option>
+        {#each sources as s}
+          <option value={s.name}>{s.name}</option>
+        {/each}
+      </select>
+      <select bind:value={analyzedFilter} onchange={load}>
+        <option value="">All</option>
+        <option value="true">Analyzed</option>
+        <option value="false">Pending</option>
+      </select>
+      <button class="btn btn-primary" onclick={search}>Search</button>
+    </div>
+  </div>
+
+  {#if loading}
+    <div class="loading">Loading articles...</div>
+  {:else if articles?.data?.length > 0}
+    <div class="articles-grid">
+      {#each articles.data as article}
+        <ArticleCard {article} />
+      {/each}
+    </div>
+    {#if articles.meta?.last_page > 1}
+      <div class="pagination">
+        <button class="btn" disabled={page <= 1} onclick={() => { page--; load(); }}>Prev</button>
+        <span style="color: var(--text-muted); align-self: center;">
+          Page {page} of {articles.meta.last_page}
+        </span>
+        <button class="btn" disabled={page >= articles.meta.last_page} onclick={() => { page++; load(); }}>Next</button>
+      </div>
+    {/if}
+  {:else}
+    <div class="empty card">No articles found. Try scraping some news from the dashboard.</div>
+  {/if}
+</div>
+
+<style>
+  .filter-row {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .filter-row input {
+    flex: 1;
+    min-width: 200px;
+  }
+  .articles-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  }
+</style>
