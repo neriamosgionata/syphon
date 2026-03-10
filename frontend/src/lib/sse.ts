@@ -13,6 +13,8 @@ function connect() {
   eventSource.addEventListener('ticker_match', (e) => dispatch('ticker_match', JSON.parse(e.data)));
   eventSource.addEventListener('scrape_complete', (e) => dispatch('scrape_complete', JSON.parse(e.data)));
   eventSource.addEventListener('order_update', (e) => dispatch('order_update', JSON.parse(e.data)));
+  eventSource.addEventListener('job_progress', (e) => dispatch('job_progress', JSON.parse(e.data)));
+  eventSource.addEventListener('job_finished', (e) => dispatch('job_finished', JSON.parse(e.data)));
 
   eventSource.onerror = () => {
     eventSource?.close();

@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite dev --port 5173",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "chart.js": "4.5.1"
@@ -14,9 +16,13 @@
   "devDependencies": {
     "@sveltejs/adapter-auto": "7.0.1",
     "@sveltejs/kit": "2.53.4",
-    "@sveltejs/vite-plugin-svelte": "6.2.4",
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/svelte": "^5.2.7",
+    "jsdom": "^26.1.0",
     "svelte": "5.53.7",
     "typescript": "5.9.3",
-    "vite": "7.3.1"
+    "vite": "7.3.1",
+    "vitest": "^3.2.1"
   }
 }

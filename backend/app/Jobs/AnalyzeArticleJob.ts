@@ -18,7 +18,19 @@ export async function processAnalyzeArticle(job: Job) {
     return { skipped: true }
   }
 
+  await job.updateProgress({
+    percent: 30,
+    stage: 'Analyzing',
+    detail: `Article #${articleId}: ${(article.title || '').slice(0, 50)}`,
+  })
+
   const analyses = await TickerMatcherService.matchAndAnalyze(article)
+
+  await job.updateProgress({
+    percent: 100,
+    stage: 'Complete',
+    detail: `Matched ${analyses.length} tickers`,
+  })
 
   Logger.info(
     '[AnalyzeArticle] Article %d: matched %d tickers',

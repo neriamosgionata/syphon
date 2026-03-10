@@ -9,11 +9,17 @@ export default class ArticlesController {
     const limit = request.input('limit', 20)
     const source = request.input('source')
     const analyzed = request.input('analyzed')
+    const sentiment = request.input('sentiment')
 
     const query = Article.query().orderBy('published_at', 'desc')
 
     if (source) query.where('source_name', source)
     if (analyzed !== undefined) query.where('is_analyzed', analyzed === 'true')
+    if (sentiment) {
+      query.whereHas('analyses', (subQuery) => {
+        subQuery.where('sentiment', sentiment)
+      })
+    }
 
     const articles = await query.preload('analyses', (q) => {
       q.preload('ticker')

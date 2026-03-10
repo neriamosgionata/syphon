@@ -18,7 +18,11 @@ export async function processSubmitOrder(job: Job) {
     return { skipped: true }
   }
 
+  await job.updateProgress({ percent: 30, stage: 'Submitting', detail: `${trade.side} ${trade.quantity} ${trade.symbol}` })
+
   const result = await IBKRService.placeOrder(trade)
+
+  await job.updateProgress({ percent: 100, stage: 'Submitted', detail: `Status: ${result.status}` })
 
   Logger.info(
     '[SubmitOrder] Trade %d: %s %d %s -> status=%s (ibOrderId=%d)',

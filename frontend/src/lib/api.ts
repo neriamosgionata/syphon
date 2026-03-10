@@ -15,6 +15,12 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
 export const api = {
   // Dashboard
   dashboard: () => request<any>('/dashboard'),
+  activeJobs: () => request<any>('/jobs/active'),
+  failedJobs: (limit?: number) => request<any>(`/jobs/failed${limit ? `?limit=${limit}` : ''}`),
+  retryJob: (queue: string, id: string) =>
+    request<any>(`/jobs/${encodeURIComponent(queue)}/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
+  removeFailedJob: (queue: string, id: string) =>
+    request<any>(`/jobs/${encodeURIComponent(queue)}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // Articles
   articles: (params?: Record<string, any>) => {
@@ -49,6 +55,8 @@ export const api = {
     request<any>('/tickers', { method: 'POST', body: JSON.stringify({ symbol }) }),
   refreshTicker: (symbol: string) =>
     request<any>(`/tickers/${symbol}/refresh`, { method: 'POST' }),
+  refreshAllTickers: () =>
+    request<any>('/tickers/refresh-all', { method: 'POST' }),
   removeTicker: (symbol: string) =>
     request<any>(`/tickers/${symbol}`, { method: 'DELETE' }),
 

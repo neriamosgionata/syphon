@@ -10,13 +10,62 @@
   let searching = $state(false);
   let addingSymbol = $state('');
 
+  // Filters
+  let filterSearch = $state('');
+  let sectorFilter = $state('');
+  let exchangeFilter = $state('');
+  let sentimentFilter = $state('');
+  let sortBy = $state('symbol');
+  let sortDir = $state('asc');
+  let sectors: string[] = $state([]);
+  let exchanges: string[] = $state([]);
+
   async function load() {
     loading = true;
     try {
-      tickers = await api.tickers({ limit: '50' });
+      const params: Record<string, string> = { limit: '50' };
+      if (filterSearch) params.search = filterSearch;
+      if (sectorFilter) params.sector = sectorFilter;
+      if (exchangeFilter) params.exchange = exchangeFilter;
+      if (sentimentFilter) params.sentiment = sentimentFilter;
+      if (sortBy !== 'symbol') params.sort = sortBy;
+      if (sortDir !== 'asc') params.dir = sortDir;
+      tickers = await api.tickers(params);
+      if (tickers.filters) {
+        sectors = tickers.filters.sectors || [];
+        exchanges = tickers.filters.exchanges || [];
+      }
     } catch {}
     loading = false;
   }
+
+  function applyFilters() {
+    load();
+  }
+
+  function toggleSort(col: string) {
+    if (sortBy === col) {
+      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      sortBy = col;
+      sortDir = col === 'symbol' || col === 'name' ? 'asc' : 'desc';
+    }
+    load();
+  }
+
+  function clearFilters() {
+    filterSearch = '';
+    sectorFilter = '';
+    exchangeFilter = '';
+    sentimentFilter = '';
+    sortBy = 'symbol';
+    sortDir = 'asc';
+    load();
+  }
+
+  let hasActiveFilters = $derived(
+    filterSearch || sectorFilter || exchangeFilter || sentimentFilter || sortBy !== 'symbol'
+  );
 
   let searchTimeout: ReturnType<typeof setTimeout>;
   function handleSearch() {
@@ -94,6 +143,39 @@
     {/if}
   </div>
 
+  <!-- Filters -->
+  <div class="card filter-card" style="margin-bottom: 1.5rem;">
+    <div class="filter-row">
+      <input
+        type="text"
+        placeholder="Filter by name or symbol..."
+        bind:value={filterSearch}
+        onkeydown={(e) => e.key === 'Enter' && applyFilters()}
+      />
+      <select bind:value={sentimentFilter} onchange={applyFilters}>
+        <option value="">All sentiments</option>
+        <option value="bullish">Bullish (avg &gt; 0)</option>
+        <option value="bearish">Bearish (avg &lt; 0)</option>
+        <option value="neutral">Neutral (avg = 0)</option>
+      </select>
+      <select bind:value={sectorFilter} onchange={applyFilters}>
+        <option value="">All sectors</option>
+        {#each sectors as s}
+          <option value={s}>{s}</option>
+        {/each}
+      </select>
+      <select bind:value={exchangeFilter} onchange={applyFilters}>
+        <option value="">All exchanges</option>
+        {#each exchanges as e}
+          <option value={e}>{e}</option>
+        {/each}
+      </select>
+      {#if hasActiveFilters}
+        <button class="btn clear-btn" onclick={clearFilters}>Clear</button>
+      {/if}
+    </div>
+  </div>
+
   {#if loading}
     <div class="loading">Loading tickers...</div>
   {:else if tickers?.data?.length > 0}
@@ -101,12 +183,20 @@
       <table>
         <thead>
           <tr>
-            <th>Symbol</th>
-            <th>Name</th>
+            <th class="sortable" onclick={() => toggleSort('symbol')}>
+              Symbol {sortBy === 'symbol' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            <th class="sortable" onclick={() => toggleSort('name')}>
+              Name {sortBy === 'name' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+            </th>
             <th>Exchange</th>
             <th>Sector</th>
-            <th>Price</th>
-            <th>Market Cap</th>
+            <th class="sortable" onclick={() => toggleSort('current_price')}>
+              Price {sortBy === 'current_price' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+            </th>
+            <th class="sortable" onclick={() => toggleSort('market_cap')}>
+              Market Cap {sortBy === 'market_cap' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+            </th>
             <th>Last Updated</th>
             <th></th>
           </tr>
@@ -120,10 +210,10 @@
               <td>{t.name}</td>
               <td>{t.exchange || '-'}</td>
               <td>{t.sector || '-'}</td>
-              <td class="num">{t.current_price != null || t.currentPrice != null ? `$${(t.current_price ?? t.currentPrice).toFixed(2)}` : '-'}</td>
+              <td class="num">{t.current_price != null || t.currentPrice != null ? `$${Number(t.current_price ?? t.currentPrice).toFixed(2)}` : '-'}</td>
               <td class="num">
                 {#if t.market_cap ?? t.marketCap}
-                  ${((t.market_cap ?? t.marketCap) / 1e9).toFixed(1)}B
+                  ${(Number(t.market_cap ?? t.marketCap) / 1e9).toFixed(1)}B
                 {:else}
                   -
                 {/if}
@@ -140,7 +230,13 @@
       </table>
     </div>
   {:else}
-    <div class="empty card">No tickers tracked yet. Search and add tickers above.</div>
+    <div class="empty card">
+      {#if hasActiveFilters}
+        No tickers match your filters. <button class="btn" onclick={clearFilters}>Clear filters</button>
+      {:else}
+        No tickers tracked yet. Search and add tickers above.
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -171,6 +267,31 @@
     color: var(--text-muted);
     font-size: 0.8rem;
     margin-left: 0.5rem;
+  }
+  .filter-card {
+    padding: 1rem 1.25rem;
+  }
+  .filter-row {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .filter-row input {
+    flex: 1;
+    min-width: 180px;
+  }
+  .clear-btn {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+  .sortable {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+  }
+  .sortable:hover {
+    color: var(--accent);
   }
   .num {
     font-family: 'SF Mono', monospace;

@@ -14,6 +14,7 @@
   let timeline: any[] = $state([]);
   let showTradePanel = $state(false);
   let tradeOrders: any = $state(null);
+  let analysisSentimentFilter = $state('');
 
   async function loadData() {
     const symbol = $page.params.symbol!;
@@ -40,6 +41,13 @@
     });
     return () => { unsub1(); unsub2(); };
   });
+
+  let filteredAnalyses = $derived(
+    (data?.analyses || []).filter((a: any) => {
+      if (!analysisSentimentFilter) return true;
+      return a.sentiment === analysisSentimentFilter;
+    })
+  );
 </script>
 
 <svelte:head>
@@ -59,7 +67,7 @@
       </div>
       {#if data.ticker.current_price ?? data.ticker.currentPrice}
         <div class="price">
-          ${(data.ticker.current_price ?? data.ticker.currentPrice).toFixed(2)}
+          ${Number(data.ticker.current_price ?? data.ticker.currentPrice).toFixed(2)}
         </div>
       {/if}
     </div>
@@ -70,7 +78,7 @@
       <StatCard
         label="Market Cap"
         value={data.ticker.market_cap ?? data.ticker.marketCap
-          ? `$${((data.ticker.market_cap ?? data.ticker.marketCap) / 1e9).toFixed(1)}B`
+          ? `$${(Number(data.ticker.market_cap ?? data.ticker.marketCap) / 1e9).toFixed(1)}B`
           : '-'}
       />
       <StatCard label="Analyses" value={data.analyses?.length || 0} />
@@ -152,8 +160,22 @@
 
     {#if data.analyses?.length > 0}
       <div class="card">
-        <h3 style="margin-bottom: 1rem;">Recent Analyses</h3>
-        <NewsTable analyses={data.analyses} />
+        <div class="analyses-header">
+          <h3>Recent Analyses</h3>
+          <select bind:value={analysisSentimentFilter} class="sentiment-select">
+            <option value="">All sentiments</option>
+            <option value="very_bullish">Very Bullish</option>
+            <option value="bullish">Bullish</option>
+            <option value="neutral">Neutral</option>
+            <option value="bearish">Bearish</option>
+            <option value="very_bearish">Very Bearish</option>
+          </select>
+        </div>
+        {#if filteredAnalyses.length > 0}
+          <NewsTable analyses={filteredAnalyses} />
+        {:else}
+          <div class="empty">No analyses match the selected sentiment.</div>
+        {/if}
       </div>
     {:else}
       <div class="empty card">No analyses yet for this ticker.</div>
@@ -231,5 +253,16 @@
   .order-time {
     font-size: 0.75rem;
     color: var(--text-muted);
+  }
+  .analyses-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .sentiment-select {
+    font-size: 0.85rem;
   }
 </style>

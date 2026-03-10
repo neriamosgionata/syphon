@@ -7,6 +7,10 @@ Route.get('/', async () => {
 Route.group(() => {
   // Dashboard
   Route.get('/dashboard', 'DashboardController.index')
+  Route.get('/jobs/active', 'DashboardController.activeJobs')
+  Route.get('/jobs/failed', 'DashboardController.failedJobs')
+  Route.post('/jobs/:queue/:id/retry', 'DashboardController.retryJob')
+  Route.delete('/jobs/:queue/:id', 'DashboardController.removeFailedJob')
 
   // Articles
   Route.get('/articles', 'ArticlesController.index')
@@ -21,6 +25,7 @@ Route.group(() => {
   Route.get('/tickers/search', 'TickersController.search')
   Route.get('/tickers/:symbol', 'TickersController.show')
   Route.post('/tickers', 'TickersController.add')
+  Route.post('/tickers/refresh-all', 'TickersController.refreshAll')
   Route.post('/tickers/:symbol/refresh', 'TickersController.refresh')
   Route.delete('/tickers/:symbol', 'TickersController.remove')
 

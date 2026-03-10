@@ -18,8 +18,15 @@ export async function processScrapeNews(job: Job) {
 
   let totalSaved = 0
 
-  for (const source of sources) {
+  for (let i = 0; i < sources.length; i++) {
+    const source = sources[i]
     try {
+      await job.updateProgress({
+        percent: Math.round((i / sources.length) * 100),
+        stage: `Scraping ${source.name}`,
+        detail: `Source ${i + 1} of ${sources.length}`,
+      })
+
       Logger.info('[ScrapeNews] Scraping: %s', source.name)
       const articles = await ScraperService.scrapeSource(source)
       const saved = await ScraperService.saveArticles(articles, source)
@@ -44,6 +51,8 @@ export async function processScrapeNews(job: Job) {
       await source.save()
     }
   }
+
+  await job.updateProgress({ percent: 100, stage: 'Complete', detail: `${totalSaved} articles saved` })
 
   NotificationService.emit({
     type: 'scrape_complete',

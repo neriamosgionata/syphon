@@ -59,4 +59,33 @@ export default class DashboardController {
       topTickers: topTickers[0],
     })
   }
+
+  public async activeJobs({ response }: HttpContextContract) {
+    const jobs = await QueueService.getActiveJobs()
+    return response.json({ jobs })
+  }
+
+  public async failedJobs({ request, response }: HttpContextContract) {
+    const limit = request.input('limit', 50)
+    const jobs = await QueueService.getFailedJobs(limit)
+    return response.json({ jobs })
+  }
+
+  public async retryJob({ params, response }: HttpContextContract) {
+    const { queue, id } = params
+    const success = await QueueService.retryJob(queue, id)
+    if (!success) {
+      return response.notFound({ error: 'Job not found' })
+    }
+    return response.json({ message: 'Job queued for retry' })
+  }
+
+  public async removeFailedJob({ params, response }: HttpContextContract) {
+    const { queue, id } = params
+    const success = await QueueService.removeFailedJob(queue, id)
+    if (!success) {
+      return response.notFound({ error: 'Job not found' })
+    }
+    return response.json({ message: 'Job removed' })
+  }
 }

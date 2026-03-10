@@ -18,6 +18,7 @@
   // Filters
   let statusFilter = $state('');
   let sideFilter = $state('');
+  let symbolFilter = $state('');
   let page = $state(1);
 
   async function load() {
@@ -38,6 +39,7 @@
     const params: Record<string, string> = { page: String(page), limit: '20' };
     if (statusFilter) params.status = statusFilter;
     if (sideFilter) params.side = sideFilter;
+    if (symbolFilter) params.symbol = symbolFilter.toUpperCase();
     orders = await api.tradingOrders(params).catch(() => ({ data: [] }));
   }
 
@@ -246,6 +248,13 @@
       <div class="orders-header">
         <h3>Order History</h3>
         <div class="filter-row">
+          <input
+            type="text"
+            placeholder="Symbol..."
+            bind:value={symbolFilter}
+            onkeydown={(e) => { if (e.key === 'Enter') { page = 1; loadOrders(); } }}
+            class="symbol-input"
+          />
           <select bind:value={statusFilter} onchange={() => { page = 1; loadOrders(); }}>
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
@@ -402,6 +411,10 @@
   .filter-row {
     display: flex;
     gap: 0.5rem;
+  }
+  .symbol-input {
+    width: 100px;
+    text-transform: uppercase;
   }
   .table-wrapper {
     overflow-x: auto;

@@ -29,7 +29,10 @@ export default class Ticker extends BaseModel {
   @column()
   public marketCap: number | null
 
-  @column()
+  @column({
+    prepare: (value: any) => (value ? JSON.stringify(value) : null),
+    consume: (value: any) => (typeof value === 'string' ? JSON.parse(value) : value),
+  })
   public metadata: Record<string, any> | null
 
   @column()

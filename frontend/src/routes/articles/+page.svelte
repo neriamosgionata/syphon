@@ -9,6 +9,7 @@
   let searchQuery = $state('');
   let selectedSource = $state('');
   let analyzedFilter = $state('');
+  let sentimentFilter = $state('');
   let page = $state(1);
   let sources: any[] = $state([]);
 
@@ -18,6 +19,7 @@
       const params: Record<string, string> = { page: String(page), limit: '20' };
       if (selectedSource) params.source = selectedSource;
       if (analyzedFilter) params.analyzed = analyzedFilter;
+      if (sentimentFilter) params.sentiment = sentimentFilter;
       articles = await api.articles(params);
     } catch {
       articles = { data: [] };
@@ -74,6 +76,14 @@
         <option value="">All</option>
         <option value="true">Analyzed</option>
         <option value="false">Pending</option>
+      </select>
+      <select bind:value={sentimentFilter} onchange={load}>
+        <option value="">All sentiments</option>
+        <option value="very_bullish">Very Bullish</option>
+        <option value="bullish">Bullish</option>
+        <option value="neutral">Neutral</option>
+        <option value="bearish">Bearish</option>
+        <option value="very_bearish">Very Bearish</option>
       </select>
       <button class="btn btn-primary" onclick={search}>Search</button>
     </div>

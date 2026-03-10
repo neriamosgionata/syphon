@@ -15,11 +15,67 @@ const CHART_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart'
 const SEARCH_BASE = 'https://query1.finance.yahoo.com/v1/finance/search'
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
+// Rate limiter: max N requests per window
+class RateLimiter {
+  private timestamps: number[] = []
+  private queue: Array<{ resolve: () => void }> = []
+  private processing = false
+
+  constructor(
+    private maxRequests: number = 5,
+    private windowMs: number = 10_000,
+  ) {}
+
+  private cleanup() {
+    const cutoff = Date.now() - this.windowMs
+    this.timestamps = this.timestamps.filter((t) => t > cutoff)
+  }
+
+  private async processQueue() {
+    if (this.processing) return
+    this.processing = true
+
+    while (this.queue.length > 0) {
+      this.cleanup()
+      if (this.timestamps.length < this.maxRequests) {
+        this.timestamps.push(Date.now())
+        this.queue.shift()!.resolve()
+      } else {
+        const oldest = this.timestamps[0]
+        const waitMs = oldest + this.windowMs - Date.now() + 100
+        await sleep(Math.max(waitMs, 500))
+      }
+    }
+
+    this.processing = false
+  }
+
+  async acquire(): Promise<void> {
+    return new Promise((resolve) => {
+      this.queue.push({ resolve })
+      this.processQueue()
+    })
+  }
+
+  // Back off after a 429 — pause all requests for a duration
+  async backoff(ms: number) {
+    Logger.warn('[RateLimiter] Backing off for %dms', ms)
+    // Fill the window so nothing gets through
+    const now = Date.now()
+    this.timestamps = Array(this.maxRequests).fill(now + ms - this.windowMs)
+    await sleep(ms)
+  }
+}
+
 class YahooFinanceService {
+  private limiter = new RateLimiter(5, 12_000) // 5 requests per 12 seconds
+  private consecutiveRateLimits = 0
+
   private async fetchJSON(url: string, retries = 3): Promise<any> {
     for (let attempt = 1; attempt <= retries; attempt++) {
+      await this.limiter.acquire()
+
       try {
-        // Use shell curl which handles DNS round-robin and connection reuse properly
         const escapedUrl = url.replace(/'/g, "'\\''")
         const { stdout } = await execAsync(
           `curl -s --max-time 15 -A '${UA}' -w '\\n%{http_code}' '${escapedUrl}'`,
@@ -28,15 +84,27 @@ class YahooFinanceService {
         const lines = stdout.trimEnd().split('\n')
         const httpCode = parseInt(lines.pop()!, 10)
         const body = lines.join('\n')
+
         if (httpCode === 429) {
-          throw new Error('Rate limited (429)')
+          this.consecutiveRateLimits++
+          const backoffMs = Math.min(30_000 * this.consecutiveRateLimits, 120_000)
+          Logger.warn('[YahooFinance] Rate limited (429) on %s — backing off %ds (streak: %d)',
+            url.substring(0, 60), backoffMs / 1000, this.consecutiveRateLimits)
+          await this.limiter.backoff(backoffMs)
+
+          if (attempt < retries) continue
+          throw new Error('Rate limited (429) after all retries')
         }
+
+        // Successful request — reset streak
+        this.consecutiveRateLimits = 0
+
         if (httpCode >= 400) {
           throw new Error(`HTTP ${httpCode}: ${body.substring(0, 100)}`)
         }
         return JSON.parse(body)
       } catch (error) {
-        if (attempt < retries) {
+        if (attempt < retries && !error.message.includes('after all retries')) {
           const delay = attempt * 5000
           Logger.warn('Fetch failed (%s): %s, retry %d/%d in %dms', url.substring(0, 60), error.message, attempt, retries, delay)
           await sleep(delay)
@@ -177,12 +245,9 @@ class YahooFinanceService {
         Logger.info('[BulkSync] %s synced (%d/%d). Price: %s', symbol, synced, symbols.length, ticker.currentPrice)
 
         if (syncHistory) {
-          await sleep(1000)
           const created = await this.syncHistoricalSnapshots(ticker, 90)
           Logger.info('[BulkSync] %s: %d snapshots created', symbol, created)
         }
-
-        if (i < symbols.length - 1) await sleep(300)
       } catch (error) {
         Logger.error('[BulkSync] Failed to sync %s: %s', symbol, error.message)
       }

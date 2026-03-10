@@ -38,10 +38,32 @@ export interface OrderUpdateNotification {
   timestamp: string
 }
 
+export interface JobProgressNotification {
+  type: 'job_progress'
+  queue: string
+  jobId: string
+  progress: number
+  stage: string
+  detail?: string
+  timestamp: string
+}
+
+export interface JobFinishedNotification {
+  type: 'job_finished'
+  queue: string
+  jobId: string
+  status: 'completed' | 'failed'
+  result?: any
+  error?: string
+  timestamp: string
+}
+
 export type AppNotification =
   | TickerMatchNotification
   | ScrapeCompleteNotification
   | OrderUpdateNotification
+  | JobProgressNotification
+  | JobFinishedNotification
 
 class NotificationService {
   private emitter = new EventEmitter()
