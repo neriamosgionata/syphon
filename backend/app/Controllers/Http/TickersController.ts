@@ -163,6 +163,37 @@ export default class TickersController {
     })
   }
 
+  public async backfill({ request, response }: HttpContextContract) {
+    const days = Number(request.input('days', 365))
+    const symbol = request.input('symbol', '')
+
+    let tickers: Ticker[]
+    if (symbol) {
+      const ticker = await Ticker.findBy('symbol', symbol.toUpperCase())
+      if (!ticker) return response.notFound({ error: 'Ticker not found' })
+      tickers = [ticker]
+    } else {
+      tickers = await Ticker.query().where('is_active', true)
+    }
+
+    if (tickers.length === 0) {
+      return response.json({ message: 'No active tickers', queued: 0 })
+    }
+
+    // Queue individual backfill jobs — each just downloads Stooq CSV + saves snapshots
+    await QueueService.addBulk(
+      QUEUE_NAMES.FETCH_TICKER,
+      tickers.map((t) => ({
+        data: { symbol: t.symbol, backfillOnly: true, backfillDays: days },
+      }))
+    )
+
+    return response.json({
+      message: `Backfill queued for ${tickers.length} tickers (${days} days)`,
+      queued: tickers.length,
+    })
+  }
+
   public async remove({ params, response }: HttpContextContract) {
     const ticker = await Ticker.query()
       .where('symbol', params.symbol.toUpperCase())

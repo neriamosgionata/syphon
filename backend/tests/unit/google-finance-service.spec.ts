@@ -134,6 +134,7 @@ function createModelStub() {
 
 test.group('GoogleFinanceService', (group) => {
   let originalFetchHTML: any
+  let originalFetchHistoricalFromStooq: any
 
   group.setup(async () => {
     const { Application } = await import('@adonisjs/application')
@@ -167,6 +168,7 @@ test.group('GoogleFinanceService', (group) => {
 
     GoogleFinanceService = (await import('../../app/Services/GoogleFinanceService')).default
     originalFetchHTML = GoogleFinanceService['fetchHTML'].bind(GoogleFinanceService)
+    originalFetchHistoricalFromStooq = GoogleFinanceService['fetchHistoricalFromStooq'].bind(GoogleFinanceService)
   })
 
   group.each.setup(() => {
@@ -176,6 +178,7 @@ test.group('GoogleFinanceService', (group) => {
 
   group.each.teardown(() => {
     GoogleFinanceService['fetchHTML'] = originalFetchHTML
+    GoogleFinanceService['fetchHistoricalFromStooq'] = originalFetchHistoricalFromStooq
   })
 
   // --- fetchQuote tests ---
@@ -406,6 +409,7 @@ test.group('GoogleFinanceService', (group) => {
   // --- fetchHistorical tests ---
 
   test('fetchHistorical extracts bars from AF_initDataCallback data', async ({ assert }) => {
+    GoogleFinanceService['fetchHistoricalFromStooq'] = async () => []
     GoogleFinanceService['fetchHTML'] = async (url: string) => {
       if (url.includes('?q=')) return SEARCH_PAGE_HTML
       return HISTORICAL_WITH_DATA_HTML
@@ -426,21 +430,23 @@ test.group('GoogleFinanceService', (group) => {
     })
   })
 
-  test('fetchHistorical extracts bars from window.chartData', async ({ assert }) => {
+  test('fetchHistorical extracts multiple bars from AF_initDataCallback', async ({ assert }) => {
+    GoogleFinanceService['fetchHistoricalFromStooq'] = async () => []
     GoogleFinanceService['fetchHTML'] = async (url: string) => {
       if (url.includes('?q=')) return SEARCH_PAGE_HTML
-      return HISTORICAL_WINDOW_DATA_HTML
+      return HISTORICAL_WITH_DATA_HTML
     }
 
     const bars = await GoogleFinanceService.fetchHistorical('AAPL', '2020-01-01')
 
     assert.isArray(bars)
-    assert.equal(bars.length, 2)
+    assert.equal(bars.length, 3)
     assert.closeTo(bars[0].open, 185.5, 0.01)
-    assert.closeTo(bars[1].close, 187.5, 0.01)
+    assert.closeTo(bars[2].close, 188.9, 0.01)
   })
 
   test('fetchHistorical returns sorted bars by date ascending', async ({ assert }) => {
+    GoogleFinanceService['fetchHistoricalFromStooq'] = async () => []
     GoogleFinanceService['fetchHTML'] = async (url: string) => {
       if (url.includes('?q=')) return SEARCH_PAGE_HTML
       return HISTORICAL_WITH_DATA_HTML
@@ -454,6 +460,7 @@ test.group('GoogleFinanceService', (group) => {
   })
 
   test('fetchHistorical filters bars by period1 start date', async ({ assert }) => {
+    GoogleFinanceService['fetchHistoricalFromStooq'] = async () => []
     GoogleFinanceService['fetchHTML'] = async (url: string) => {
       if (url.includes('?q=')) return SEARCH_PAGE_HTML
       return HISTORICAL_WITH_DATA_HTML
@@ -466,6 +473,7 @@ test.group('GoogleFinanceService', (group) => {
   })
 
   test('fetchHistorical returns empty array when no data is embedded', async ({ assert }) => {
+    GoogleFinanceService['fetchHistoricalFromStooq'] = async () => []
     GoogleFinanceService['fetchHTML'] = async (url: string) => {
       if (url.includes('?q=')) return SEARCH_PAGE_HTML
       return HISTORICAL_NO_DATA_HTML
@@ -478,6 +486,7 @@ test.group('GoogleFinanceService', (group) => {
   })
 
   test('fetchHistorical returns empty array on fetch error', async ({ assert }) => {
+    GoogleFinanceService['fetchHistoricalFromStooq'] = async () => []
     GoogleFinanceService['fetchHTML'] = async () => { throw new Error('Network error') }
 
     const bars = await GoogleFinanceService.fetchHistorical('AAPL', '2020-01-01')
@@ -745,6 +754,7 @@ test.group('GoogleFinanceService', (group) => {
     AF_initDataCallback({key: 'ds:5', data: [[1704067200000,185.50,186.70,184.30,186.00,45000000]]});
     </script>
     </body></html>`
+    GoogleFinanceService['fetchHistoricalFromStooq'] = async () => []
     GoogleFinanceService['fetchHTML'] = async (url: string) => {
       if (url.includes('?q=')) return SEARCH_PAGE_HTML
       return html
@@ -763,6 +773,7 @@ test.group('GoogleFinanceService', (group) => {
     AF_initDataCallback({key: 'ds:5', data: [[1704067200,185.50,186.70,184.30,186.00]]});
     </script>
     </body></html>`
+    GoogleFinanceService['fetchHistoricalFromStooq'] = async () => []
     GoogleFinanceService['fetchHTML'] = async (url: string) => {
       if (url.includes('?q=')) return SEARCH_PAGE_HTML
       return html
@@ -774,12 +785,13 @@ test.group('GoogleFinanceService', (group) => {
     assert.equal(bars[0].volume, 0)
   })
 
-  test('fetchHistorical window.__data variant works', async ({ assert }) => {
+  test('fetchHistorical AF_initDataCallback with single bar works', async ({ assert }) => {
     const html = `<html><body>
     <script>
-    window.__data = {"prices":[{"timestamp":1704067200,"open":185.5,"high":186.7,"low":184.3,"close":186.0,"volume":45000000}]};
+    AF_initDataCallback({key: 'ds:5', data: [[1704067200,190.00,192.50,189.00,191.80,60000000]]});
     </script>
     </body></html>`
+    GoogleFinanceService['fetchHistoricalFromStooq'] = async () => []
     GoogleFinanceService['fetchHTML'] = async (url: string) => {
       if (url.includes('?q=')) return SEARCH_PAGE_HTML
       return html
@@ -788,15 +800,16 @@ test.group('GoogleFinanceService', (group) => {
     const bars = await GoogleFinanceService.fetchHistorical('AAPL', '2020-01-01')
 
     assert.equal(bars.length, 1)
-    assert.closeTo(bars[0].open, 185.5, 0.01)
+    assert.closeTo(bars[0].open, 190.0, 0.01)
   })
 
-  test('fetchHistorical chartData with p.date instead of p.timestamp', async ({ assert }) => {
+  test('fetchHistorical parses date correctly from second timestamp', async ({ assert }) => {
     const html = `<html><body>
     <script>
-    window.chartData = {"prices":[{"date":"2024-01-01T00:00:00.000Z","open":185.5,"high":186.7,"low":184.3,"close":186.0,"volume":45000000}]};
+    AF_initDataCallback({key: 'ds:5', data: [[1704067200,185.50,186.70,184.30,186.00,45000000]]});
     </script>
     </body></html>`
+    GoogleFinanceService['fetchHistoricalFromStooq'] = async () => []
     GoogleFinanceService['fetchHTML'] = async (url: string) => {
       if (url.includes('?q=')) return SEARCH_PAGE_HTML
       return html
@@ -808,21 +821,21 @@ test.group('GoogleFinanceService', (group) => {
     assert.equal(bars[0].date.getFullYear(), 2024)
   })
 
-  test('fetchHistorical skips entries where open is null', async ({ assert }) => {
+  test('fetchHistorical skips bars before period1 date', async ({ assert }) => {
+    // Two bars: one from 2024-01-01, one from 2024-01-02
+    // With period1=2024-01-02, only the second should be returned
     const html = `<html><body>
     <script>
-    window.chartData = {"prices":[
-      {"timestamp":1704067200,"open":null,"high":186.7,"low":184.3,"close":186.0,"volume":45000000},
-      {"timestamp":1704153600,"open":186.2,"high":188.0,"low":185.8,"close":187.5,"volume":52000000}
-    ]};
+    AF_initDataCallback({key: 'ds:5', data: [[1704067200,185.50,186.70,184.30,186.00,45000000],[1704153600,186.20,188.00,185.80,187.50,52000000]]});
     </script>
     </body></html>`
+    GoogleFinanceService['fetchHistoricalFromStooq'] = async () => []
     GoogleFinanceService['fetchHTML'] = async (url: string) => {
       if (url.includes('?q=')) return SEARCH_PAGE_HTML
       return html
     }
 
-    const bars = await GoogleFinanceService.fetchHistorical('AAPL', '2020-01-01')
+    const bars = await GoogleFinanceService.fetchHistorical('AAPL', '2024-01-02')
 
     assert.equal(bars.length, 1)
     assert.closeTo(bars[0].open, 186.2, 0.01)
@@ -834,6 +847,7 @@ test.group('GoogleFinanceService', (group) => {
     window.chartData = {not valid json!!!};
     </script>
     </body></html>`
+    GoogleFinanceService['fetchHistoricalFromStooq'] = async () => []
     GoogleFinanceService['fetchHTML'] = async (url: string) => {
       if (url.includes('?q=')) return SEARCH_PAGE_HTML
       return html

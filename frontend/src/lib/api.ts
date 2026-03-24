@@ -59,6 +59,8 @@ export const api = {
     request<any>(`/tickers/${symbol}/refresh`, { method: 'POST' }),
   refreshAllTickers: () =>
     request<any>('/tickers/refresh-all', { method: 'POST' }),
+  backfillTickers: (params?: { symbol?: string; days?: number }) =>
+    request<any>('/tickers/backfill', { method: 'POST', body: JSON.stringify(params || {}) }),
   removeTicker: (symbol: string) =>
     request<any>(`/tickers/${symbol}`, { method: 'DELETE' }),
 
@@ -109,6 +111,10 @@ export const api = {
     }),
   cancelOrder: (id: number) =>
     request<any>(`/trading/orders/${id}/cancel`, { method: 'POST' }),
+
+  // Quant
+  quantAnalyze: (symbol: string) => request<any>(`/quant/${encodeURIComponent(symbol)}`),
+  quantScreener: () => request<any>('/quant/screener'),
 
   // Signals
   signals: (params?: Record<string, any>) => {

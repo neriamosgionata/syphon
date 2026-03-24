@@ -293,14 +293,97 @@ class GoogleFinanceService {
   }
 
   /**
-   * Fetch historical data from Google Finance.
+   * Fetch historical OHLCV data.
    *
-   * Strategy: Scrape the quote page and extract embedded chart data from
-   * AF_initDataCallback JS payloads. Google embeds OHLCV-like price arrays
-   * in the page source. If extraction fails (Google changes format),
-   * syncHistoricalSnapshots falls back to building history from daily syncs.
+   * Strategy priority:
+   * 1. Stooq CSV download — reliable, 1Y+ of daily OHLCV, free
+   * 2. Google Finance ds:11 embedded data — ~20 trading days with close+volume
+   * 3. Google Finance AF_initDataCallback — legacy fallback
    */
   public async fetchHistorical(symbol: string, period1: string, _period2?: string, knownExchange?: string) {
+    const bars = await this.fetchHistoricalFromStooq(symbol, period1)
+    if (bars.length > 0) return bars
+
+    // Fallback: scrape Google Finance embedded chart data (ds:11)
+    return this.fetchHistoricalFromGooglePage(symbol, period1, knownExchange)
+  }
+
+  /**
+   * Download historical data from Stooq CSV endpoint.
+   * Stooq provides free OHLCV data sourced from exchanges.
+   * Symbol mapping: US stocks/ETFs → symbol.us, dots → dashes (BRK.B → brk-b.us)
+   */
+  private async fetchHistoricalFromStooq(
+    symbol: string,
+    period1: string
+  ): Promise<Array<{ date: Date; open: number; high: number; low: number; close: number; volume: number }>> {
+    try {
+      const stooqSymbol = this.toStooqSymbol(symbol)
+      const d1 = period1.replace(/-/g, '')
+      const d2 = DateTime.now().toISODate()!.replace(/-/g, '')
+      const url = `https://stooq.com/q/d/l/?s=${encodeURIComponent(stooqSymbol)}&d1=${d1}&d2=${d2}&i=d`
+
+      await this.limiter.acquire()
+      const { stdout } = await execAsync(
+        `curl -sL --max-time 20 -A '${UA}' '${url}'`,
+        { maxBuffer: 5 * 1024 * 1024 }
+      )
+
+      const lines = stdout.trim().split('\n')
+      if (lines.length < 2 || !lines[0].startsWith('Date')) {
+        Logger.debug('[Stooq] No data for %s (symbol: %s)', symbol, stooqSymbol)
+        return []
+      }
+
+      const bars: Array<{ date: Date; open: number; high: number; low: number; close: number; volume: number }> = []
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',')
+        if (cols.length < 5) continue
+        const [dateStr, openStr, highStr, lowStr, closeStr, volStr] = cols
+        const open = parseFloat(openStr)
+        const high = parseFloat(highStr)
+        const low = parseFloat(lowStr)
+        const close = parseFloat(closeStr)
+        if (isNaN(open) || isNaN(close)) continue
+
+        bars.push({
+          date: new Date(dateStr),
+          open,
+          high,
+          low,
+          close,
+          volume: volStr ? Math.round(parseFloat(volStr)) : 0,
+        })
+      }
+
+      bars.sort((a, b) => a.date.getTime() - b.date.getTime())
+      if (bars.length > 0) {
+        Logger.info('[Stooq] Downloaded %d bars for %s', bars.length, symbol)
+      }
+      return bars
+    } catch (error) {
+      Logger.warn('[Stooq] Failed for %s: %s', symbol, error.message)
+      return []
+    }
+  }
+
+  /**
+   * Convert ticker symbol to Stooq format.
+   * US stocks/ETFs: lowercase + .us suffix, dots → dashes
+   */
+  private toStooqSymbol(symbol: string): string {
+    return symbol.toLowerCase().replace(/\./g, '-') + '.us'
+  }
+
+  /**
+   * Extract daily chart data from Google Finance page (ds:11 key).
+   * Returns ~20 trading days of close+volume data.
+   */
+  private async fetchHistoricalFromGooglePage(
+    symbol: string,
+    period1: string,
+    knownExchange?: string
+  ): Promise<Array<{ date: Date; open: number; high: number; low: number; close: number; volume: number }>> {
     try {
       const exchange = knownExchange || this.exchangeCache.get(symbol.toUpperCase()) || null
       const quotePath = exchange
@@ -309,104 +392,45 @@ class GoogleFinanceService {
       const url = `${FINANCE_BASE}/quote/${quotePath}`
       const html = await this.fetchHTML(url)
 
-      const bars: Array<{
-        date: Date
-        open: number
-        high: number
-        low: number
-        close: number
-        volume: number
-      }> = []
+      const bars: Array<{ date: Date; open: number; high: number; low: number; close: number; volume: number }> = []
+      const startDate = new Date(period1)
 
-      // Strategy 1: AF_initDataCallback — Google embeds chart data in JS callbacks
-      const dataPatterns = [
-        /AF_initDataCallback\(\{[^}]*key:\s*'ds:(\d+)'[^}]*data:\s*(\[[\s\S]*?\])\s*\}\s*\)/g,
-      ]
-
-      for (const pattern of dataPatterns) {
-        let match: RegExpExecArray | null
-        while ((match = pattern.exec(html)) !== null) {
-          try {
-            const rawData = match[2]
-            // Price arrays: [timestamp, open, high, low, close, volume?]
-            const priceArrayPattern = /\[(\d{10,13}),\s*([\d.]+),\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*(\d+))?\]/g
-            let priceMatch: RegExpExecArray | null
-            while ((priceMatch = priceArrayPattern.exec(rawData)) !== null) {
-              const ts = parseInt(priceMatch[1])
-              const timestamp = ts > 1e12 ? ts : ts * 1000
-              const date = new Date(timestamp)
-              const startDate = new Date(period1)
-
-              if (date >= startDate) {
-                bars.push({
-                  date,
-                  open: parseFloat(priceMatch[2]),
-                  high: parseFloat(priceMatch[3]),
-                  low: parseFloat(priceMatch[4]),
-                  close: parseFloat(priceMatch[5]),
-                  volume: priceMatch[6] ? parseInt(priceMatch[6]) : 0,
-                })
-              }
-            }
-          } catch {
-            // skip unparseable data blocks
+      // Strategy 1: ds:11 daily chart data — format: [[year,month,day,hour,...],[close,change,...],volume]
+      const ds11Match = html.match(
+        /AF_initDataCallback\(\{[^}]*key:\s*'ds:11'[^}]*data:([\s\S]*?)\}\s*\);/
+      )
+      if (ds11Match) {
+        const entryPattern = /\[\[(\d{4}),(\d{1,2}),(\d{1,2}),\d+,null,null,null,\[-?\d+\]\],\[([\d.]+),[^\]]+\],?(\d+)?\]/g
+        let m: RegExpExecArray | null
+        while ((m = entryPattern.exec(ds11Match[1])) !== null) {
+          const date = new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]))
+          if (date >= startDate) {
+            const close = parseFloat(m[4])
+            bars.push({ date, open: close, high: close, low: close, close, volume: m[5] ? parseInt(m[5]) : 0 })
           }
         }
       }
 
-      // Strategy 2: window.__data or window.chartData globals
+      // Strategy 2: AF_initDataCallback timestamp-based arrays (legacy)
       if (bars.length === 0) {
-        const windowDataMatch = html.match(
-          /(?:window\.__data|window\.chartData)\s*=\s*(\{[\s\S]*?\});/
-        )
-        if (windowDataMatch) {
-          try {
-            const chartData = JSON.parse(windowDataMatch[1])
-            if (Array.isArray(chartData?.prices)) {
-              const startDate = new Date(period1)
-              for (const p of chartData.prices) {
-                const date = new Date(p.date || p.timestamp * 1000)
-                if (date >= startDate && p.open != null) {
-                  bars.push({
-                    date,
-                    open: p.open,
-                    high: p.high,
-                    low: p.low,
-                    close: p.close,
-                    volume: p.volume || 0,
-                  })
-                }
-              }
+        const cbPattern = /AF_initDataCallback\(\{[^}]*data:\s*(\[[\s\S]*?\])\s*\}\s*\)/g
+        let cbMatch: RegExpExecArray | null
+        while ((cbMatch = cbPattern.exec(html)) !== null) {
+          const pricePattern = /\[(\d{10,13}),\s*([\d.]+),\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*(\d+))?\]/g
+          let pm: RegExpExecArray | null
+          while ((pm = pricePattern.exec(cbMatch[1])) !== null) {
+            const ts = parseInt(pm[1])
+            const date = new Date(ts > 1e12 ? ts : ts * 1000)
+            if (date >= startDate) {
+              bars.push({
+                date,
+                open: parseFloat(pm[2]),
+                high: parseFloat(pm[3]),
+                low: parseFloat(pm[4]),
+                close: parseFloat(pm[5]),
+                volume: pm[6] ? parseInt(pm[6]) : 0,
+              })
             }
-          } catch {
-            // not valid JSON, skip
-          }
-        }
-      }
-
-      // Strategy 3: Look for any numeric arrays that look like price data
-      // Google sometimes uses different data structures
-      if (bars.length === 0) {
-        // Match arrays of arrays with price-like numbers: [[date_int, price, price, price, price], ...]
-        const nestedArrayPattern = /\[\[(\d{8}),\s*([\d.]+),\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*(\d+))?\]/g
-        let nestedMatch: RegExpExecArray | null
-        while ((nestedMatch = nestedArrayPattern.exec(html)) !== null) {
-          const dateStr = nestedMatch[1] // e.g. 20240315
-          const year = parseInt(dateStr.substring(0, 4))
-          const month = parseInt(dateStr.substring(4, 6)) - 1
-          const day = parseInt(dateStr.substring(6, 8))
-          const date = new Date(year, month, day)
-          const startDate = new Date(period1)
-
-          if (date >= startDate && year > 2000) {
-            bars.push({
-              date,
-              open: parseFloat(nestedMatch[2]),
-              high: parseFloat(nestedMatch[3]),
-              low: parseFloat(nestedMatch[4]),
-              close: parseFloat(nestedMatch[5]),
-              volume: nestedMatch[6] ? parseInt(nestedMatch[6]) : 0,
-            })
           }
         }
       }
@@ -414,17 +438,14 @@ class GoogleFinanceService {
       bars.sort((a, b) => a.date.getTime() - b.date.getTime())
 
       if (bars.length === 0) {
-        Logger.debug(
-          '[GoogleFinance] No embedded chart data for %s — history will build from daily syncs',
-          symbol
-        )
+        Logger.debug('[GoogleFinance] No embedded chart data for %s', symbol)
       } else {
-        Logger.info('[GoogleFinance] Extracted %d historical bars for %s', bars.length, symbol)
+        Logger.info('[GoogleFinance] Extracted %d bars for %s from page', bars.length, symbol)
       }
 
       return bars
     } catch (error) {
-      Logger.error('[GoogleFinance] Failed to fetch historical data for %s: %s', symbol, error.message)
+      Logger.error('[GoogleFinance] Failed to fetch historical for %s: %s', symbol, error.message)
       return []
     }
   }
@@ -562,7 +583,7 @@ class GoogleFinanceService {
    *
    * Over time, daily syncs (cron every 30 min) build up a complete price history.
    */
-  public async syncHistoricalSnapshots(ticker: Ticker, days: number = 90) {
+  public async syncHistoricalSnapshots(ticker: Ticker, days: number = 365) {
     let created = 0
 
     // Attempt to extract embedded historical data from the quote page

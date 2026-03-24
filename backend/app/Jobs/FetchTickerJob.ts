@@ -5,7 +5,20 @@ import Ticker from 'App/Models/Ticker'
 import QueueService, { QUEUE_NAMES } from './QueueService'
 
 export async function processFetchTicker(job: Job) {
-  const { symbol, symbols, syncHistory } = job.data
+  const { symbol, symbols, syncHistory, backfillOnly, backfillDays } = job.data
+
+  // Backfill-only mode: just download historical data, skip quote refresh
+  if (backfillOnly && symbol) {
+    Logger.info('[FetchTicker] Backfill-only for %s (%d days)', symbol, backfillDays || 365)
+    await job.updateProgress({ percent: 10, stage: 'Backfilling', detail: symbol })
+    const ticker = await Ticker.findBy('symbol', symbol.toUpperCase())
+    if (!ticker) throw new Error(`Ticker ${symbol} not found`)
+
+    const created = await FinanceService.syncHistoricalSnapshots(ticker, backfillDays || 365)
+    await job.updateProgress({ percent: 100, stage: 'Complete', detail: `${symbol}: ${created} snapshots` })
+    Logger.info('[FetchTicker] Backfill complete for %s: %d new snapshots', symbol, created)
+    return { symbol, snapshotsCreated: created, backfillOnly: true }
+  }
 
   // Bulk mode: sync many symbols in one job using batch API
   if (symbols && Array.isArray(symbols)) {
@@ -21,7 +34,7 @@ export async function processFetchTicker(job: Job) {
 
         if (syncHistory) {
           try {
-            const created = await FinanceService.syncHistoricalSnapshots(ticker, 90)
+            const created = await FinanceService.syncHistoricalSnapshots(ticker)
             totalSnapshots += created
           } catch (err) {
             Logger.warn('[FetchTicker] History sync failed for %s: %s', symbols[i], err.message)
@@ -48,7 +61,7 @@ export async function processFetchTicker(job: Job) {
   if (syncHistory !== false) {
     await job.updateProgress({ percent: 50, stage: 'Syncing history', detail: symbol })
     await new Promise((r) => setTimeout(r, 1000))
-    snapshotsCreated = await FinanceService.syncHistoricalSnapshots(ticker, 90)
+    snapshotsCreated = await FinanceService.syncHistoricalSnapshots(ticker)
   }
 
   await job.updateProgress({ percent: 100, stage: 'Complete', detail: `${symbol} $${ticker.currentPrice}` })

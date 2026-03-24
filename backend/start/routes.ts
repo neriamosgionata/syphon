@@ -27,6 +27,7 @@ Route.group(() => {
   Route.get('/tickers/:symbol', 'TickersController.show')
   Route.post('/tickers', 'TickersController.add')
   Route.post('/tickers/refresh-all', 'TickersController.refreshAll')
+  Route.post('/tickers/backfill', 'TickersController.backfill')
   Route.post('/tickers/:symbol/refresh', 'TickersController.refresh')
   Route.delete('/tickers/:symbol', 'TickersController.remove')
 
@@ -38,6 +39,10 @@ Route.group(() => {
 
   // Signals
   Route.get('/signals', 'SignalsController.index')
+
+  // Quant
+  Route.get('/quant/screener', 'QuantController.screener')
+  Route.get('/quant/:symbol', 'QuantController.analyze')
 
   // Trading
   Route.get('/trading/status', 'TradingController.status')
