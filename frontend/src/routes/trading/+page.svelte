@@ -10,16 +10,21 @@
   let stats: any = $state(null);
   let orders: any = $state(null);
   let loading = $state(true);
-  let connecting = $state(false);
+  let connectingIbkr = $state(false);
+  let connectingKraken = $state(false);
 
   // Quick trade
   let quickSymbol = $state('');
+  let activeBroker: 'ibkr' | 'kraken' = $state('ibkr');
 
   // Filters
   let statusFilter = $state('');
   let sideFilter = $state('');
   let symbolFilter = $state('');
   let page = $state(1);
+
+  let ibkrConnected = $derived(status?.connection?.connected ?? false);
+  let krakenConnected = $derived(status?.kraken?.connection?.connected ?? false);
 
   async function load() {
     loading = true;
@@ -43,17 +48,30 @@
     orders = await api.tradingOrders(params).catch(() => ({ data: [] }));
   }
 
-  async function toggleConnection() {
-    connecting = true;
+  async function toggleIbkr() {
+    connectingIbkr = true;
     try {
-      if (status?.connection?.connected) {
-        await api.tradingDisconnect();
+      if (ibkrConnected) {
+        await api.tradingDisconnect('ibkr');
       } else {
-        await api.tradingConnect();
+        await api.tradingConnect('ibkr');
       }
       status = await api.tradingStatus().catch(() => null);
     } catch {}
-    connecting = false;
+    connectingIbkr = false;
+  }
+
+  async function toggleKraken() {
+    connectingKraken = true;
+    try {
+      if (krakenConnected) {
+        await api.tradingDisconnect('kraken');
+      } else {
+        await api.tradingConnect('kraken');
+      }
+      status = await api.tradingStatus().catch(() => null);
+    } catch {}
+    connectingKraken = false;
   }
 
   async function cancelOrder(id: number) {
@@ -100,40 +118,90 @@
 <div class="page">
   <div class="page-header">
     <h1>Trading</h1>
-    <div class="connection-status">
-      <span class="dot" class:connected={status?.connection?.connected}></span>
-      <span>{status?.connection?.connected ? 'Connected to IB' : 'Disconnected'}</span>
-      <button
-        class="btn"
-        class:btn-primary={!status?.connection?.connected}
-        disabled={connecting}
-        onclick={toggleConnection}
-      >
-        {connecting ? '...' : status?.connection?.connected ? 'Disconnect' : 'Connect to IB'}
-      </button>
+    <div class="broker-connections">
+      <div class="connection-status">
+        <span class="dot" class:connected={ibkrConnected}></span>
+        <span>IBKR</span>
+        <button class="btn btn-sm" disabled={connectingIbkr} onclick={toggleIbkr}>
+          {connectingIbkr ? '...' : ibkrConnected ? 'Disconnect' : 'Connect'}
+        </button>
+      </div>
+      <div class="connection-status">
+        <span class="dot" class:connected={krakenConnected}></span>
+        <span>Kraken</span>
+        <button class="btn btn-sm" disabled={connectingKraken} onclick={toggleKraken}>
+          {connectingKraken ? '...' : krakenConnected ? 'Disconnect' : 'Connect'}
+        </button>
+      </div>
     </div>
   </div>
 
   {#if loading}
     <div class="loading">Loading trading data...</div>
   {:else}
-    <!-- Account & Stats -->
+    <!-- Broker Tabs -->
+    <div class="broker-tabs" style="margin-bottom: 1.5rem;">
+      <button
+        class="broker-tab"
+        class:active={activeBroker === 'ibkr'}
+        onclick={() => activeBroker = 'ibkr'}
+      >IBKR</button>
+      <button
+        class="broker-tab"
+        class:active={activeBroker === 'kraken'}
+        onclick={() => activeBroker = 'kraken'}
+      >Kraken</button>
+    </div>
+
+    <!-- Account & Quick Trade -->
     <div class="grid grid-2" style="margin-bottom: 1.5rem;">
       <div class="card">
-        <h3 style="margin-bottom: 1rem;">Account Summary</h3>
-        {#if status?.connection?.connected && status?.account}
-          <div class="account-grid">
-            {#each Object.entries(status.account) as [key, val]}
-              <div class="account-item">
-                <span class="account-label">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
-                <span class="account-value">
-                  {(val as any).currency === 'USD' ? '$' : ''}{Number((val as any).value).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                </span>
+        <h3 style="margin-bottom: 1rem;">
+          {activeBroker === 'kraken' ? 'Kraken' : 'IBKR'} Account
+        </h3>
+        {#if activeBroker === 'kraken'}
+          {#if krakenConnected && status?.kraken?.balance}
+            <div class="account-grid">
+              {#each Object.entries(status.kraken.balance).filter(([_, v]) => Number(v) > 0) as [asset, amount]}
+                <div class="account-item">
+                  <span class="account-label">{asset}</span>
+                  <span class="account-value">{Number(amount).toLocaleString(undefined, { maximumFractionDigits: 6 })}</span>
+                </div>
+              {/each}
+            </div>
+            {#if status.kraken.tradeBalance && Object.keys(status.kraken.tradeBalance).length > 0}
+              <div style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--border);">
+                <span class="account-label" style="margin-bottom: 0.5rem; display: block;">TRADE BALANCE</span>
+                <div class="account-grid">
+                  {#each Object.entries(status.kraken.tradeBalance) as [key, val]}
+                    <div class="account-item">
+                      <span class="account-label">{key}</span>
+                      <span class="account-value" style="font-size: 0.95rem;">
+                        {Number(val).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  {/each}
+                </div>
               </div>
-            {/each}
-          </div>
+            {/if}
+          {:else}
+            <div class="empty">Connect to Kraken to view balances</div>
+          {/if}
         {:else}
-          <div class="empty">Connect to IB to view account data</div>
+          {#if ibkrConnected && status?.account}
+            <div class="account-grid">
+              {#each Object.entries(status.account) as [key, val]}
+                <div class="account-item">
+                  <span class="account-label">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
+                  <span class="account-value">
+                    {(val as any).currency === 'USD' ? '$' : ''}{Number((val as any).value).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div class="empty">Connect to IB to view account data</div>
+          {/if}
         {/if}
       </div>
 
@@ -142,13 +210,13 @@
         <div class="quick-trade-search">
           <input
             type="text"
-            placeholder="Enter ticker symbol (e.g. AAPL)..."
+            placeholder={activeBroker === 'kraken' ? 'Enter pair (e.g. BTC, ETH)...' : 'Enter ticker symbol (e.g. AAPL)...'}
             bind:value={quickSymbol}
             onkeydown={(e) => e.key === 'Enter' && (quickSymbol = quickSymbol.toUpperCase())}
           />
         </div>
         {#if quickSymbol}
-          <OrderEntry symbol={quickSymbol.toUpperCase()} {onOrderPlaced} />
+          <OrderEntry symbol={quickSymbol.toUpperCase()} broker={activeBroker} {onOrderPlaced} />
         {:else}
           <div class="empty" style="padding: 1.5rem;">Enter a symbol above to start trading</div>
         {/if}
@@ -178,9 +246,9 @@
     {/if}
 
     <!-- Positions -->
-    {#if status?.positions?.length > 0}
+    {#if activeBroker === 'ibkr' && status?.positions?.length > 0}
       <div class="card" style="margin-bottom: 1.5rem;">
-        <h3 style="margin-bottom: 1rem;">Open Positions</h3>
+        <h3 style="margin-bottom: 1rem;">Open Positions (IBKR)</h3>
         <table>
           <thead>
             <tr>
@@ -202,6 +270,38 @@
                 <td class="muted">{p.account}</td>
                 <td>
                   <a href="/tickers/{p.symbol}" class="btn" style="font-size: 0.8rem;">View</a>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+
+    {#if activeBroker === 'kraken' && krakenConnected && status?.kraken?.positions && Object.keys(status.kraken.positions).length > 0}
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <h3 style="margin-bottom: 1rem;">Open Positions (Kraken Margin)</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Pair</th>
+              <th>Type</th>
+              <th>Volume</th>
+              <th>Cost</th>
+              <th>P&L</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each Object.entries(status.kraken.positions) as [id, p]}
+              <tr>
+                <td><strong>{(p as any).pair}</strong></td>
+                <td>
+                  <span class="side-label {(p as any).type}">{(p as any).type?.toUpperCase()}</span>
+                </td>
+                <td>{(p as any).vol}</td>
+                <td class="num">{(p as any).cost}</td>
+                <td class="num" class:positive={Number((p as any).net) > 0} class:negative={Number((p as any).net) < 0}>
+                  {(p as any).net}
                 </td>
               </tr>
             {/each}
@@ -278,6 +378,7 @@
             <thead>
               <tr>
                 <th>ID</th>
+                <th>Broker</th>
                 <th>Symbol</th>
                 <th>Side</th>
                 <th>Type</th>
@@ -294,6 +395,9 @@
               {#each orders.data as t}
                 <tr>
                   <td class="muted">#{t.id}</td>
+                  <td>
+                    <span class="broker-badge {t.broker || 'ibkr'}">{(t.broker || 'ibkr').toUpperCase()}</span>
+                  </td>
                   <td>
                     <a href="/tickers/{t.symbol}"><strong>{t.symbol}</strong></a>
                   </td>
@@ -357,21 +461,67 @@
     flex-wrap: wrap;
     gap: 1rem;
   }
+  .broker-connections {
+    display: flex;
+    gap: 1.25rem;
+  }
   .connection-status {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    font-size: 0.9rem;
+    gap: 0.5rem;
+    font-size: 0.85rem;
   }
   .dot {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     background: var(--red);
+    flex-shrink: 0;
   }
   .dot.connected {
     background: var(--green);
     box-shadow: 0 0 6px var(--green);
+  }
+  .broker-tabs {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    width: fit-content;
+  }
+  .broker-tab {
+    padding: 0.5rem 1.25rem;
+    background: var(--bg);
+    border: none;
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .broker-tab.active {
+    background: var(--accent);
+    color: white;
+  }
+  .broker-tab:hover:not(.active) {
+    background: var(--bg-hover);
+  }
+  .broker-badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .broker-badge.ibkr {
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--accent);
+  }
+  .broker-badge.kraken {
+    background: rgba(139, 92, 246, 0.15);
+    color: #8b5cf6;
   }
   .quick-trade-search {
     margin-bottom: 1rem;

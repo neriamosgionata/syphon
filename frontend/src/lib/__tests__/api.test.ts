@@ -203,19 +203,39 @@ describe('API client', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/trading/status', expect.anything());
     });
 
-    it('calls POST /api/trading/connect', async () => {
+    it('calls POST /api/trading/connect with default broker', async () => {
       mockFetch.mockResolvedValue(mockResponse({ connected: true }));
       await api.tradingConnect();
       expect(mockFetch).toHaveBeenCalledWith('/api/trading/connect', expect.objectContaining({
         method: 'POST',
+        body: JSON.stringify({ broker: 'ibkr' }),
       }));
     });
 
-    it('calls POST /api/trading/disconnect', async () => {
+    it('calls POST /api/trading/connect with kraken broker', async () => {
+      mockFetch.mockResolvedValue(mockResponse({ connected: true }));
+      await api.tradingConnect('kraken');
+      expect(mockFetch).toHaveBeenCalledWith('/api/trading/connect', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ broker: 'kraken' }),
+      }));
+    });
+
+    it('calls POST /api/trading/disconnect with default broker', async () => {
       mockFetch.mockResolvedValue(mockResponse({ connected: false }));
       await api.tradingDisconnect();
       expect(mockFetch).toHaveBeenCalledWith('/api/trading/disconnect', expect.objectContaining({
         method: 'POST',
+        body: JSON.stringify({ broker: 'ibkr' }),
+      }));
+    });
+
+    it('calls POST /api/trading/disconnect with kraken broker', async () => {
+      mockFetch.mockResolvedValue(mockResponse({ connected: false }));
+      await api.tradingDisconnect('kraken');
+      expect(mockFetch).toHaveBeenCalledWith('/api/trading/disconnect', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ broker: 'kraken' }),
       }));
     });
 
@@ -256,6 +276,33 @@ describe('API client', () => {
       mockFetch.mockResolvedValue(mockResponse({ overview: {} }));
       await api.tradingStats();
       expect(mockFetch).toHaveBeenCalledWith('/api/trading/stats', expect.anything());
+    });
+  });
+
+  describe('signals', () => {
+    it('calls GET /api/signals with no params', async () => {
+      mockFetch.mockResolvedValue(mockResponse({ generated_at: '', count: 0, signals: [] }));
+      await api.signals();
+      expect(mockFetch).toHaveBeenCalledWith('/api/signals', expect.anything());
+    });
+
+    it('calls GET /api/signals with query params', async () => {
+      mockFetch.mockResolvedValue(mockResponse({ generated_at: '', count: 0, signals: [] }));
+      await api.signals({ days: '7', min_articles: '3' });
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/signals?days=7&min_articles=3',
+        expect.anything()
+      );
+    });
+  });
+
+  describe('prune', () => {
+    it('calls POST /api/prune', async () => {
+      mockFetch.mockResolvedValue(mockResponse({ message: 'ok', deleted: {} }));
+      await api.pruneDatabase();
+      expect(mockFetch).toHaveBeenCalledWith('/api/prune', expect.objectContaining({
+        method: 'POST',
+      }));
     });
   });
 

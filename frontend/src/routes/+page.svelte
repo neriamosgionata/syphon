@@ -63,6 +63,24 @@
     return `${Math.floor(hours / 24)}d ago`;
   }
 
+  let pruning = $state(false);
+  let showPruneConfirm = $state(false);
+
+  async function pruneDatabase() {
+    pruning = true;
+    try {
+      await api.pruneDatabase();
+      showPruneConfirm = false;
+      await load();
+      await loadJobs();
+      await loadFailedJobs();
+    } catch (e: any) {
+      error = e.message;
+    } finally {
+      pruning = false;
+    }
+  }
+
   async function refreshTickers() {
     await api.refreshAllTickers();
     setTimeout(loadJobs, 500);
@@ -139,7 +157,7 @@
     (dashboard?.recentAnalyses || []).filter((a: any) => {
       if (!sentimentFilter) return true;
       return a.sentiment === sentimentFilter;
-    })
+    }).slice(0, 15)
   );
 
   const QUEUE_LABELS: Record<string, string> = {
@@ -188,6 +206,7 @@
       <button class="btn" onclick={refreshTickers}>Refresh Tickers</button>
       <button class="btn" onclick={triggerScrape}>Scrape News</button>
       <button class="btn btn-primary" onclick={triggerAnalysis}>Run Analysis</button>
+      <button class="btn btn-danger" onclick={() => showPruneConfirm = true}>Prune DB</button>
     </div>
   </div>
 
@@ -196,40 +215,6 @@
   {:else if error}
     <div class="card" style="color: var(--red);">Error: {error}</div>
   {:else if dashboard}
-    <!-- Active Jobs -->
-    {#if activeJobs.length > 0}
-      <div class="jobs-section" style="margin-bottom: 1.5rem;">
-        <div class="jobs-header">
-          <h3>Active Jobs</h3>
-          <span class="jobs-count">{activeJobs.length} running</span>
-        </div>
-        <div class="jobs-grid">
-          {#each activeJobs as job (job.queue + ':' + job.id)}
-            <div class="job-card" class:job-active={job.state === 'active'} class:job-waiting={job.state === 'waiting'} class:job-done={job.state === 'completed'} class:job-failed={job.state === 'failed'}>
-              <div class="job-top">
-                <span class="job-queue">{queueLabel(job.queue)}</span>
-                <span class="job-state" style="color: {stateColor(job.state)}">{job.state}</span>
-              </div>
-              <div class="job-desc">{jobDescription(job)}</div>
-              {#if job.stage}
-                <div class="job-stage">{job.stage}{#if job.detail} &middot; {job.detail}{/if}</div>
-              {/if}
-              <div class="job-progress-track">
-                <div
-                  class="job-progress-fill"
-                  class:fill-active={job.state === 'active'}
-                  class:fill-done={job.state === 'completed'}
-                  class:fill-failed={job.state === 'failed'}
-                  style="width: {job.progress || 0}%"
-                ></div>
-              </div>
-              <div class="job-percent">{job.progress || 0}%</div>
-            </div>
-          {/each}
-        </div>
-      </div>
-    {/if}
-
     <div class="grid grid-4" style="margin-bottom: 1.5rem;">
       <StatCard label="Total Articles" value={dashboard.stats.totalArticles.toLocaleString()} />
       <StatCard label="Active Tickers" value={dashboard.stats.totalTickers} />
@@ -299,56 +284,6 @@
       </div>
     </div>
 
-    <!-- Failed Jobs -->
-    {#if failedJobs.length > 0}
-      <div class="failed-section" style="margin-bottom: 1.5rem;">
-        <div class="failed-header">
-          <button class="failed-toggle" onclick={() => showFailedJobs = !showFailedJobs}>
-            <span class="failed-icon">!</span>
-            <h3>Failed Jobs</h3>
-            <span class="failed-count">{failedJobs.length}</span>
-            <span class="failed-chevron">{showFailedJobs ? '▾' : '▸'}</span>
-          </button>
-          {#if showFailedJobs}
-            <div class="failed-actions">
-              <button class="btn btn-sm" onclick={() => { failedJobs.forEach((j) => retryJob(j.queue, j.id)); }}>
-                Retry All
-              </button>
-            </div>
-          {/if}
-        </div>
-        {#if showFailedJobs}
-          <div class="failed-list">
-            {#each failedJobs as job (job.queue + ':' + job.id)}
-              <div class="failed-card">
-                <div class="failed-card-top">
-                  <div class="failed-card-info">
-                    <span class="failed-queue">{queueLabel(job.queue)}</span>
-                    <span class="failed-job-desc">{jobDescription(job)}</span>
-                  </div>
-                  <span class="failed-time">{timeAgo(job.finishedOn || job.timestamp)}</span>
-                </div>
-                <div class="failed-reason">{job.failedReason}</div>
-                {#if job.stacktrace?.length > 0}
-                  <details class="failed-stacktrace">
-                    <summary>Stack trace</summary>
-                    <pre>{job.stacktrace.join('\n')}</pre>
-                  </details>
-                {/if}
-                <div class="failed-card-meta">
-                  <span class="failed-attempts">Attempts: {job.attemptsMade}/3</span>
-                  <div class="failed-card-actions">
-                    <button class="btn btn-sm" onclick={() => retryJob(job.queue, job.id)}>Retry</button>
-                    <button class="btn btn-sm btn-dismiss" onclick={() => removeJob(job.queue, job.id)}>Dismiss</button>
-                  </div>
-                </div>
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
-
     <div class="grid grid-2">
       <div class="card">
         <h3 style="margin-bottom: 1rem;">
@@ -397,6 +332,105 @@
         {:else}
           <div class="empty">No analyses yet</div>
         {/if}
+      </div>
+    </div>
+    <!-- Active Jobs -->
+    {#if activeJobs.length > 0}
+      <div class="jobs-section" style="margin-top: 1.5rem;">
+        <div class="jobs-header">
+          <h3>Active Jobs</h3>
+          <span class="jobs-count">{activeJobs.length} running</span>
+        </div>
+        <div class="jobs-grid">
+          {#each activeJobs as job (job.queue + ':' + job.id)}
+            <div class="job-card" class:job-active={job.state === 'active'} class:job-waiting={job.state === 'waiting'} class:job-done={job.state === 'completed'} class:job-failed={job.state === 'failed'}>
+              <div class="job-top">
+                <span class="job-queue">{queueLabel(job.queue)}</span>
+                <span class="job-state" style="color: {stateColor(job.state)}">{job.state}</span>
+              </div>
+              <div class="job-desc">{jobDescription(job)}</div>
+              {#if job.stage}
+                <div class="job-stage">{job.stage}{#if job.detail} &middot; {job.detail}{/if}</div>
+              {/if}
+              <div class="job-progress-track">
+                <div
+                  class="job-progress-fill"
+                  class:fill-active={job.state === 'active'}
+                  class:fill-done={job.state === 'completed'}
+                  class:fill-failed={job.state === 'failed'}
+                  style="width: {job.progress || 0}%"
+                ></div>
+              </div>
+              <div class="job-percent">{job.progress || 0}%</div>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    <!-- Failed Jobs -->
+    {#if failedJobs.length > 0}
+      <div class="failed-section" style="margin-top: 1.5rem;">
+        <div class="failed-header">
+          <button class="failed-toggle" onclick={() => showFailedJobs = !showFailedJobs}>
+            <span class="failed-icon">!</span>
+            <h3>Failed Jobs</h3>
+            <span class="failed-count">{failedJobs.length}</span>
+            <span class="failed-chevron">{showFailedJobs ? '▾' : '▸'}</span>
+          </button>
+          {#if showFailedJobs}
+            <div class="failed-actions">
+              <button class="btn btn-sm" onclick={() => { failedJobs.forEach((j) => retryJob(j.queue, j.id)); }}>
+                Retry All
+              </button>
+            </div>
+          {/if}
+        </div>
+        {#if showFailedJobs}
+          <div class="failed-list">
+            {#each failedJobs as job (job.queue + ':' + job.id)}
+              <div class="failed-card">
+                <div class="failed-card-top">
+                  <div class="failed-card-info">
+                    <span class="failed-queue">{queueLabel(job.queue)}</span>
+                    <span class="failed-job-desc">{jobDescription(job)}</span>
+                  </div>
+                  <span class="failed-time">{timeAgo(job.finishedOn || job.timestamp)}</span>
+                </div>
+                <div class="failed-reason">{job.failedReason}</div>
+                {#if job.stacktrace?.length > 0}
+                  <details class="failed-stacktrace">
+                    <summary>Stack trace</summary>
+                    <pre>{job.stacktrace.join('\n')}</pre>
+                  </details>
+                {/if}
+                <div class="failed-card-meta">
+                  <span class="failed-attempts">Attempts: {job.attemptsMade}/3</span>
+                  <div class="failed-card-actions">
+                    <button class="btn btn-sm" onclick={() => retryJob(job.queue, job.id)}>Retry</button>
+                    <button class="btn btn-sm btn-dismiss" onclick={() => removeJob(job.queue, job.id)}>Dismiss</button>
+                  </div>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+  {/if}
+
+  {#if showPruneConfirm}
+    <div class="modal-backdrop" onclick={() => showPruneConfirm = false}>
+      <div class="modal" onclick={(e) => e.stopPropagation()}>
+        <h3>Prune Database</h3>
+        <p>This will permanently delete articles, analyses, trades, scrape sources, and OpenSearch indices. <strong>Tickers will be preserved.</strong></p>
+        <p style="color: var(--red); font-weight: 600;">This action cannot be undone.</p>
+        <div class="modal-actions">
+          <button class="btn" onclick={() => showPruneConfirm = false} disabled={pruning}>Cancel</button>
+          <button class="btn btn-danger" onclick={pruneDatabase} disabled={pruning}>
+            {pruning ? 'Pruning...' : 'Confirm Prune'}
+          </button>
+        </div>
       </div>
     </div>
   {/if}
@@ -770,5 +804,50 @@
   .btn-dismiss:hover {
     color: var(--red);
     border-color: var(--red);
+  }
+
+  /* Prune / Danger */
+  :global(.btn-danger) {
+    background: var(--red);
+    color: white;
+    border-color: var(--red);
+  }
+  :global(.btn-danger:hover) {
+    opacity: 0.85;
+  }
+  :global(.btn-danger:disabled) {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    max-width: 420px;
+    width: 90%;
+  }
+  .modal h3 {
+    margin-bottom: 0.75rem;
+  }
+  .modal p {
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+    line-height: 1.5;
+  }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
   }
 </style>

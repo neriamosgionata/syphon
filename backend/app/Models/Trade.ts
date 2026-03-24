@@ -3,6 +3,7 @@ import { BaseModel, column, belongsTo, BelongsTo } from '@ioc:Adonis/Lucid/Orm'
 import Ticker from './Ticker'
 import Analysis from './Analysis'
 
+export type Broker = 'ibkr' | 'kraken'
 export type TradeSide = 'BUY' | 'SELL'
 export type OrderType = 'MKT' | 'LMT' | 'STP' | 'STP_LMT' | 'TRAIL'
 export type TradeStatus =
@@ -53,6 +54,9 @@ export default class Trade extends BaseModel {
   public ibPermId: string | null
 
   @column()
+  public externalOrderId: string | null
+
+  @column()
   public status: TradeStatus
 
   @column()
@@ -75,6 +79,9 @@ export default class Trade extends BaseModel {
 
   @column()
   public currency: string
+
+  @column()
+  public broker: Broker
 
   @column()
   public ibMetadata: Record<string, any> | null

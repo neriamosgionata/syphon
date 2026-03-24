@@ -877,6 +877,21 @@ test.group('GoogleFinanceService', (group) => {
     assert.equal(result, 12345)
   })
 
+  test('parseMarketCap handles T followed by currency code', async ({ assert }) => {
+    const result = GoogleFinanceService['parseMarketCap']('3.69T USD')
+    assert.equal(result, 3.69e12)
+  })
+
+  test('parseMarketCap handles B followed by currency code', async ({ assert }) => {
+    const result = GoogleFinanceService['parseMarketCap']('150.3B USD')
+    assert.equal(result, 150.3e9)
+  })
+
+  test('parseMarketCap handles TRILLION word', async ({ assert }) => {
+    const result = GoogleFinanceService['parseMarketCap']('2.5 TRILLION')
+    assert.equal(result, 2.5e12)
+  })
+
   // --- syncTicker error path ---
 
   test('syncTicker throws when fetchQuote returns null', async ({ assert }) => {

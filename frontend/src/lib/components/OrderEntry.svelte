@@ -5,10 +5,11 @@
     symbol: string;
     currentPrice?: number | null;
     analysisId?: number | null;
+    broker?: string;
     onOrderPlaced?: (trade: any) => void;
   }
 
-  let { symbol, currentPrice = null, analysisId = null, onOrderPlaced }: Props = $props();
+  let { symbol, currentPrice = null, analysisId = null, broker = 'ibkr', onOrderPlaced }: Props = $props();
 
   let side: 'BUY' | 'SELL' = $state('BUY');
   let orderType = $state('MKT');
@@ -17,6 +18,8 @@
   let stopPrice = $state(0);
   let trailAmount = $state(1);
   let timeInForce = $state('DAY');
+  let leverage = $state('none');
+  let tradingMode = $state('spot');
   let submitting = $state(false);
   let error = $state('');
   let success = $state('');
@@ -51,6 +54,16 @@
       if (['STP', 'STP_LMT'].includes(orderType)) payload.stop_price = stopPrice;
       if (orderType === 'TRAIL') payload.trail_amount = trailAmount;
       if (analysisId) payload.analysis_id = analysisId;
+      payload.broker = broker;
+
+      // Kraken-specific: leverage and futures
+      if (broker === 'kraken') {
+        if (tradingMode === 'futures') {
+          payload.exchange = 'futures';
+        } else if (leverage !== 'none') {
+          payload.exchange = leverage; // e.g. "2x", "3x", "5x"
+        }
+      }
 
       const result = await api.placeOrder(payload);
       success = result.message || 'Order submitted';
@@ -128,9 +141,34 @@
         <option value="DAY">Day</option>
         <option value="GTC">Good 'til Cancelled</option>
         <option value="IOC">Immediate or Cancel</option>
-        <option value="OPG">At Open</option>
+        {#if broker !== 'kraken'}
+          <option value="OPG">At Open</option>
+        {/if}
       </select>
     </div>
+
+    {#if broker === 'kraken'}
+      <div class="field">
+        <label for="trading-mode">Mode</label>
+        <select id="trading-mode" bind:value={tradingMode}>
+          <option value="spot">Spot</option>
+          <option value="margin">Margin</option>
+          <option value="futures">Futures</option>
+        </select>
+      </div>
+
+      {#if tradingMode === 'margin'}
+        <div class="field">
+          <label for="leverage">Leverage</label>
+          <select id="leverage" bind:value={leverage}>
+            <option value="2x">2x</option>
+            <option value="3x">3x</option>
+            <option value="4x">4x</option>
+            <option value="5x">5x</option>
+          </select>
+        </div>
+      {/if}
+    {/if}
   </div>
 
   <div class="order-summary">

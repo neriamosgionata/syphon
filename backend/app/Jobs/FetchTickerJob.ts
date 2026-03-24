@@ -13,10 +13,20 @@ export async function processFetchTicker(job: Job) {
     Logger.info('[FetchTicker] Bulk syncing %d tickers', symbols.length)
 
     let synced = 0
+    let totalSnapshots = 0
     for (let i = 0; i < symbols.length; i++) {
       try {
-        await FinanceService.syncTicker(symbols[i])
+        const ticker = await FinanceService.syncTicker(symbols[i])
         synced++
+
+        if (syncHistory) {
+          try {
+            const created = await FinanceService.syncHistoricalSnapshots(ticker, 90)
+            totalSnapshots += created
+          } catch (err) {
+            Logger.warn('[FetchTicker] History sync failed for %s: %s', symbols[i], err.message)
+          }
+        }
       } catch (err) {
         Logger.warn('[FetchTicker] Failed to sync %s: %s', symbols[i], err.message)
       }
@@ -24,8 +34,8 @@ export async function processFetchTicker(job: Job) {
       await job.updateProgress({ percent: pct, stage: 'Bulk sync', detail: `${synced}/${i + 1} synced (${symbols[i]})` })
     }
 
-    Logger.info('[FetchTicker] Bulk sync complete: %d/%d succeeded', synced, symbols.length)
-    return { synced, total: symbols.length }
+    Logger.info('[FetchTicker] Bulk sync complete: %d/%d succeeded, %d snapshots', synced, symbols.length, totalSnapshots)
+    return { synced, total: symbols.length, totalSnapshots }
   }
 
   // Single mode

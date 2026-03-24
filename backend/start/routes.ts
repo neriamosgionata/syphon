@@ -11,6 +11,7 @@ Route.group(() => {
   Route.get('/jobs/failed', 'DashboardController.failedJobs')
   Route.post('/jobs/:queue/:id/retry', 'DashboardController.retryJob')
   Route.delete('/jobs/:queue/:id', 'DashboardController.removeFailedJob')
+  Route.post('/prune', 'DashboardController.prune')
 
   // Articles
   Route.get('/articles', 'ArticlesController.index')
@@ -34,6 +35,9 @@ Route.group(() => {
   Route.get('/analysis/stats', 'AnalysisController.stats')
   Route.get('/analysis/timeline', 'AnalysisController.timeline')
   Route.get('/analysis/:id', 'AnalysisController.show')
+
+  // Signals
+  Route.get('/signals', 'SignalsController.index')
 
   // Trading
   Route.get('/trading/status', 'TradingController.status')

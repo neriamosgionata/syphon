@@ -22,6 +22,8 @@ export const api = {
   removeFailedJob: (queue: string, id: string) =>
     request<any>(`/jobs/${encodeURIComponent(queue)}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  pruneDatabase: () => request<any>('/prune', { method: 'POST' }),
+
   // Articles
   articles: (params?: Record<string, any>) => {
     const qs = new URLSearchParams(params).toString();
@@ -72,8 +74,10 @@ export const api = {
 
   // Trading
   tradingStatus: () => request<any>('/trading/status'),
-  tradingConnect: () => request<any>('/trading/connect', { method: 'POST' }),
-  tradingDisconnect: () => request<any>('/trading/disconnect', { method: 'POST' }),
+  tradingConnect: (broker: string = 'ibkr') =>
+    request<any>('/trading/connect', { method: 'POST', body: JSON.stringify({ broker }) }),
+  tradingDisconnect: (broker: string = 'ibkr') =>
+    request<any>('/trading/disconnect', { method: 'POST', body: JSON.stringify({ broker }) }),
   tradingAccount: () => request<any>('/trading/account'),
   tradingPositions: () => request<any[]>('/trading/positions'),
   tradingStats: (symbol?: string) => {
@@ -97,6 +101,7 @@ export const api = {
     exchange?: string;
     currency?: string;
     analysis_id?: number;
+    broker?: string;
   }) =>
     request<any>('/trading/orders', {
       method: 'POST',
@@ -104,6 +109,12 @@ export const api = {
     }),
   cancelOrder: (id: number) =>
     request<any>(`/trading/orders/${id}/cancel`, { method: 'POST' }),
+
+  // Signals
+  signals: (params?: Record<string, any>) => {
+    const qs = params ? new URLSearchParams(params).toString() : '';
+    return request<any>(`/signals${qs ? `?${qs}` : ''}`);
+  },
 
   // Logs
   logs: (params?: Record<string, any>) => {

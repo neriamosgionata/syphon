@@ -199,6 +199,15 @@ class QueueService {
     return true
   }
 
+  public async drainAll() {
+    for (const name of Object.values(QUEUE_NAMES)) {
+      const queue = this.getQueue(name)
+      await queue.drain()
+      await queue.clean(0, 0, 'completed')
+      await queue.clean(0, 0, 'failed')
+    }
+  }
+
   public async shutdown() {
     for (const [name, worker] of this.workers) {
       Logger.info('Shutting down worker: %s', name)

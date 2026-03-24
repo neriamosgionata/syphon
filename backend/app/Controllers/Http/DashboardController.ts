@@ -4,6 +4,8 @@ import Ticker from 'App/Models/Ticker'
 import Analysis from 'App/Models/Analysis'
 import QueueService from 'App/Jobs/QueueService'
 import Database from '@ioc:Adonis/Lucid/Database'
+import Logger from '@ioc:Adonis/Core/Logger'
+import OpenSearchService from 'App/Services/OpenSearchService'
 
 export default class DashboardController {
   public async index({ response }: HttpContextContract) {
@@ -87,5 +89,38 @@ export default class DashboardController {
       return response.notFound({ error: 'Job not found' })
     }
     return response.json({ message: 'Job removed' })
+  }
+
+  public async prune({ response }: HttpContextContract) {
+    Logger.info('Pruning entire database...')
+
+    // Delete in FK-safe order, preserving tickers and their snapshots
+    await Database.rawQuery('DELETE FROM trades')
+    await Database.rawQuery('DELETE FROM analyses')
+    await Database.rawQuery('DELETE FROM articles')
+    await Database.rawQuery('DELETE FROM scrape_sources')
+
+    // Clear OpenSearch indices
+    const osClient = await OpenSearchService.getClient()
+    for (const index of ['syphon-articles', 'syphon-logs']) {
+      try {
+        const exists = await osClient.indices.exists({ index })
+        if (exists.body) {
+          await osClient.deleteByQuery({
+            index,
+            body: { query: { match_all: {} } },
+            refresh: true,
+          })
+        }
+      } catch {
+        // index may not exist yet
+      }
+    }
+
+    // Drain BullMQ queues
+    await QueueService.drainAll()
+
+    Logger.info('Database pruned successfully')
+    return response.json({ message: 'All data pruned successfully' })
   }
 }

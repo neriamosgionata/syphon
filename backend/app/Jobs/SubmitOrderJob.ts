@@ -2,6 +2,7 @@ import { Job } from 'bullmq'
 import Logger from '@ioc:Adonis/Core/Logger'
 import Trade from 'App/Models/Trade'
 import IBKRService from 'App/Services/IBKRService'
+import KrakenService from 'App/Services/KrakenService'
 import QueueService, { QUEUE_NAMES } from './QueueService'
 
 export async function processSubmitOrder(job: Job) {
@@ -18,20 +19,26 @@ export async function processSubmitOrder(job: Job) {
     return { skipped: true }
   }
 
-  await job.updateProgress({ percent: 30, stage: 'Submitting', detail: `${trade.side} ${trade.quantity} ${trade.symbol}` })
+  await job.updateProgress({ percent: 30, stage: 'Submitting', detail: `${trade.side} ${trade.quantity} ${trade.symbol} (${trade.broker})` })
 
-  const result = await IBKRService.placeOrder(trade)
+  let result: Trade
+
+  if (trade.broker === 'kraken') {
+    result = await KrakenService.placeOrderAny(trade)
+  } else {
+    result = await IBKRService.placeOrder(trade)
+  }
 
   await job.updateProgress({ percent: 100, stage: 'Submitted', detail: `Status: ${result.status}` })
 
   Logger.info(
-    '[SubmitOrder] Trade %d: %s %d %s -> status=%s (ibOrderId=%d)',
+    '[SubmitOrder] Trade %d [%s]: %s %d %s -> status=%s',
     trade.id,
+    trade.broker,
     trade.side,
     trade.quantity,
     trade.symbol,
     result.status,
-    result.ibOrderId,
   )
 
   // If order was submitted successfully, schedule a status check
@@ -39,14 +46,14 @@ export async function processSubmitOrder(job: Job) {
     await QueueService.addJob(
       QUEUE_NAMES.MONITOR_ORDER,
       { tradeId: trade.id },
-      { delay: 5000 },
+      { delay: trade.broker === 'kraken' ? 3000 : 5000 },
     )
   }
 
   return {
     tradeId: trade.id,
     status: result.status,
-    ibOrderId: result.ibOrderId,
+    externalOrderId: result.externalOrderId || result.ibOrderId,
   }
 }
 

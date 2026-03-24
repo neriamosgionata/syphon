@@ -20,7 +20,6 @@ export default Env.rules({
   REDIS_PASSWORD: Env.schema.string.optional(),
 
   OPENSEARCH_NODE: Env.schema.string(),
-  FINANCE_PROVIDER: Env.schema.enum.optional(['google', 'yahoo'] as const),
   SCRAPE_INTERVAL_MINUTES: Env.schema.number.optional(),
   ANALYSIS_BATCH_SIZE: Env.schema.number.optional(),
 

@@ -1,63 +1,125 @@
 import { HttpContextContract } from '@ioc:Adonis/Core/HttpContext'
 import Trade from 'App/Models/Trade'
+import type { Broker } from 'App/Models/Trade'
 import Ticker from 'App/Models/Ticker'
 import IBKRService from 'App/Services/IBKRService'
+import KrakenService from 'App/Services/KrakenService'
 import QueueService, { QUEUE_NAMES } from 'App/Jobs/QueueService'
 import Database from '@ioc:Adonis/Lucid/Database'
 
 export default class TradingController {
   /**
-   * IB connection status + account overview
+   * Combined connection status for all brokers
    */
   public async status({ response }: HttpContextContract) {
-    const connectionStatus = IBKRService.getConnectionStatus()
+    const ibkrStatus = IBKRService.getConnectionStatus()
+    const krakenStatus = KrakenService.getConnectionStatus()
 
-    let account = {}
-    let positions: any[] = []
-    let openOrders: any[] = []
+    let ibkrAccount = {}
+    let ibkrPositions: any[] = []
+    let ibkrOpenOrders: any[] = []
 
-    if (connectionStatus.connected) {
-      ;[account, positions, openOrders] = await Promise.all([
+    if (ibkrStatus.connected) {
+      ;[ibkrAccount, ibkrPositions, ibkrOpenOrders] = await Promise.all([
         IBKRService.getAccountSummary(),
         IBKRService.getPositions(),
         IBKRService.getOpenOrders(),
       ])
     }
 
+    let krakenBalance = {}
+    let krakenTradeBalance = {}
+    let krakenPositions: any = {}
+    let krakenOpenOrders: any = {}
+
+    if (krakenStatus.connected) {
+      ;[krakenBalance, krakenTradeBalance, krakenPositions, krakenOpenOrders] = await Promise.all([
+        KrakenService.getBalance().catch(() => ({})),
+        KrakenService.getTradeBalance().catch(() => ({})),
+        KrakenService.getOpenPositions().catch(() => ({})),
+        KrakenService.getOpenOrders().catch(() => ({})),
+      ])
+    }
+
     return response.json({
-      connection: connectionStatus,
-      account,
-      positions,
-      openOrders,
+      // Legacy field for backwards compat
+      connection: ibkrStatus,
+      account: ibkrAccount,
+      positions: ibkrPositions,
+      openOrders: ibkrOpenOrders,
+      // Kraken-specific
+      kraken: {
+        connection: krakenStatus,
+        balance: krakenBalance,
+        tradeBalance: krakenTradeBalance,
+        positions: krakenPositions,
+        openOrders: krakenOpenOrders,
+      },
     })
   }
 
   /**
-   * Connect to IB TWS/Gateway
+   * Connect to a broker
    */
-  public async connect({ response }: HttpContextContract) {
+  public async connect({ request, response }: HttpContextContract) {
+    const broker = (request.input('broker', 'ibkr') as string).toLowerCase()
+
+    if (broker === 'kraken') {
+      const result = await KrakenService.connect()
+      if (result) {
+        return response.json({ connected: true, broker: 'kraken', message: 'Connected to Kraken' })
+      }
+      return response.serviceUnavailable({
+        connected: false,
+        broker: 'kraken',
+        error: 'Failed to connect. Check KRAKEN_API_KEY and KRAKEN_API_SECRET.',
+      })
+    }
+
+    // Default: IBKR
     const result = await IBKRService.connect()
     if (result) {
-      return response.json({ connected: true, message: 'Connected to IB TWS/Gateway' })
+      return response.json({ connected: true, broker: 'ibkr', message: 'Connected to IB TWS/Gateway' })
     }
     return response.serviceUnavailable({
       connected: false,
+      broker: 'ibkr',
       error: 'Failed to connect. Ensure TWS or IB Gateway is running.',
     })
   }
 
   /**
-   * Disconnect from IB
+   * Disconnect from a broker
    */
-  public async disconnect({ response }: HttpContextContract) {
+  public async disconnect({ request, response }: HttpContextContract) {
+    const broker = (request.input('broker', 'ibkr') as string).toLowerCase()
+
+    if (broker === 'kraken') {
+      KrakenService.disconnect()
+      return response.json({ connected: false, broker: 'kraken', message: 'Disconnected from Kraken' })
+    }
+
     IBKRService.disconnect()
-    return response.json({ connected: false, message: 'Disconnected from IB' })
+    return response.json({ connected: false, broker: 'ibkr', message: 'Disconnected from IB' })
   }
 
   /**
-   * Get account summary
+   * Get account summary for a specific broker
    */
-  public async account({ response }: HttpContextContract) {
+  public async account({ request, response }: HttpContextContract) {
+    const broker = (request.input('broker', 'ibkr') as string).toLowerCase()
+
+    if (broker === 'kraken') {
+      if (!KrakenService.isConnected) {
+        return response.serviceUnavailable({ error: 'Not connected to Kraken' })
+      }
+      const [balance, tradeBalance] = await Promise.all([
+        KrakenService.getBalance(),
+        KrakenService.getTradeBalance(),
+      ])
+      return response.json({ balance, tradeBalance })
+    }
+
     if (!IBKRService.isConnected) {
       return response.serviceUnavailable({ error: 'Not connected to IB' })
     }
@@ -66,9 +128,19 @@ export default class TradingController {
   }
 
   /**
-   * Get portfolio positions from IB
+   * Get portfolio positions
    */
-  public async positions({ response }: HttpContextContract) {
+  public async positions({ request, response }: HttpContextContract) {
+    const broker = (request.input('broker', 'ibkr') as string).toLowerCase()
+
+    if (broker === 'kraken') {
+      if (!KrakenService.isConnected) {
+        return response.serviceUnavailable({ error: 'Not connected to Kraken' })
+      }
+      const positions = await KrakenService.getOpenPositions()
+      return response.json(positions)
+    }
+
     if (!IBKRService.isConnected) {
       return response.serviceUnavailable({ error: 'Not connected to IB' })
     }
@@ -91,6 +163,7 @@ export default class TradingController {
     const exchange = request.input('exchange', 'SMART')
     const currency = request.input('currency', 'USD')
     const analysisId = request.input('analysis_id') ? Number(request.input('analysis_id')) : null
+    const broker = (request.input('broker', 'ibkr') as string).toLowerCase() as Broker
 
     // Validation
     if (!symbol) return response.badRequest({ error: 'symbol is required' })
@@ -105,11 +178,13 @@ export default class TradingController {
     if (['STP', 'STP_LMT'].includes(orderType) && !stopPrice) {
       return response.badRequest({ error: 'stop_price required for STP/STP_LMT orders' })
     }
+    if (!['ibkr', 'kraken'].includes(broker)) {
+      return response.badRequest({ error: 'broker must be ibkr or kraken' })
+    }
 
     // Find or reference the ticker
     let ticker = await Ticker.findBy('symbol', symbol)
     if (!ticker) {
-      // Create a minimal ticker record
       ticker = await Ticker.create({ symbol, name: symbol, isActive: true })
     }
 
@@ -125,6 +200,7 @@ export default class TradingController {
       timeInForce,
       exchange,
       currency,
+      broker,
       analysisId,
       status: 'pending',
       filledQuantity: 0,
@@ -135,7 +211,7 @@ export default class TradingController {
 
     return response.created({
       trade: trade.serialize(),
-      message: 'Order queued for submission',
+      message: `Order queued for submission via ${broker.toUpperCase()}`,
     })
   }
 
@@ -149,7 +225,13 @@ export default class TradingController {
       return response.badRequest({ error: `Cannot cancel order in ${trade.status} status` })
     }
 
-    const updated = await IBKRService.cancelOrder(trade)
+    let updated: Trade
+    if (trade.broker === 'kraken') {
+      updated = await KrakenService.cancelOrderAny(trade)
+    } else {
+      updated = await IBKRService.cancelOrder(trade)
+    }
+
     return response.json({ trade: updated.serialize(), message: 'Cancel requested' })
   }
 

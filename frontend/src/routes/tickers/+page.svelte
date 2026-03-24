@@ -219,7 +219,7 @@
                 {/if}
               </td>
               <td class="time">
-                {t.last_fetched_at || t.lastFetchedAt ? new Date(t.last_fetched_at || t.lastFetchedAt).toLocaleDateString() : 'Never'}
+                {t.last_fetched_at || t.lastFetchedAt ? new Date(t.last_fetched_at || t.lastFetchedAt).toLocaleString() : 'Never'}
               </td>
               <td>
                 <button class="btn" onclick={() => refreshTicker(t.symbol)}>Refresh</button>

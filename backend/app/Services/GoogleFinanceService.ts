@@ -150,11 +150,8 @@ class GoogleFinanceService {
     throw new Error('fetchHTML exhausted retries')
   }
 
-  // Exchange resolution is now done inside fetchQuote to avoid extra requests
-
   private parsePrice(text: string): number | null {
     if (!text) return null
-    // Remove currency symbols, commas, whitespace
     const cleaned = text.replace(/[^0-9.\-]/g, '')
     const num = parseFloat(cleaned)
     return isNaN(num) ? null : num
@@ -165,10 +162,10 @@ class GoogleFinanceService {
     const cleaned = text.trim().toUpperCase()
     const num = parseFloat(cleaned.replace(/[^0-9.]/g, ''))
     if (isNaN(num)) return null
-    if (cleaned.endsWith('T')) return num * 1e12
-    if (cleaned.endsWith('B')) return num * 1e9
-    if (cleaned.endsWith('M')) return num * 1e6
-    if (cleaned.endsWith('K')) return num * 1e3
+    if (/T(?:\s|$|[^A-Z])/.test(cleaned) || cleaned.includes('TRILLION')) return num * 1e12
+    if (/B(?:\s|$|[^A-Z])/.test(cleaned) || cleaned.includes('BILLION')) return num * 1e9
+    if (/M(?:\s|$|[^A-Z])/.test(cleaned) || cleaned.includes('MILLION')) return num * 1e6
+    if (/K(?:\s|$|[^A-Z])/.test(cleaned) || cleaned.includes('THOUSAND')) return num * 1e3
     return num
   }
 
@@ -178,7 +175,6 @@ class GoogleFinanceService {
     try {
       const upper = symbol.toUpperCase()
 
-      // Build list of exchanges to try: known/cached first, then common US exchanges
       const exchangesToTry: string[] = []
       if (knownExchange) exchangesToTry.push(knownExchange)
       const cached = this.exchangeCache.get(upper)
@@ -200,7 +196,6 @@ class GoogleFinanceService {
           continue
         }
 
-        // Found a working page — cache the exchange and parse it
         this.exchangeCache.set(upper, exchange)
         return this.parseQuotePage(html, upper, exchange)
       }
@@ -216,14 +211,12 @@ class GoogleFinanceService {
   private parseQuotePage(html: string, symbol: string, exchange: string) {
     const $ = cheerio.load(html)
 
-    // Extract current price
     let price: number | null = null
     const priceAttr = $('[data-last-price]').first().attr('data-last-price')
     if (priceAttr) {
       price = parseFloat(priceAttr)
     }
 
-    // Extract company name from the page title
     let shortName: string | null = null
     const pageTitle = $('title').text()
     const titleMatch = pageTitle.match(/^(.+?)\s*(?:Stock Price|Share Price|ETF|\()/)
@@ -299,10 +292,16 @@ class GoogleFinanceService {
     }
   }
 
+  /**
+   * Fetch historical data from Google Finance.
+   *
+   * Strategy: Scrape the quote page and extract embedded chart data from
+   * AF_initDataCallback JS payloads. Google embeds OHLCV-like price arrays
+   * in the page source. If extraction fails (Google changes format),
+   * syncHistoricalSnapshots falls back to building history from daily syncs.
+   */
   public async fetchHistorical(symbol: string, period1: string, _period2?: string, knownExchange?: string) {
     try {
-      // Google Finance doesn't expose a simple historical data API.
-      // We scrape the quote page which includes a chart data payload embedded in the HTML.
       const exchange = knownExchange || this.exchangeCache.get(symbol.toUpperCase()) || null
       const quotePath = exchange
         ? `${encodeURIComponent(symbol)}:${encodeURIComponent(exchange)}`
@@ -319,13 +318,8 @@ class GoogleFinanceService {
         volume: number
       }> = []
 
-      // Google Finance embeds chart data in a JS variable within the page.
-      // Look for the data payload that contains historical prices.
-      // The format varies but typically includes arrays of [timestamp, open, high, low, close, volume]
-
-      // Strategy 1: Look for embedded JSON data with price arrays
+      // Strategy 1: AF_initDataCallback — Google embeds chart data in JS callbacks
       const dataPatterns = [
-        // AF_initDataCallback pattern used by Google Finance
         /AF_initDataCallback\(\{[^}]*key:\s*'ds:(\d+)'[^}]*data:\s*(\[[\s\S]*?\])\s*\}\s*\)/g,
       ]
 
@@ -334,7 +328,7 @@ class GoogleFinanceService {
         while ((match = pattern.exec(html)) !== null) {
           try {
             const rawData = match[2]
-            // Try to find price-like arrays: arrays with 5-6 numeric elements
+            // Price arrays: [timestamp, open, high, low, close, volume?]
             const priceArrayPattern = /\[(\d{10,13}),\s*([\d.]+),\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*(\d+))?\]/g
             let priceMatch: RegExpExecArray | null
             while ((priceMatch = priceArrayPattern.exec(rawData)) !== null) {
@@ -360,16 +354,13 @@ class GoogleFinanceService {
         }
       }
 
-      // Strategy 2: If no embedded data found, attempt to extract from
-      // the chart's inline data (sometimes in a different format)
+      // Strategy 2: window.__data or window.chartData globals
       if (bars.length === 0) {
-        // Look for data in window.__data or similar global JS objects
         const windowDataMatch = html.match(
           /(?:window\.__data|window\.chartData)\s*=\s*(\{[\s\S]*?\});/
         )
         if (windowDataMatch) {
           try {
-            // Attempt JSON parse (may fail if not valid JSON)
             const chartData = JSON.parse(windowDataMatch[1])
             if (Array.isArray(chartData?.prices)) {
               const startDate = new Date(period1)
@@ -393,14 +384,42 @@ class GoogleFinanceService {
         }
       }
 
-      // Sort by date ascending
+      // Strategy 3: Look for any numeric arrays that look like price data
+      // Google sometimes uses different data structures
+      if (bars.length === 0) {
+        // Match arrays of arrays with price-like numbers: [[date_int, price, price, price, price], ...]
+        const nestedArrayPattern = /\[\[(\d{8}),\s*([\d.]+),\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*(\d+))?\]/g
+        let nestedMatch: RegExpExecArray | null
+        while ((nestedMatch = nestedArrayPattern.exec(html)) !== null) {
+          const dateStr = nestedMatch[1] // e.g. 20240315
+          const year = parseInt(dateStr.substring(0, 4))
+          const month = parseInt(dateStr.substring(4, 6)) - 1
+          const day = parseInt(dateStr.substring(6, 8))
+          const date = new Date(year, month, day)
+          const startDate = new Date(period1)
+
+          if (date >= startDate && year > 2000) {
+            bars.push({
+              date,
+              open: parseFloat(nestedMatch[2]),
+              high: parseFloat(nestedMatch[3]),
+              low: parseFloat(nestedMatch[4]),
+              close: parseFloat(nestedMatch[5]),
+              volume: nestedMatch[6] ? parseInt(nestedMatch[6]) : 0,
+            })
+          }
+        }
+      }
+
       bars.sort((a, b) => a.date.getTime() - b.date.getTime())
 
       if (bars.length === 0) {
-        Logger.warn(
-          '[GoogleFinance] No historical data extracted for %s. Google Finance may not embed chart data in HTML.',
+        Logger.debug(
+          '[GoogleFinance] No embedded chart data for %s — history will build from daily syncs',
           symbol
         )
+      } else {
+        Logger.info('[GoogleFinance] Extracted %d historical bars for %s', bars.length, symbol)
       }
 
       return bars
@@ -418,10 +437,6 @@ class GoogleFinanceService {
 
       const results: Array<{ symbol: string; name: string; exchange: string }> = []
 
-      // Google Finance search results appear as list items with ticker info
-      // Each result typically has a symbol, name, and exchange
-
-      // Primary selector: finance search result items
       $('a[href*="/finance/quote/"]').each((_i, el) => {
         const href = $(el).attr('href') || ''
         const quoteMatch = href.match(/\/finance\/quote\/([^:]+):([^?&#/]+)/)
@@ -430,26 +445,18 @@ class GoogleFinanceService {
         const sym = decodeURIComponent(quoteMatch[1])
         const exch = decodeURIComponent(quoteMatch[2])
 
-        // Extract the displayed name from the link content
         const textParts = $(el).text().trim().split('\n').map((s) => s.trim()).filter(Boolean)
         const name = textParts.find((t) => t !== sym && t !== exch && t.length > 1) || sym
 
-        // Avoid duplicates
         if (!results.some((r) => r.symbol === sym && r.exchange === exch)) {
-          results.push({
-            symbol: sym,
-            name,
-            exchange: exch,
-          })
+          results.push({ symbol: sym, name, exchange: exch })
         }
       })
 
-      // Also try the AF_initDataCallback approach for search results
       if (results.length === 0) {
         const callbackPattern = /AF_initDataCallback\(\{[^}]*data:\s*(\[[\s\S]*?\])\s*\}\s*\)/g
         let cbMatch: RegExpExecArray | null
         while ((cbMatch = callbackPattern.exec(html)) !== null) {
-          // Look for ticker-like entries: ["AAPL", "Apple Inc", "NASDAQ", ...]
           const tickerPattern = /"([A-Z]{1,5})"\s*,\s*"([^"]{2,80})"\s*,\s*"([A-Z]{2,15})"/g
           let tickerMatch: RegExpExecArray | null
           while ((tickerMatch = tickerPattern.exec(cbMatch[1])) !== null) {
@@ -471,7 +478,6 @@ class GoogleFinanceService {
   }
 
   public async syncTicker(symbol: string): Promise<Ticker> {
-    // Pass existing exchange from DB if available to skip exchange probing
     const existing = await Ticker.findBy('symbol', symbol.toUpperCase())
     const quote = await this.fetchQuote(symbol, existing?.exchange || undefined)
     if (!quote) throw new Error(`Could not fetch data for ${symbol}`)
@@ -518,7 +524,6 @@ class GoogleFinanceService {
     for (let i = 0; i < symbols.length; i++) {
       const symbol = symbols[i]
       try {
-        // Use existing exchange from DB to avoid extra search requests
         const existing = await Ticker.findBy('symbol', symbol.toUpperCase())
         const knownExchange = existing?.exchange || undefined
         const quote = await this.fetchQuote(symbol, knownExchange)
@@ -548,11 +553,22 @@ class GoogleFinanceService {
     return synced
   }
 
+  /**
+   * Sync historical snapshots for a ticker.
+   *
+   * Two-pronged approach:
+   * 1. Try to extract embedded chart data from Google Finance page (backfill)
+   * 2. Always upsert today's snapshot from the current price (daily accumulation)
+   *
+   * Over time, daily syncs (cron every 30 min) build up a complete price history.
+   */
   public async syncHistoricalSnapshots(ticker: Ticker, days: number = 90) {
+    let created = 0
+
+    // Attempt to extract embedded historical data from the quote page
     const period1 = DateTime.now().minus({ days }).toISODate()!
     const history = await this.fetchHistorical(ticker.symbol, period1, undefined, ticker.exchange || undefined)
 
-    let created = 0
     for (const bar of history) {
       const date = DateTime.fromJSDate(bar.date).toISODate()!
       const existing = await TickerSnapshot.query()
@@ -570,6 +586,42 @@ class GoogleFinanceService {
           volume: bar.volume,
           changePercent: bar.open ? ((bar.close - bar.open) / bar.open) * 100 : null,
           date,
+        })
+        created++
+      }
+    }
+
+    // Always save/update today's snapshot from current price
+    if (ticker.currentPrice) {
+      const today = DateTime.now().toISODate()!
+      const todaySnap = await TickerSnapshot.query()
+        .where('ticker_id', ticker.id)
+        .where('date', today)
+        .first()
+
+      if (todaySnap) {
+        // Update: track intraday high/low, always update close
+        todaySnap.close = ticker.currentPrice
+        if (!todaySnap.high || ticker.currentPrice > todaySnap.high) {
+          todaySnap.high = ticker.currentPrice
+        }
+        if (!todaySnap.low || ticker.currentPrice < todaySnap.low) {
+          todaySnap.low = ticker.currentPrice
+        }
+        todaySnap.changePercent = todaySnap.open
+          ? ((ticker.currentPrice - todaySnap.open) / todaySnap.open) * 100
+          : null
+        await todaySnap.save()
+      } else {
+        await TickerSnapshot.create({
+          tickerId: ticker.id,
+          open: ticker.currentPrice,
+          high: ticker.currentPrice,
+          low: ticker.currentPrice,
+          close: ticker.currentPrice,
+          volume: null,
+          changePercent: 0,
+          date: today,
         })
         created++
       }

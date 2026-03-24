@@ -14,6 +14,7 @@
     { href: '/articles', label: 'Articles' },
     { href: '/tickers', label: 'Tickers' },
     { href: '/analysis', label: 'Analysis' },
+    { href: '/signals', label: 'Signals' },
     { href: '/trading', label: 'Trading' },
     { href: '/logs', label: 'Logs' },
   ];

@@ -124,3 +124,74 @@ describe('OrderEntry', () => {
     expect(submitBtn).toBeDisabled();
   });
 });
+
+describe('OrderEntry - Kraken broker', () => {
+  it('renders Mode field when broker is kraken', () => {
+    render(OrderEntry, { props: { symbol: 'BTC-USD', broker: 'kraken' } });
+    expect(screen.getByLabelText('Mode')).toBeInTheDocument();
+    expect(screen.getByText('Spot')).toBeInTheDocument();
+    expect(screen.getByText('Margin')).toBeInTheDocument();
+    expect(screen.getByText('Futures')).toBeInTheDocument();
+  });
+
+  it('does not render Mode field for IBKR broker', () => {
+    render(OrderEntry, { props: { symbol: 'AAPL', broker: 'ibkr' } });
+    expect(screen.queryByLabelText('Mode')).not.toBeInTheDocument();
+  });
+
+  it('does not show At Open time-in-force for kraken', () => {
+    render(OrderEntry, { props: { symbol: 'BTC-USD', broker: 'kraken' } });
+    expect(screen.queryByText('At Open')).not.toBeInTheDocument();
+  });
+
+  it('shows At Open time-in-force for ibkr', () => {
+    render(OrderEntry, { props: { symbol: 'AAPL', broker: 'ibkr' } });
+    expect(screen.getByText('At Open')).toBeInTheDocument();
+  });
+
+  it('shows leverage options when margin mode selected', async () => {
+    render(OrderEntry, { props: { symbol: 'BTC-USD', broker: 'kraken' } });
+    const modeSelect = screen.getByLabelText('Mode');
+    await fireEvent.change(modeSelect, { target: { value: 'margin' } });
+
+    expect(screen.getByLabelText('Leverage')).toBeInTheDocument();
+    expect(screen.getByText('2x')).toBeInTheDocument();
+    expect(screen.getByText('5x')).toBeInTheDocument();
+  });
+
+  it('sends broker=kraken and exchange=futures in payload', async () => {
+    vi.mocked(api.placeOrder).mockResolvedValue({ trade: {}, message: 'ok' });
+
+    render(OrderEntry, { props: { symbol: 'BTC-USD', broker: 'kraken' } });
+    const modeSelect = screen.getByLabelText('Mode');
+    await fireEvent.change(modeSelect, { target: { value: 'futures' } });
+
+    const submitBtn = screen.getByText('BUY 1 BTC-USD');
+    await fireEvent.click(submitBtn);
+
+    expect(api.placeOrder).toHaveBeenCalledWith(expect.objectContaining({
+      symbol: 'BTC-USD',
+      broker: 'kraken',
+      exchange: 'futures',
+    }));
+  });
+
+  it('sends leverage value as exchange for margin mode', async () => {
+    vi.mocked(api.placeOrder).mockResolvedValue({ trade: {}, message: 'ok' });
+
+    render(OrderEntry, { props: { symbol: 'ETH-USD', broker: 'kraken' } });
+    const modeSelect = screen.getByLabelText('Mode');
+    await fireEvent.change(modeSelect, { target: { value: 'margin' } });
+
+    const leverageSelect = screen.getByLabelText('Leverage');
+    await fireEvent.change(leverageSelect, { target: { value: '3x' } });
+
+    const submitBtn = screen.getByText('BUY 1 ETH-USD');
+    await fireEvent.click(submitBtn);
+
+    expect(api.placeOrder).toHaveBeenCalledWith(expect.objectContaining({
+      broker: 'kraken',
+      exchange: '3x',
+    }));
+  });
+});

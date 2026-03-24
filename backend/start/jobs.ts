@@ -35,13 +35,13 @@ async function boot() {
       await QueueService.addJob(QUEUE_NAMES.SCRAPE_NEWS, {})
     })
 
-    // Schedule ticker refresh every 4 hours
-    cron.schedule('0 */4 * * *', async () => {
+    // Schedule ticker refresh every 30 minutes
+    cron.schedule('*/30 * * * *', async () => {
       Logger.info('[Cron] Triggering ticker refresh')
       await queueAllTickerRefresh()
     })
 
-    Logger.info('Cron jobs scheduled (scrape every %d min, ticker refresh every 4h)', interval)
+    Logger.info('Cron jobs scheduled (scrape every %d min, ticker refresh every 30min)', interval)
   } catch (error) {
     Logger.error('Failed to boot jobs: %s', error.message)
   }
