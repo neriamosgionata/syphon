@@ -10,8 +10,10 @@ export default class QuantController {
     return response.json(analysis)
   }
 
-  public async screener({ response }: HttpContextContract) {
-    const result = await QuantEngine.screener()
+  public async screener({ request, response }: HttpContextContract) {
+    const days = Number(request.input('days', 365))
+    const minArticles = Number(request.input('min_articles', 0))
+    const result = await QuantEngine.screener({ days, minArticles })
     return response.json(result)
   }
 }

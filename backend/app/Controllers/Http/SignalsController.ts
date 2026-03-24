@@ -1,12 +1,12 @@
 import { HttpContextContract } from '@ioc:Adonis/Core/HttpContext'
-import TradingSignalService from 'App/Services/TradingSignalService'
+import QuantEngine from 'App/Services/QuantEngine'
 
 export default class SignalsController {
   public async index({ request }: HttpContextContract) {
     const days = Number(request.input('days', 30))
     const minArticles = Number(request.input('min_articles', 0))
 
-    const signals = await TradingSignalService.generateSignals({ days, minArticles })
+    const signals = await QuantEngine.generateSignals({ days, minArticles })
 
     return {
       generated_at: new Date().toISOString(),

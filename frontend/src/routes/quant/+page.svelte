@@ -9,16 +9,20 @@
   let error = $state('');
   let signalFilter = $state('');
   let patternFilter = $state('');
+  let regimeFilter = $state('');
   let sortBy = $state('composite_score');
   let sortDir = $state<'desc' | 'asc'>('desc');
   let searchQuery = $state('');
   let selectedSymbol = $state('');
+  let minArticles = $state('0');
 
   async function loadScreener() {
     loading = true;
     error = '';
     try {
-      screenerData = await api.quantScreener();
+      const params: Record<string, string> = {};
+      if (minArticles !== '0') params.min_articles = minArticles;
+      screenerData = await api.quantScreener(params);
     } catch (e: any) {
       error = e.message;
     }
@@ -46,6 +50,7 @@
     let list = screenerData.tickers;
     if (signalFilter) list = list.filter((t: any) => t.signal === signalFilter);
     if (patternFilter) list = list.filter((t: any) => t.patterns.includes(patternFilter));
+    if (regimeFilter) list = list.filter((t: any) => t.regime === regimeFilter);
     if (searchQuery) {
       const q = searchQuery.toUpperCase();
       list = list.filter((t: any) => t.symbol.includes(q) || t.name.toUpperCase().includes(q));
@@ -76,6 +81,15 @@
       for (const p of t.patterns) set.add(p);
     }
     return [...set].sort();
+  });
+
+  let regimeCounts = $derived(() => {
+    if (!screenerData?.tickers) return {};
+    const counts: Record<string, number> = {};
+    for (const t of screenerData.tickers) {
+      counts[t.regime] = (counts[t.regime] || 0) + 1;
+    }
+    return counts;
   });
 
   function toggleSort(col: string) {
@@ -118,27 +132,60 @@
     return p.replace(/_/g, ' ');
   }
 
+  function regimeLabel(r: string) {
+    return r.replace(/_/g, ' ');
+  }
+
+  function regimeColor(r: string) {
+    if (r === 'trending_up') return 'var(--green)';
+    if (r === 'trending_down') return 'var(--red)';
+    if (r === 'volatile') return 'var(--yellow)';
+    return 'var(--text-muted)';
+  }
+
+  function convictionBar(c: number) {
+    return Math.round(c * 100);
+  }
+
+  function sentimentColor(s: number | null) {
+    if (s === null) return 'var(--text-muted)';
+    if (s > 0.1) return 'var(--green)';
+    if (s < -0.1) return 'var(--red)';
+    return 'var(--text-muted)';
+  }
+
   onMount(loadScreener);
 </script>
 
-<svelte:head><title>Quant Analysis | Syphon</title></svelte:head>
+<svelte:head><title>Quant Engine | Syphon</title></svelte:head>
 
 <div class="container page">
   <header class="page-header">
     <div>
-      <h1>Quant Engine</h1>
-      <p class="subtitle">Technical indicators, statistical risk metrics, and pattern detection across {screenerData?.count || 0} tickers</p>
+      <h1>Unified Quant Engine</h1>
+      <p class="subtitle">Technical analysis, sentiment scoring, risk metrics, and trading recommendations across {screenerData?.count || 0} tickers</p>
     </div>
-    <button class="btn" onclick={loadScreener} disabled={loading}>
-      {loading ? 'Analyzing...' : 'Refresh'}
-    </button>
+    <div class="header-controls">
+      <div class="control-group">
+        <label for="min-articles">Min Articles</label>
+        <select id="min-articles" bind:value={minArticles} onchange={loadScreener}>
+          <option value="0">All</option>
+          <option value="1">1+</option>
+          <option value="3">3+</option>
+          <option value="5">5+</option>
+        </select>
+      </div>
+      <button class="btn" onclick={loadScreener} disabled={loading}>
+        {loading ? 'Analyzing...' : 'Refresh'}
+      </button>
+    </div>
   </header>
 
   {#if error}
     <div class="alert error">{error}</div>
   {/if}
 
-  <!-- Signal summary chips -->
+  <!-- Signal + Regime chips -->
   {#if screenerData}
     <div class="signal-chips">
       <button class="chip" class:active={!signalFilter} onclick={() => signalFilter = ''}>
@@ -156,6 +203,17 @@
             {sig.replace('_', ' ')} ({count})
           </button>
         {/if}
+      {/each}
+      <span class="chip-divider"></span>
+      {#each Object.entries(regimeCounts()) as [regime, count]}
+        <button
+          class="chip regime-chip"
+          class:active={regimeFilter === regime}
+          style="--chip-color: {regimeColor(regime)}"
+          onclick={() => regimeFilter = regimeFilter === regime ? '' : regime}
+        >
+          {regimeLabel(regime)} ({count})
+        </button>
       {/each}
     </div>
 
@@ -182,16 +240,16 @@
             <th class="sticky-col" onclick={() => toggleSort('symbol')}>Symbol {sortBy === 'symbol' ? (sortDir === 'desc' ? 'v' : '^') : ''}</th>
             <th onclick={() => toggleSort('composite_score')}>Score {sortBy === 'composite_score' ? (sortDir === 'desc' ? 'v' : '^') : ''}</th>
             <th>Signal</th>
+            <th onclick={() => toggleSort('conviction')}>Conv. {sortBy === 'conviction' ? (sortDir === 'desc' ? 'v' : '^') : ''}</th>
+            <th>Regime</th>
+            <th onclick={() => toggleSort('sentiment_score')}>Sent. {sortBy === 'sentiment_score' ? (sortDir === 'desc' ? 'v' : '^') : ''}</th>
+            <th onclick={() => toggleSort('article_count')}>News {sortBy === 'article_count' ? (sortDir === 'desc' ? 'v' : '^') : ''}</th>
             <th onclick={() => toggleSort('rsi14')}>RSI {sortBy === 'rsi14' ? (sortDir === 'desc' ? 'v' : '^') : ''}</th>
             <th onclick={() => toggleSort('macd_histogram')}>MACD {sortBy === 'macd_histogram' ? (sortDir === 'desc' ? 'v' : '^') : ''}</th>
             <th>Trend</th>
-            <th onclick={() => toggleSort('bollinger_position')}>BB% {sortBy === 'bollinger_position' ? (sortDir === 'desc' ? 'v' : '^') : ''}</th>
-            <th onclick={() => toggleSort('volatility20d')}>Vol {sortBy === 'volatility20d' ? (sortDir === 'desc' ? 'v' : '^') : ''}</th>
-            <th onclick={() => toggleSort('volume_ratio')}>Vol.R {sortBy === 'volume_ratio' ? (sortDir === 'desc' ? 'v' : '^') : ''}</th>
             <th onclick={() => toggleSort('return20d')}>Ret20d {sortBy === 'return20d' ? (sortDir === 'desc' ? 'v' : '^') : ''}</th>
             <th onclick={() => toggleSort('sharpe')}>Sharpe {sortBy === 'sharpe' ? (sortDir === 'desc' ? 'v' : '^') : ''}</th>
             <th onclick={() => toggleSort('beta')}>Beta {sortBy === 'beta' ? (sortDir === 'desc' ? 'v' : '^') : ''}</th>
-            <th onclick={() => toggleSort('max_drawdown')}>MaxDD {sortBy === 'max_drawdown' ? (sortDir === 'desc' ? 'v' : '^') : ''}</th>
             <th>Patterns</th>
           </tr>
         </thead>
@@ -210,6 +268,15 @@
                 </div>
               </td>
               <td><span class="signal-badge" style="color:{signalColor(t.signal)}">{t.signal.replace('_', ' ')}</span></td>
+              <td>
+                <div class="conviction-cell">
+                  <div class="conviction-bar-bg"><div class="conviction-bar-fill" style="width:{convictionBar(t.conviction)}%; background:{t.conviction > 0.5 ? 'var(--accent)' : 'var(--text-muted)'}"></div></div>
+                  <span class="conviction-val">{(t.conviction * 100).toFixed(0)}%</span>
+                </div>
+              </td>
+              <td><span class="regime-tag" style="color:{regimeColor(t.regime)}">{regimeLabel(t.regime)}</span></td>
+              <td style="color:{sentimentColor(t.sentiment_score)}">{t.sentiment_score !== null ? (t.sentiment_score >= 0 ? '+' : '') + t.sentiment_score.toFixed(3) : '-'}</td>
+              <td class="news-col">{t.article_count || 0}</td>
               <td style="color:{rsiColor(t.rsi14)}">{fmtNum(t.rsi14, 1)}</td>
               <td style="color:{t.macd_histogram > 0 ? 'var(--green)' : t.macd_histogram < 0 ? 'var(--red)' : 'var(--text-muted)'}">{fmtNum(t.macd_histogram)}</td>
               <td>
@@ -217,13 +284,9 @@
                 {:else if t.sma_trend === 'bearish'}<span class="trend-down">DN</span>
                 {:else}<span class="trend-flat">--</span>{/if}
               </td>
-              <td>{fmtNum(t.bollinger_position)}</td>
-              <td>{t.volatility20d ? t.volatility20d.toFixed(1) + '%' : '-'}</td>
-              <td style="color:{(t.volume_ratio || 0) > 1.5 ? 'var(--yellow)' : 'var(--text-muted)'}">{fmtNum(t.volume_ratio, 1)}x</td>
               <td style="color:{(t.return20d || 0) >= 0 ? 'var(--green)' : 'var(--red)'}">{fmtPct(t.return20d)}</td>
               <td style="color:{(t.sharpe || 0) > 1 ? 'var(--green)' : (t.sharpe || 0) < 0 ? 'var(--red)' : 'var(--text-muted)'}">{fmtNum(t.sharpe)}</td>
               <td>{fmtNum(t.beta)}</td>
-              <td style="color:var(--red)">{t.max_drawdown ? t.max_drawdown.toFixed(1) + '%' : '-'}</td>
               <td class="patterns-cell">
                 {#each t.patterns.slice(0, 3) as p}
                   <span class="pattern-tag">{patternLabel(p)}</span>
@@ -251,6 +314,43 @@
             <span class="signal-label" style="color:{signalColor(detail.quantSignal)}">{detail.quantSignal.replace('_', ' ')}</span>
           </div>
         </div>
+
+        <!-- Recommendation Banner -->
+        {#if detail.recommendation}
+          <div class="recommendation-banner" style="border-color:{signalColor(detail.recommendation.action === 'hold' ? 'neutral' : detail.recommendation.action)}">
+            <div class="rec-header">
+              <span class="rec-action" style="color:{signalColor(detail.recommendation.action === 'hold' ? 'neutral' : detail.recommendation.action)}">{detail.recommendation.action.replace('_', ' ').toUpperCase()}</span>
+              <span class="rec-regime" style="color:{regimeColor(detail.recommendation.regime)}">{regimeLabel(detail.recommendation.regime)}</span>
+              <span class="rec-conviction">Conviction: {(detail.recommendation.conviction * 100).toFixed(0)}%</span>
+            </div>
+            <div class="rec-details">
+              {#if detail.recommendation.positionSize > 0}
+                <span>Size: {(detail.recommendation.positionSize * 100).toFixed(0)}%</span>
+              {/if}
+              {#if detail.recommendation.stopLoss}
+                <span>SL: ${detail.recommendation.stopLoss}</span>
+              {/if}
+              {#if detail.recommendation.takeProfit}
+                <span>TP: ${detail.recommendation.takeProfit}</span>
+              {/if}
+              {#if detail.recommendation.riskRewardRatio}
+                <span>R:R {detail.recommendation.riskRewardRatio}x</span>
+              {/if}
+            </div>
+          </div>
+        {/if}
+
+        <!-- Sentiment Section -->
+        {#if detail.sentiment}
+          <div class="detail-section sentiment-section">
+            <h3>Sentiment</h3>
+            <div class="kv-grid">
+              <div class="kv"><span>Articles</span><span>{detail.sentiment.totalArticles}</span></div>
+              <div class="kv"><span>Avg Score</span><span style="color:{sentimentColor(detail.sentiment.avgScore)}">{detail.sentiment.avgScore >= 0 ? '+' : ''}{detail.sentiment.avgScore.toFixed(3)}</span></div>
+              <div class="kv"><span>Trend</span><span style="color:{detail.sentiment.recentTrend > 0 ? 'var(--green)' : detail.sentiment.recentTrend < 0 ? 'var(--red)' : 'inherit'}">{detail.sentiment.recentTrend >= 0 ? '+' : ''}{detail.sentiment.recentTrend.toFixed(3)}</span></div>
+            </div>
+          </div>
+        {/if}
 
         <div class="detail-grid">
           <!-- Moving Averages -->
@@ -296,7 +396,6 @@
                 <div class="kv"><span>+DI / -DI</span><span>{fmtNum(detail.adx.plusDI, 1)} / {fmtNum(detail.adx.minusDI, 1)}</span></div>
               {/if}
             </div>
-            <!-- RSI gauge -->
             {#if detail.rsi14 !== null}
               <div class="gauge">
                 <div class="gauge-bar">
@@ -364,17 +463,53 @@
           </div>
         </div>
 
+        <!-- Score Breakdown -->
+        {#if detail.scoreBreakdown}
+          <div class="detail-section breakdown-section">
+            <h3>Score Breakdown</h3>
+            <div class="breakdown-grid">
+              {#each [
+                { label: 'RSI', value: detail.scoreBreakdown.rsi, weight: '10%' },
+                { label: 'MACD', value: detail.scoreBreakdown.macd, weight: '10%' },
+                { label: 'Bollinger', value: detail.scoreBreakdown.bollingerBands, weight: '7%' },
+                { label: 'Trend', value: detail.scoreBreakdown.trend, weight: '10%' },
+                { label: 'ADX', value: detail.scoreBreakdown.adx, weight: '7%' },
+                { label: 'Stochastic', value: detail.scoreBreakdown.stochastic, weight: '5%' },
+                { label: 'Momentum', value: detail.scoreBreakdown.momentum, weight: '8%' },
+                { label: 'Volume', value: detail.scoreBreakdown.volume, weight: '4%' },
+                { label: 'Patterns', value: detail.scoreBreakdown.patterns, weight: '4%' },
+                { label: 'Sentiment', value: detail.scoreBreakdown.sentiment, weight: '12%' },
+                { label: 'Sent. Trend', value: detail.scoreBreakdown.sentimentMomentum, weight: '5%' },
+                { label: 'News Vol.', value: detail.scoreBreakdown.newsVolume, weight: '3%' },
+                { label: 'Sharpe', value: detail.scoreBreakdown.sharpe, weight: '4%' },
+                { label: 'Beta', value: detail.scoreBreakdown.beta, weight: '3%' },
+                { label: 'P/E', value: detail.scoreBreakdown.pe, weight: '4%' },
+                { label: '52-Week', value: detail.scoreBreakdown.fiftyTwoWeek, weight: '4%' },
+              ] as item}
+                <div class="bd-item">
+                  <span class="bd-weight">{item.weight}</span>
+                  <span class="bd-label">{item.label}</span>
+                  <div class="bd-bar-bg">
+                    <div class="bd-bar-fill" style="width:{Math.abs(item.value) / 2}%; background:{item.value > 0 ? 'var(--green)' : item.value < 0 ? 'var(--red)' : 'var(--border)'}; margin-left:{item.value >= 0 ? '50%' : (50 - Math.abs(item.value) / 2) + '%'}"></div>
+                  </div>
+                  <span class="bd-val" style="color:{item.value > 0 ? 'var(--green)' : item.value < 0 ? 'var(--red)' : 'var(--text-muted)'}">{item.value > 0 ? '+' : ''}{item.value.toFixed(0)}</span>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
         <!-- Patterns -->
         {#if detail.patterns.length > 0}
           <div class="detail-section patterns-section">
             <h3>Detected Patterns</h3>
             <div class="patterns-list">
               {#each detail.patterns as p}
-                <div class="pattern-item {p.signal}">
+                <div class="pattern-item {p.type}">
                   <div class="pattern-head">
-                    <span class="pattern-name">{patternLabel(p.type)}</span>
-                    <span class="pattern-signal">{p.signal}</span>
-                    <div class="strength-bar"><div class="strength-fill" style="width:{p.strength}%; background:{p.signal === 'bullish' ? 'var(--green)' : p.signal === 'bearish' ? 'var(--red)' : 'var(--yellow)'}"></div></div>
+                    <span class="pattern-name">{patternLabel(p.name)}</span>
+                    <span class="pattern-signal">{p.type}</span>
+                    <div class="strength-bar"><div class="strength-fill" style="width:{p.strength * 100}%; background:{p.type === 'bullish' ? 'var(--green)' : p.type === 'bearish' ? 'var(--red)' : 'var(--yellow)'}"></div></div>
                   </div>
                   <p class="pattern-desc">{p.description}</p>
                 </div>
@@ -396,15 +531,20 @@
   .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; }
   .page-header h1 { font-size: 1.75rem; font-weight: 800; }
   .subtitle { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; }
+  .header-controls { display: flex; gap: 0.75rem; align-items: flex-end; }
+  .control-group { display: flex; flex-direction: column; gap: 0.2rem; }
+  .control-group label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; }
   .btn { padding: 0.5rem 1.25rem; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); border-radius: var(--radius); cursor: pointer; font-weight: 600; }
   .btn:hover { background: var(--bg-hover); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .alert.error { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: var(--red); padding: 0.75rem 1rem; border-radius: var(--radius); margin-bottom: 1rem; }
 
-  .signal-chips { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  .signal-chips { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
   .chip { padding: 0.35rem 0.85rem; border-radius: 20px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-muted); cursor: pointer; font-size: 0.8rem; font-weight: 600; text-transform: capitalize; }
   .chip.active { border-color: var(--chip-color, var(--accent)); color: var(--chip-color, var(--accent)); background: rgba(99,102,241,0.1); }
+  .chip-divider { width: 1px; height: 20px; background: var(--border); margin: 0 0.25rem; }
+  .regime-chip { font-size: 0.72rem; }
 
   .filters-row { display: flex; gap: 0.75rem; margin-bottom: 1rem; }
   .search-input { flex: 1; max-width: 300px; padding: 0.5rem 0.75rem; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 0.85rem; }
@@ -428,17 +568,35 @@
   .score-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
   .score-val { font-weight: 700; font-family: 'SF Mono', monospace; font-size: 0.8rem; min-width: 28px; text-align: right; }
 
+  .conviction-cell { display: flex; align-items: center; gap: 0.35rem; min-width: 70px; }
+  .conviction-bar-bg { flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .conviction-bar-fill { height: 100%; border-radius: 2px; }
+  .conviction-val { font-size: 0.72rem; font-family: 'SF Mono', monospace; color: var(--text-muted); min-width: 28px; }
+
   .signal-badge { font-weight: 700; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.03em; }
+  .regime-tag { font-size: 0.7rem; text-transform: capitalize; font-weight: 600; }
   .trend-up { color: var(--green); font-weight: 700; }
   .trend-down { color: var(--red); font-weight: 700; }
   .trend-flat { color: var(--text-muted); }
+  .news-col { font-weight: 600; font-family: 'SF Mono', monospace; font-size: 0.8rem; }
 
   .patterns-cell { display: flex; gap: 0.25rem; flex-wrap: wrap; }
   .pattern-tag { padding: 0.15rem 0.4rem; border-radius: 4px; background: var(--bg-hover); color: var(--text-muted); font-size: 0.65rem; text-transform: capitalize; }
 
+  /* Recommendation banner */
+  .recommendation-banner { border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; margin-bottom: 1.25rem; background: var(--bg-card); border-left-width: 3px; }
+  .rec-header { display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; }
+  .rec-action { font-size: 1.1rem; font-weight: 800; text-transform: uppercase; }
+  .rec-regime { font-size: 0.8rem; font-weight: 600; text-transform: capitalize; }
+  .rec-conviction { font-size: 0.8rem; color: var(--text-muted); margin-left: auto; }
+  .rec-details { display: flex; gap: 1rem; font-size: 0.82rem; color: var(--text-muted); font-family: 'SF Mono', monospace; }
+
+  /* Sentiment section */
+  .sentiment-section { margin-bottom: 1.25rem; }
+
   /* Detail overlay */
   .detail-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; display: flex; justify-content: flex-end; backdrop-filter: blur(2px); }
-  .detail-panel { width: 640px; max-width: 100vw; height: 100vh; overflow-y: auto; background: var(--bg); border-left: 1px solid var(--border); padding: 2rem; }
+  .detail-panel { width: 680px; max-width: 100vw; height: 100vh; overflow-y: auto; background: var(--bg); border-left: 1px solid var(--border); padding: 2rem; }
   .detail-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; }
   .detail-header h2 { font-size: 1.4rem; font-weight: 800; }
   .detail-name { font-weight: 400; color: var(--text-muted); font-size: 1rem; }
@@ -462,7 +620,6 @@
   .ma-badge.bearish { background: rgba(239,68,68,0.15); color: var(--red); }
   .ma-badge.neutral { background: rgba(107,114,128,0.15); color: var(--text-muted); }
 
-  /* RSI Gauge */
   .gauge { margin-top: 0.75rem; }
   .gauge-bar { position: relative; height: 8px; border-radius: 4px; display: flex; overflow: hidden; }
   .gauge-zone { height: 100%; }
@@ -474,9 +631,18 @@
 
   .trend-rising { color: var(--green); }
   .trend-falling { color: var(--red); }
-  .trend-flat { color: var(--text-muted); }
 
-  .patterns-section { grid-column: 1 / -1; }
+  /* Score Breakdown */
+  .breakdown-section { grid-column: 1 / -1; margin-top: 1.25rem; }
+  .breakdown-grid { display: flex; flex-direction: column; gap: 0.3rem; }
+  .bd-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; }
+  .bd-weight { font-family: 'SF Mono', monospace; color: var(--accent); font-weight: 700; min-width: 28px; font-size: 0.7rem; }
+  .bd-label { min-width: 80px; color: var(--text-muted); font-weight: 600; }
+  .bd-bar-bg { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; position: relative; }
+  .bd-bar-fill { height: 100%; border-radius: 3px; position: absolute; top: 0; }
+  .bd-val { font-family: 'SF Mono', monospace; font-weight: 600; min-width: 32px; text-align: right; }
+
+  .patterns-section { grid-column: 1 / -1; margin-top: 1.25rem; }
   .patterns-list { display: flex; flex-direction: column; gap: 0.5rem; }
   .pattern-item { padding: 0.6rem 0.75rem; border-radius: var(--radius); border-left: 3px solid var(--text-muted); background: var(--bg); }
   .pattern-item.bullish { border-left-color: var(--green); }
@@ -500,5 +666,6 @@
     .detail-grid { grid-template-columns: 1fr; }
     .filters-row { flex-direction: column; }
     .search-input { max-width: 100%; }
+    .page-header { flex-direction: column; gap: 1rem; }
   }
 </style>

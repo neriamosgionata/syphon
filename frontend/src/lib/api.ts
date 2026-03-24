@@ -112,11 +112,14 @@ export const api = {
   cancelOrder: (id: number) =>
     request<any>(`/trading/orders/${id}/cancel`, { method: 'POST' }),
 
-  // Quant
+  // Quant (unified engine — includes signals)
   quantAnalyze: (symbol: string) => request<any>(`/quant/${encodeURIComponent(symbol)}`),
-  quantScreener: () => request<any>('/quant/screener'),
+  quantScreener: (params?: Record<string, any>) => {
+    const qs = params ? new URLSearchParams(params).toString() : '';
+    return request<any>(`/quant/screener${qs ? `?${qs}` : ''}`);
+  },
 
-  // Signals
+  // Signals (legacy — delegates to quant engine)
   signals: (params?: Record<string, any>) => {
     const qs = params ? new URLSearchParams(params).toString() : '';
     return request<any>(`/signals${qs ? `?${qs}` : ''}`);

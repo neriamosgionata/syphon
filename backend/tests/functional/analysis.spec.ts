@@ -49,4 +49,38 @@ test.group('Analysis API', () => {
     const response = await client.get('/api/analysis/timeline').qs({ ticker: 'AAPL', days: 7 })
     response.assertStatus(200)
   })
+
+  test('GET /api/analysis/timeline returns array data', async ({ client, assert }) => {
+    const response = await client.get('/api/analysis/timeline').qs({ ticker: 'AAPL' })
+
+    response.assertStatus(200)
+    assert.isArray(response.body())
+  })
+
+  test('GET /api/analysis supports pagination', async ({ client, assert }) => {
+    const response = await client.get('/api/analysis').qs({ page: 1, limit: 5 })
+
+    response.assertStatus(200)
+    assert.equal(response.body().meta.per_page, 5)
+  })
+
+  test('GET /api/analysis supports bearish sentiment filter', async ({ client }) => {
+    const response = await client.get('/api/analysis').qs({ sentiment: 'bearish' })
+    response.assertStatus(200)
+  })
+
+  test('GET /api/analysis supports neutral sentiment filter', async ({ client }) => {
+    const response = await client.get('/api/analysis').qs({ sentiment: 'neutral' })
+    response.assertStatus(200)
+  })
+
+  test('GET /api/analysis stats has correct structure', async ({ client, assert }) => {
+    const response = await client.get('/api/analysis/stats')
+
+    response.assertStatus(200)
+    const body = response.body()
+    assert.isObject(body.overall)
+    assert.isArray(body.byTicker)
+    assert.isArray(body.recent)
+  })
 })
