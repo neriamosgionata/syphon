@@ -89,7 +89,7 @@
     </div>
   </div>
 
-  {#if loading}
+  {#if loading && !articles}
     <div class="loading">Loading articles...</div>
   {:else if articles?.data?.length > 0}
     <div class="articles-grid">

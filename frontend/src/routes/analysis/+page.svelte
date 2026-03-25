@@ -120,7 +120,7 @@
     </div>
   </div>
 
-  {#if loading}
+  {#if loading && !analyses}
     <div class="loading">Loading analyses...</div>
   {:else}
     <div class="card">

@@ -609,6 +609,33 @@ class GoogleFinanceService {
           date,
         })
         created++
+      } else {
+        // Update existing snapshot if new data has distinct OHLC values (not close-only)
+        const hasRealOHLC = bar.open !== bar.close || bar.high !== bar.close || bar.low !== bar.close
+        const existingIsCloseOnly =
+          existing.open === existing.close &&
+          existing.high === existing.close &&
+          existing.low === existing.close
+
+        let updated = false
+
+        if (hasRealOHLC && existingIsCloseOnly) {
+          existing.open = bar.open
+          existing.high = bar.high
+          existing.low = bar.low
+          existing.close = bar.close
+          existing.changePercent = bar.open ? ((bar.close - bar.open) / bar.open) * 100 : null
+          updated = true
+        }
+
+        if (bar.volume > 0 && (!existing.volume || existing.volume === 0)) {
+          existing.volume = bar.volume
+          updated = true
+        }
+
+        if (updated) {
+          await existing.save()
+        }
       }
     }
 

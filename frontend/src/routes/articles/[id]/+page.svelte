@@ -62,12 +62,12 @@
               <div>
                 <span class="score-label">Score</span>
                 <span class="score-value" class:positive={(a.sentiment_score ?? a.sentimentScore) > 0} class:negative={(a.sentiment_score ?? a.sentimentScore) < 0}>
-                  {(a.sentiment_score ?? a.sentimentScore)?.toFixed(3)}
+                  {Number(a.sentiment_score ?? a.sentimentScore).toFixed(3)}
                 </span>
               </div>
               <div>
                 <span class="score-label">Relevance</span>
-                <span class="score-value">{(a.relevance_score ?? a.relevanceScore)?.toFixed(3)}</span>
+                <span class="score-value">{Number(a.relevance_score ?? a.relevanceScore).toFixed(3)}</span>
               </div>
               <div>
                 <span class="score-label">Confidence</span>
@@ -76,7 +76,7 @@
               {#if a.ticker_price_at_analysis ?? a.tickerPriceAtAnalysis}
                 <div>
                   <span class="score-label">Price at Analysis</span>
-                  <span class="score-value">${(a.ticker_price_at_analysis ?? a.tickerPriceAtAnalysis)?.toFixed(2)}</span>
+                  <span class="score-value">${Number(a.ticker_price_at_analysis ?? a.tickerPriceAtAnalysis).toFixed(2)}</span>
                 </div>
               {/if}
             </div>

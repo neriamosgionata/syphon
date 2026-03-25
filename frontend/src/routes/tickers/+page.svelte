@@ -94,6 +94,22 @@
     await api.refreshTicker(symbol).catch(() => {});
   }
 
+  let backfilling = $state(false);
+  let backfillMsg = $state('');
+
+  async function backfillAll() {
+    backfilling = true;
+    backfillMsg = '';
+    try {
+      const res = await api.backfillTickers();
+      backfillMsg = res.message || `Backfill queued for ${res.queued} tickers`;
+    } catch {
+      backfillMsg = 'Failed to start backfill';
+    }
+    backfilling = false;
+    setTimeout(() => backfillMsg = '', 5000);
+  }
+
   onMount(() => {
     load();
     return onSSE('ticker_match', () => load());
@@ -105,7 +121,17 @@
 </svelte:head>
 
 <div class="page">
-  <h1 style="margin-bottom: 1.5rem;">Tickers</h1>
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+    <h1>Tickers</h1>
+    <div style="display: flex; align-items: center; gap: 0.75rem;">
+      {#if backfillMsg}
+        <span class="backfill-msg">{backfillMsg}</span>
+      {/if}
+      <button class="btn btn-primary" disabled={backfilling} onclick={backfillAll}>
+        {backfilling ? 'Backfilling...' : 'Backfill History'}
+      </button>
+    </div>
+  </div>
 
   <div class="card" style="margin-bottom: 1.5rem;">
     <h3 style="margin-bottom: 0.75rem;">Add Ticker</h3>
@@ -300,5 +326,9 @@
   .time {
     color: var(--text-muted);
     font-size: 0.85rem;
+  }
+  .backfill-msg {
+    font-size: 0.85rem;
+    color: var(--accent);
   }
 </style>

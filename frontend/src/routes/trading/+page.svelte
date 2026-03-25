@@ -136,7 +136,7 @@
     </div>
   </div>
 
-  {#if loading}
+  {#if loading && !status && !orders}
     <div class="loading">Loading trading data...</div>
   {:else}
     <!-- Broker Tabs -->
