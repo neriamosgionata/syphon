@@ -58,12 +58,21 @@ export interface JobFinishedNotification {
   timestamp: string
 }
 
+export interface AlgoUpdateNotification {
+  type: 'algo_update'
+  event: string
+  message: string
+  runId?: string
+  timestamp: string
+}
+
 export type AppNotification =
   | TickerMatchNotification
   | ScrapeCompleteNotification
   | OrderUpdateNotification
   | JobProgressNotification
   | JobFinishedNotification
+  | AlgoUpdateNotification
 
 class NotificationService {
   private emitter = new EventEmitter()

@@ -1,8 +1,8 @@
 import Parser from 'rss-parser'
 import * as cheerio from 'cheerio'
 import Logger from '@ioc:Adonis/Core/Logger'
-import Article from 'App/Models/Article'
 import ScrapeSource from 'App/Models/ScrapeSource'
+import MeilisearchService from './MeilisearchService'
 import { DateTime } from 'luxon'
 
 const rssParser = new Parser({
@@ -164,17 +164,19 @@ class ScraperService {
     let saved = 0
 
     for (const data of articles) {
-      const existingQuery = Article.query()
+      // Dedup by externalId or URL
+      let existing: any = null
       if (data.externalId) {
-        existingQuery.where('external_id', data.externalId)
-      } else {
-        existingQuery.where('url', data.url)
+        existing = await MeilisearchService.findArticleByExternalId(data.externalId)
       }
-      const existing = await existingQuery.first()
+      if (!existing) {
+        existing = await MeilisearchService.findArticleByUrl(data.url)
+      }
 
       if (!existing) {
-        await Article.create({
+        await MeilisearchService.saveArticle({
           ...data,
+          publishedAt: data.publishedAt?.toISO() || null,
           sourceName: source.name,
           scrapeSourceId: source.id,
           isAnalyzed: false,

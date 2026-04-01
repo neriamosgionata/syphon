@@ -1,0 +1,57 @@
+# TradingTransformer Configuration
+
+data:
+  pairs:
+    - XXBTZUSD     # BTC/USD
+    - XETHZUSD     # ETH/USD
+    - SOLUSD       # SOL/USD
+    - XRPUSD       # XRP/USD
+    - ADAUSD       # ADA/USD
+  interval: 5                 # 5-minute bars
+  seq_len: 120                # 10 hours lookback
+  backfill_days: 90           # Days of history to fetch
+  data_dir: ./data            # Parquet file storage
+
+features:
+  num_features: 40
+  direction_threshold: 0.003  # 0.3% for up/down label
+
+model:
+  d_model: 128
+  nhead: 8
+  num_layers: 4
+  dim_feedforward: 256
+  dropout: 0.1
+
+training:
+  batch_size: 256
+  epochs: 100
+  lr: 1.0e-4
+  weight_decay: 1.0e-5
+  max_grad_norm: 1.0
+  early_stopping_patience: 10
+  walk_forward_train_days: 30
+  walk_forward_val_days: 7
+  loss_weights:
+    direction: 1.0
+    return_30m: 0.5
+    return_1h: 1.0
+    return_3h: 1.5
+    confidence: 0.3
+
+targets:
+  horizons:
+    - 6    # 30 min (6 × 5-min bars)
+    - 12   # 1 hour
+    - 36   # 3 hours
+
+inference:
+  port: 8000
+  model_dir: ./checkpoints
+
+database:
+  host: ${MYSQL_HOST:-127.0.0.1}
+  port: ${MYSQL_PORT:-3307}
+  user: ${MYSQL_USER:-syphon}
+  password: ${MYSQL_PASSWORD:-syphon_pass}
+  database: ${MYSQL_DATABASE:-syphon}

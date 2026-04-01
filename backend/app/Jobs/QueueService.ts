@@ -7,8 +7,10 @@ export const QUEUE_NAMES = {
   SCRAPE_NEWS: 'scrape-news',
   ANALYZE_ARTICLE: 'analyze-article',
   FETCH_TICKER: 'fetch-ticker',
+  BACKFILL_NEWS: 'backfill-news',
   SUBMIT_ORDER: 'submit-order',
   MONITOR_ORDER: 'monitor-order',
+  ALGO_TRADING: 'algo-trading',
 } as const
 
 const connection = {
@@ -197,6 +199,33 @@ class QueueService {
     if (!job) return false
     await job.remove()
     return true
+  }
+
+  public async cancelJob(queueName: string, jobId: string): Promise<{ cancelled: boolean; state: string }> {
+    const queue = this.getQueue(queueName)
+    const job = await queue.getJob(jobId)
+    if (!job) return { cancelled: false, state: 'not_found' }
+
+    const state = await job.getState()
+
+    if (state === 'waiting' || state === 'delayed') {
+      await job.remove()
+      return { cancelled: true, state }
+    }
+
+    if (state === 'active') {
+      // For active jobs: move to failed with cancellation error
+      try {
+        await job.moveToFailed(new Error('Cancelled by user'), '0', false)
+        return { cancelled: true, state }
+      } catch {
+        // Lock token mismatch — discard so it won't retry, then let it finish
+        await job.discard()
+        return { cancelled: true, state: 'discarded' }
+      }
+    }
+
+    return { cancelled: false, state }
   }
 
   public async drainAll() {

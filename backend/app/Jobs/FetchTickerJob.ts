@@ -9,12 +9,12 @@ export async function processFetchTicker(job: Job) {
 
   // Backfill-only mode: just download historical data, skip quote refresh
   if (backfillOnly && symbol) {
-    Logger.info('[FetchTicker] Backfill-only for %s (%d days)', symbol, backfillDays || 365)
+    Logger.info('[FetchTicker] Backfill-only for %s (%d days)', symbol, backfillDays || 1825)
     await job.updateProgress({ percent: 10, stage: 'Backfilling', detail: symbol })
     const ticker = await Ticker.findBy('symbol', symbol.toUpperCase())
     if (!ticker) throw new Error(`Ticker ${symbol} not found`)
 
-    const created = await FinanceService.syncHistoricalSnapshots(ticker, backfillDays || 365)
+    const created = await FinanceService.syncHistoricalSnapshots(ticker, backfillDays || 1825)
     await job.updateProgress({ percent: 100, stage: 'Complete', detail: `${symbol}: ${created} snapshots` })
     Logger.info('[FetchTicker] Backfill complete for %s: %d new snapshots', symbol, created)
     return { symbol, snapshotsCreated: created, backfillOnly: true }

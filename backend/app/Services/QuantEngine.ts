@@ -1,7 +1,6 @@
 import Logger from '@ioc:Adonis/Core/Logger'
 import Ticker from 'App/Models/Ticker'
-import TickerSnapshot from 'App/Models/TickerSnapshot'
-import Database from '@ioc:Adonis/Lucid/Database'
+import MeilisearchService from './MeilisearchService'
 
 // ─── Data Types ──────────────────────────────────────────────
 
@@ -1056,12 +1055,10 @@ class QuantEngineService {
     const spy = await Ticker.findBy('symbol', 'SPY')
     if (!spy) return []
 
-    const snapshots = await TickerSnapshot.query()
-      .where('ticker_id', spy.id)
-      .orderBy('date', 'asc')
+    const snapshots = await MeilisearchService.getSnapshotsForTicker(spy.id)
 
     // FIX #15: coerce with Number()
-    const closes = snapshots.map((s) => Number(s.close)).filter(Boolean)
+    const closes = snapshots.map((s: any) => Number(s.close)).filter(Boolean)
     const returns = computeReturns(closes)
     this.spyReturnsCache = { returns, cachedAt: Date.now() }
     return returns
@@ -1071,14 +1068,7 @@ class QuantEngineService {
     const cutoff = new Date(Date.now() - days * 86400000).toISOString()
     const halfCutoff = new Date(Date.now() - (days / 2) * 86400000).toISOString()
 
-    const [allRows] = await Database.rawQuery(
-      `SELECT sentiment_score, relevance_score, confidence, created_at
-       FROM analyses WHERE ticker_id = ? AND created_at >= ?
-       ORDER BY created_at ASC`,
-      [tickerId, cutoff]
-    )
-
-    const analyses = allRows as any[]
+    const analyses = await MeilisearchService.getAnalysesForTicker(tickerId, cutoff)
     if (analyses.length === 0) {
       return { totalArticles: 0, avgScore: 0, recentTrend: 0 }
     }
@@ -1086,20 +1076,20 @@ class QuantEngineService {
     let weightedSum = 0
     let weightTotal = 0
     for (const a of analyses) {
-      const w = (Number(a.relevance_score) || 0.5) * (Number(a.confidence) || 0.5)
-      weightedSum += Number(a.sentiment_score) * w
+      const w = (Number(a.relevanceScore) || 0.5) * (Number(a.confidence) || 0.5)
+      weightedSum += Number(a.sentimentScore) * w
       weightTotal += w
     }
     const avgScore = weightTotal > 0 ? weightedSum / weightTotal : 0
 
     // FIX #17: require at least 2 articles in each half for momentum
-    const recent = analyses.filter((a) => a.created_at >= halfCutoff)
-    const older = analyses.filter((a) => a.created_at < halfCutoff)
+    const recent = analyses.filter((a: any) => a.createdAt >= halfCutoff)
+    const older = analyses.filter((a: any) => a.createdAt < halfCutoff)
 
     let recentTrend = 0
     if (recent.length >= 2 && older.length >= 2) {
-      const recentAvg = recent.reduce((s, a) => s + Number(a.sentiment_score), 0) / recent.length
-      const olderAvg = older.reduce((s, a) => s + Number(a.sentiment_score), 0) / older.length
+      const recentAvg = recent.reduce((s: number, a: any) => s + Number(a.sentimentScore), 0) / recent.length
+      const olderAvg = older.reduce((s: number, a: any) => s + Number(a.sentimentScore), 0) / older.length
       recentTrend = recentAvg - olderAvg
     }
 
@@ -1114,9 +1104,7 @@ class QuantEngineService {
 
     if (!ticker) return null
 
-    const snapshots = await TickerSnapshot.query()
-      .where('ticker_id', ticker.id)
-      .orderBy('date', 'asc')
+    const snapshots = await MeilisearchService.getSnapshotsForTicker(ticker.id)
 
     if (snapshots.length < 5) {
       Logger.warn('[Quant] Insufficient data for %s (%d bars)', symbol, snapshots.length)
@@ -1128,7 +1116,7 @@ class QuantEngineService {
 
   public async analyzeTickerData(
     ticker: Ticker,
-    snapshots: TickerSnapshot[],
+    snapshots: any[],
     options: { days?: number } = {}
   ): Promise<TickerAnalysis | null> {
     const days = options.days || 365
@@ -1297,16 +1285,12 @@ class QuantEngineService {
     const minArticles = options.minArticles || 0
     const tickers = await Ticker.query().where('is_active', true).orderBy('symbol')
 
-    // Preload all snapshots in batch
+    // Preload all snapshots in batch from Meilisearch
     const tickerIds = tickers.map((t) => t.id)
-    const allSnapshots = tickerIds.length > 0
-      ? await TickerSnapshot.query()
-          .whereIn('ticker_id', tickerIds)
-          .orderBy('date', 'asc')
-      : []
+    const allSnapshots = await MeilisearchService.getSnapshotsForTickers(tickerIds)
 
-    // Group snapshots by ticker_id
-    const snapshotsByTicker = new Map<number, TickerSnapshot[]>()
+    // Group snapshots by tickerId
+    const snapshotsByTicker = new Map<number, any[]>()
     for (const s of allSnapshots) {
       const existing = snapshotsByTicker.get(s.tickerId) || []
       existing.push(s)

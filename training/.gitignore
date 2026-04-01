@@ -1,0 +1,5 @@
+checkpoints/
+data/*.parquet
+__pycache__/
+*.pyc
+.venv/

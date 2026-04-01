@@ -1,6 +1,6 @@
 import Logger from '@ioc:Adonis/Core/Logger'
 import Ticker from 'App/Models/Ticker'
-import TickerSnapshot from 'App/Models/TickerSnapshot'
+import MeilisearchService from './MeilisearchService'
 import { DateTime } from 'luxon'
 import { exec } from 'child_process'
 import { promisify } from 'util'
@@ -583,7 +583,7 @@ class GoogleFinanceService {
    *
    * Over time, daily syncs (cron every 30 min) build up a complete price history.
    */
-  public async syncHistoricalSnapshots(ticker: Ticker, days: number = 365) {
+  public async syncHistoricalSnapshots(ticker: Ticker, days: number = 1825) {
     let created = 0
 
     // Attempt to extract embedded historical data from the quote page
@@ -592,14 +592,12 @@ class GoogleFinanceService {
 
     for (const bar of history) {
       const date = DateTime.fromJSDate(bar.date).toISODate()!
-      const existing = await TickerSnapshot.query()
-        .where('ticker_id', ticker.id)
-        .where('date', date)
-        .first()
+      const existing = await MeilisearchService.getSnapshot(ticker.id, date)
 
       if (!existing) {
-        await TickerSnapshot.create({
+        await MeilisearchService.saveSnapshot({
           tickerId: ticker.id,
+          tickerSymbol: ticker.symbol,
           open: bar.open,
           high: bar.high,
           low: bar.low,
@@ -618,23 +616,24 @@ class GoogleFinanceService {
           existing.low === existing.close
 
         let updated = false
+        const updates: any = {}
 
         if (hasRealOHLC && existingIsCloseOnly) {
-          existing.open = bar.open
-          existing.high = bar.high
-          existing.low = bar.low
-          existing.close = bar.close
-          existing.changePercent = bar.open ? ((bar.close - bar.open) / bar.open) * 100 : null
+          updates.open = bar.open
+          updates.high = bar.high
+          updates.low = bar.low
+          updates.close = bar.close
+          updates.changePercent = bar.open ? ((bar.close - bar.open) / bar.open) * 100 : null
           updated = true
         }
 
         if (bar.volume > 0 && (!existing.volume || existing.volume === 0)) {
-          existing.volume = bar.volume
+          updates.volume = bar.volume
           updated = true
         }
 
         if (updated) {
-          await existing.save()
+          await MeilisearchService.saveSnapshot({ ...existing, ...updates })
         }
       }
     }
@@ -642,27 +641,25 @@ class GoogleFinanceService {
     // Always save/update today's snapshot from current price
     if (ticker.currentPrice) {
       const today = DateTime.now().toISODate()!
-      const todaySnap = await TickerSnapshot.query()
-        .where('ticker_id', ticker.id)
-        .where('date', today)
-        .first()
+      const todaySnap = await MeilisearchService.getSnapshot(ticker.id, today)
 
       if (todaySnap) {
         // Update: track intraday high/low, always update close
-        todaySnap.close = ticker.currentPrice
+        const updates: any = { close: ticker.currentPrice }
         if (!todaySnap.high || ticker.currentPrice > todaySnap.high) {
-          todaySnap.high = ticker.currentPrice
+          updates.high = ticker.currentPrice
         }
         if (!todaySnap.low || ticker.currentPrice < todaySnap.low) {
-          todaySnap.low = ticker.currentPrice
+          updates.low = ticker.currentPrice
         }
-        todaySnap.changePercent = todaySnap.open
+        updates.changePercent = todaySnap.open
           ? ((ticker.currentPrice - todaySnap.open) / todaySnap.open) * 100
           : null
-        await todaySnap.save()
+        await MeilisearchService.saveSnapshot({ ...todaySnap, ...updates })
       } else {
-        await TickerSnapshot.create({
+        await MeilisearchService.saveSnapshot({
           tickerId: ticker.id,
+          tickerSymbol: ticker.symbol,
           open: ticker.currentPrice,
           high: ticker.currentPrice,
           low: ticker.currentPrice,
@@ -683,16 +680,19 @@ class GoogleFinanceService {
       this.fetchQuote(symbol),
       Ticker.query()
         .where('symbol', symbol.toUpperCase())
-        .preload('snapshots', (q) => {
-          q.orderBy('date', 'desc').limit(30)
-        })
         .first(),
     ])
+
+    let snapshots: any[] = []
+    if (ticker) {
+      const allSnaps = await MeilisearchService.getSnapshotsForTicker(ticker.id)
+      snapshots = allSnaps.slice(-30).reverse()
+    }
 
     return {
       quote,
       ticker,
-      snapshots: ticker?.snapshots || [],
+      snapshots,
     }
   }
 }

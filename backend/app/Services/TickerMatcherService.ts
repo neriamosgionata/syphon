@@ -1,23 +1,21 @@
 import Logger from '@ioc:Adonis/Core/Logger'
 import Ticker from 'App/Models/Ticker'
-import Article from 'App/Models/Article'
-import Analysis from 'App/Models/Analysis'
 import SentimentService from './SentimentService'
-import OpenSearchService from './OpenSearchService'
+import MeilisearchService from './MeilisearchService'
 import NotificationService from './NotificationService'
 
 class TickerMatcherService {
-  public async matchAndAnalyze(article: Article): Promise<Analysis[]> {
+  public async matchAndAnalyze(article: any): Promise<any[]> {
     const tickers = await Ticker.query().where('is_active', true)
-    const results: Analysis[] = []
+    const results: any[] = []
 
-    const textToAnalyze = [article.title, article.summary, article.content]
+    const textForRelevance = [article.title, article.summary, article.content]
       .filter(Boolean)
       .join(' ')
 
     for (const ticker of tickers) {
       const relevance = SentimentService.analyzeRelevance(
-        textToAnalyze,
+        textForRelevance,
         ticker.symbol,
         ticker.name
       )
@@ -26,18 +24,18 @@ class TickerMatcherService {
       if (relevance < 0.1) continue
 
       // Check for existing analysis
-      const existing = await Analysis.query()
-        .where('article_id', article.id)
-        .where('ticker_id', ticker.id)
-        .first()
-
+      const existing = await MeilisearchService.findAnalysis(article.id, ticker.id)
       if (existing) continue
 
-      const sentiment = SentimentService.analyze(textToAnalyze, ticker.symbol)
+      const sentiment = SentimentService.analyze(
+        { title: article.title, summary: article.summary, content: article.content },
+        ticker.symbol
+      )
 
-      const analysis = await Analysis.create({
+      const { id } = await MeilisearchService.saveAnalysis({
         articleId: article.id,
         tickerId: ticker.id,
+        tickerSymbol: ticker.symbol,
         sentiment: sentiment.sentiment,
         sentimentScore: sentiment.sentimentScore,
         relevanceScore: relevance,
@@ -47,7 +45,17 @@ class TickerMatcherService {
         tickerPriceAtAnalysis: ticker.currentPrice,
       })
 
-      results.push(analysis)
+      results.push({
+        id,
+        articleId: article.id,
+        tickerId: ticker.id,
+        tickerSymbol: ticker.symbol,
+        sentiment: sentiment.sentiment,
+        sentimentScore: sentiment.sentimentScore,
+        relevanceScore: relevance,
+        confidence: sentiment.confidence,
+        keywords: sentiment.keywords,
+      })
 
       NotificationService.emit({
         type: 'ticker_match',
@@ -70,7 +78,7 @@ class TickerMatcherService {
 
       Logger.debug(
         'Analysis: %s -> %s | sentiment=%s score=%.3f relevance=%.3f',
-        article.title.slice(0, 50),
+        (article.title || '').slice(0, 50),
         ticker.symbol,
         sentiment.sentiment,
         sentiment.sentimentScore,
@@ -79,23 +87,11 @@ class TickerMatcherService {
     }
 
     // Mark article as analyzed
-    article.isAnalyzed = true
-    await article.save()
-
-    // Update OpenSearch with analysis data
-    const bestAnalysis = results.sort((a, b) => b.relevanceScore - a.relevanceScore)[0]
-    await OpenSearchService.indexArticle({
-      id: article.id,
-      title: article.title,
-      summary: article.summary,
-      content: article.content,
-      url: article.url,
-      source_name: article.sourceName,
-      author: article.author,
-      published_at: article.publishedAt?.toISO() || null,
-      tickers: results.map((a) => tickers.find((t) => t.id === a.tickerId)!.symbol),
-      sentiment: bestAnalysis?.sentiment || null,
-      sentiment_score: bestAnalysis?.sentimentScore || null,
+    await MeilisearchService.updateArticle(article.id, {
+      isAnalyzed: true,
+      tickers: results.map((a) => a.tickerSymbol),
+      sentiment: results.sort((a, b) => b.relevanceScore - a.relevanceScore)[0]?.sentiment || null,
+      sentimentScore: results.sort((a, b) => b.relevanceScore - a.relevanceScore)[0]?.sentimentScore || null,
     })
 
     return results

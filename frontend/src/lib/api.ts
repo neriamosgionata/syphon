@@ -21,7 +21,10 @@ export const api = {
     request<any>(`/jobs/${encodeURIComponent(queue)}/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
   removeFailedJob: (queue: string, id: string) =>
     request<any>(`/jobs/${encodeURIComponent(queue)}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  cancelJob: (queue: string, id: string) =>
+    request<any>(`/jobs/${encodeURIComponent(queue)}/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
 
+  drainQueues: () => request<any>('/jobs/drain', { method: 'POST' }),
   pruneDatabase: () => request<any>('/prune', { method: 'POST' }),
 
   // Articles
@@ -44,6 +47,11 @@ export const api = {
     request<any>('/articles/analyze', {
       method: 'POST',
       body: JSON.stringify({ limit }),
+    }),
+  backfillNews: (params?: { symbol?: string; days?: number }) =>
+    request<any>('/articles/backfill', {
+      method: 'POST',
+      body: JSON.stringify(params || {}),
     }),
 
   // Tickers
@@ -124,6 +132,43 @@ export const api = {
     const qs = params ? new URLSearchParams(params).toString() : '';
     return request<any>(`/signals${qs ? `?${qs}` : ''}`);
   },
+
+  // Algo Trading
+  algoConfig: () => request<any>('/algo/config'),
+  algoUpdateConfig: (config: Record<string, any>) =>
+    request<any>('/algo/config', { method: 'PUT', body: JSON.stringify(config) }),
+  algoEnable: () => request<any>('/algo/enable', { method: 'POST' }),
+  algoDisable: () => request<any>('/algo/disable', { method: 'POST' }),
+  algoRun: () => request<any>('/algo/run', { method: 'POST' }),
+  algoDecisions: (params?: Record<string, any>) => {
+    const qs = params ? new URLSearchParams(params).toString() : '';
+    return request<any>(`/algo/decisions${qs ? `?${qs}` : ''}`);
+  },
+  algoPositions: (params?: Record<string, any>) => {
+    const qs = params ? new URLSearchParams(params).toString() : '';
+    return request<any>(`/algo/positions${qs ? `?${qs}` : ''}`);
+  },
+  algoForceClose: (id: number) =>
+    request<any>(`/algo/positions/${id}/close`, { method: 'POST' }),
+  algoStats: () => request<any>('/algo/stats'),
+
+  // Training (NN model service)
+  trainingHealth: () => request<any>('/training/health'),
+  trainingConfig: () => request<any>('/training/config'),
+  trainingModel: () => request<any>('/training/model'),
+  trainingPredict: (pair: string) =>
+    request<any>('/training/predict', { method: 'POST', body: JSON.stringify({ pair }) }),
+  trainingPredictBatch: (pairs: string[]) =>
+    request<any>('/training/predict/batch', { method: 'POST', body: JSON.stringify({ pairs }) }),
+  trainingStart: (params?: { pairs?: string[]; epochs?: number; batch_size?: number; learning_rate?: number }) =>
+    request<any>('/training/train', { method: 'POST', body: JSON.stringify(params || {}) }),
+  trainingStatus: () => request<any>('/training/train/status'),
+  trainingBackfill: (params?: { pairs?: string[]; days?: number }) =>
+    request<any>('/training/backfill', { method: 'POST', body: JSON.stringify(params || {}) }),
+  trainingBackfillStatus: () => request<any>('/training/backfill/status'),
+
+  // Metrics
+  metrics: () => request<any>('/metrics'),
 
   // Logs
   logs: (params?: Record<string, any>) => {

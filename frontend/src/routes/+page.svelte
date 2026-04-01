@@ -52,6 +52,18 @@
     failedJobs = failedJobs.filter((j) => !(j.queue === queue && j.id === id));
   }
 
+  async function cancelJob(queue: string, id: string) {
+    await api.cancelJob(queue, id).catch(() => {});
+    activeJobs = activeJobs.filter((j) => !(j.queue === queue && j.id === id));
+    setTimeout(() => { loadJobs(); loadFailedJobs(); }, 500);
+  }
+
+  async function cancelAllJobs() {
+    await api.drainQueues().catch(() => {});
+    activeJobs = [];
+    setTimeout(() => { load(); loadJobs(); }, 500);
+  }
+
   function timeAgo(ts: number | null): string {
     if (!ts) return '';
     const diff = Date.now() - ts;
@@ -61,6 +73,25 @@
     const hours = Math.floor(mins / 60);
     if (hours < 24) return `${hours}h ago`;
     return `${Math.floor(hours / 24)}d ago`;
+  }
+
+  let draining = $state(false);
+  let drainMsg = $state('');
+
+  async function drainQueues() {
+    draining = true;
+    drainMsg = '';
+    try {
+      const res = await api.drainQueues();
+      drainMsg = res.message || 'All queues drained';
+      await load();
+      await loadJobs();
+    } catch {
+      drainMsg = 'Failed to drain queues';
+    } finally {
+      draining = false;
+      setTimeout(() => drainMsg = '', 4000);
+    }
   }
 
   let pruning = $state(false);
@@ -203,9 +234,15 @@
           Filtering: <strong>{sentimentFilter.replace('_', ' ')}</strong> &times;
         </button>
       {/if}
+      {#if drainMsg}
+        <span style="font-size: 0.85rem; color: var(--accent);">{drainMsg}</span>
+      {/if}
       <button class="btn" onclick={refreshTickers}>Refresh Tickers</button>
       <button class="btn" onclick={triggerScrape}>Scrape News</button>
       <button class="btn btn-primary" onclick={triggerAnalysis}>Run Analysis</button>
+      <button class="btn btn-warning" onclick={drainQueues} disabled={draining}>
+        {draining ? 'Draining...' : 'Drain Queues'}
+      </button>
       <button class="btn btn-danger" onclick={() => showPruneConfirm = true}>Prune DB</button>
     </div>
   </div>
@@ -338,15 +375,21 @@
     {#if activeJobs.length > 0}
       <div class="jobs-section" style="margin-top: 1.5rem;">
         <div class="jobs-header">
-          <h3>Active Jobs</h3>
-          <span class="jobs-count">{activeJobs.length} running</span>
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <h3>Active Jobs</h3>
+            <span class="jobs-count">{activeJobs.length} running</span>
+          </div>
+          <button class="btn btn-sm btn-stop" onclick={cancelAllJobs}>Stop All</button>
         </div>
         <div class="jobs-grid">
           {#each activeJobs as job (job.queue + ':' + job.id)}
             <div class="job-card" class:job-active={job.state === 'active'} class:job-waiting={job.state === 'waiting'} class:job-done={job.state === 'completed'} class:job-failed={job.state === 'failed'}>
               <div class="job-top">
                 <span class="job-queue">{queueLabel(job.queue)}</span>
-                <span class="job-state" style="color: {stateColor(job.state)}">{job.state}</span>
+                <div style="display: flex; align-items: center; gap: 0.4rem;">
+                  <span class="job-state" style="color: {stateColor(job.state)}">{job.state}</span>
+                  <button class="job-cancel-btn" onclick={() => cancelJob(job.queue, job.id)} title="Cancel job">&times;</button>
+                </div>
               </div>
               <div class="job-desc">{jobDescription(job)}</div>
               {#if job.stage}
@@ -423,7 +466,7 @@
     <div class="modal-backdrop" onclick={() => showPruneConfirm = false}>
       <div class="modal" onclick={(e) => e.stopPropagation()}>
         <h3>Prune Database</h3>
-        <p>This will permanently delete articles, analyses, trades, scrape sources, and OpenSearch indices. <strong>Tickers will be preserved.</strong></p>
+        <p>This will permanently delete articles, analyses, trades, scrape sources, and search indexes. <strong>Tickers will be preserved.</strong></p>
         <p style="color: var(--red); font-weight: 600;">This action cannot be undone.</p>
         <div class="modal-actions">
           <button class="btn" onclick={() => showPruneConfirm = false} disabled={pruning}>Cancel</button>
@@ -550,6 +593,29 @@
     color: var(--text-muted);
     font-family: 'SF Mono', monospace;
     text-align: right;
+  }
+  .job-cancel-btn {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.3rem;
+    border-radius: 4px;
+    transition: all 0.15s;
+  }
+  .job-cancel-btn:hover {
+    color: var(--red);
+    border-color: var(--red);
+    background: rgba(239, 68, 68, 0.1);
+  }
+  .btn-stop {
+    color: var(--red);
+    border-color: var(--red);
+  }
+  .btn-stop:hover {
+    background: rgba(239, 68, 68, 0.1);
   }
 
   /* Sentiment / Filters */
@@ -804,6 +870,20 @@
   .btn-dismiss:hover {
     color: var(--red);
     border-color: var(--red);
+  }
+
+  /* Warning button */
+  .btn-warning {
+    background: transparent;
+    color: #f59e0b;
+    border-color: #f59e0b;
+  }
+  .btn-warning:hover {
+    background: rgba(245, 158, 11, 0.1);
+  }
+  .btn-warning:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* Prune / Danger */

@@ -1,10 +1,10 @@
 import { HttpContextContract } from '@ioc:Adonis/Core/HttpContext'
-import OpenSearchService from 'App/Services/OpenSearchService'
+import MeilisearchService from 'App/Services/MeilisearchService'
 
 export default class LogsController {
   public async index({ request }: HttpContextContract) {
     const params = request.qs()
-    const result = await OpenSearchService.searchLogs({
+    const result = await MeilisearchService.searchLogs({
       query: params.q || undefined,
       level: params.level || undefined,
       context: params.context || undefined,
@@ -23,45 +23,29 @@ export default class LogsController {
   }
 
   public async stats({}: HttpContextContract) {
-    const client = await OpenSearchService.getClient()
-
     try {
-      const result = await client.search({
-        index: 'syphon-logs',
-        body: {
-          size: 0,
-          aggs: {
-            by_level: { terms: { field: 'level', size: 10 } },
-            by_context: { terms: { field: 'context', size: 20 } },
-            over_time: {
-              date_histogram: {
-                field: 'timestamp',
-                fixed_interval: '1h',
-              },
-            },
-            errors_over_time: {
-              filter: { terms: { level: ['error', 'fatal'] } },
-              aggs: {
-                over_time: {
-                  date_histogram: {
-                    field: 'timestamp',
-                    fixed_interval: '1h',
-                  },
-                },
-              },
-            },
-          },
-        },
-      })
+      // Meilisearch doesn't have aggregations like OpenSearch.
+      // Get basic stats from the stats endpoint and recent logs for distribution.
+      const stats = await MeilisearchService.getStats()
+      const logsIndex = stats.indexes.find((i) => i.name === 'logs')
 
-      const aggs = result.body.aggregations
+      // Fetch recent logs to compute level distribution
+      const levels = ['trace', 'debug', 'info', 'warn', 'error', 'fatal']
+      const byLevel: { level: string; count: number }[] = []
+
+      for (const level of levels) {
+        const result = await MeilisearchService.searchLogs({ level, size: 0 })
+        if (result.total > 0) {
+          byLevel.push({ level, count: result.total })
+        }
+      }
 
       return {
-        totalLogs: result.body.hits.total.value,
-        byLevel: aggs.by_level.buckets.map((b: any) => ({ level: b.key, count: b.doc_count })),
-        byContext: aggs.by_context.buckets.map((b: any) => ({ context: b.key, count: b.doc_count })),
-        overTime: aggs.over_time.buckets.map((b: any) => ({ time: b.key_as_string, count: b.doc_count })),
-        errorsOverTime: aggs.errors_over_time.over_time.buckets.map((b: any) => ({ time: b.key_as_string, count: b.doc_count })),
+        totalLogs: logsIndex?.docs || 0,
+        byLevel,
+        byContext: [],
+        overTime: [],
+        errorsOverTime: [],
       }
     } catch {
       return { totalLogs: 0, byLevel: [], byContext: [], overTime: [], errorsOverTime: [] }

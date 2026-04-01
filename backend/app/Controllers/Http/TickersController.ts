@@ -164,7 +164,7 @@ export default class TickersController {
   }
 
   public async backfill({ request, response }: HttpContextContract) {
-    const days = Number(request.input('days', 365))
+    const days = Number(request.input('days', 1825))
     const symbol = request.input('symbol', '')
 
     let tickers: Ticker[]

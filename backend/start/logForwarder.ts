@@ -1,5 +1,5 @@
 import Logger from '@ioc:Adonis/Core/Logger'
-import OpenSearchService from 'App/Services/OpenSearchService'
+import MeilisearchService from 'App/Services/MeilisearchService'
 import { DateTime } from 'luxon'
 import os from 'os'
 
@@ -14,7 +14,7 @@ const LEVEL_NAMES: Record<number, string> = {
 
 /**
  * Hook into pino's underlying stream to capture all log entries
- * and forward them to OpenSearch
+ * and forward them to Meilisearch
  */
 function setupLogForwarder() {
   const pino = (Logger as any).pino || (Logger as any)['$logger']
@@ -67,7 +67,7 @@ function setupLogForwarder() {
 
       const levelNumber = { trace: 10, debug: 20, info: 30, warn: 40, error: 50, fatal: 60 }[level] || 30
 
-      OpenSearchService.pushLog({
+      MeilisearchService.pushLog({
         timestamp: DateTime.now().toISO()!,
         level,
         levelNumber,

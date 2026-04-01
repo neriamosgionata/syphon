@@ -17,7 +17,8 @@
     "@adonisjs/lucid": "18.4.2",
     "@adonisjs/redis": "7.3.4",
     "@adonisjs/repl": "3.1.11",
-    "@opensearch-project/opensearch": "3.5.1",
+    "@google-cloud/bigquery": "^8.1.1",
+
     "@stoqey/ib": "1.5.3",
     "bullmq": "5.70.4",
     "cheerio": "1.0.0",

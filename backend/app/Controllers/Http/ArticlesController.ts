@@ -1,6 +1,5 @@
 import { HttpContextContract } from '@ioc:Adonis/Core/HttpContext'
-import Article from 'App/Models/Article'
-import OpenSearchService from 'App/Services/OpenSearchService'
+import MeilisearchService from 'App/Services/MeilisearchService'
 import QueueService, { QUEUE_NAMES } from 'App/Jobs/QueueService'
 
 export default class ArticlesController {
@@ -11,37 +10,41 @@ export default class ArticlesController {
     const analyzed = request.input('analyzed')
     const sentiment = request.input('sentiment')
 
-    const query = Article.query().orderBy('published_at', 'desc')
+    const result = await MeilisearchService.getArticles({
+      page,
+      limit,
+      source,
+      analyzed: analyzed !== undefined ? analyzed === 'true' : undefined,
+      sentiment,
+    })
 
-    if (source) query.where('source_name', source)
-    if (analyzed !== undefined) query.where('is_analyzed', analyzed === 'true')
-    if (sentiment) {
-      query.whereHas('analyses', (subQuery) => {
-        subQuery.where('sentiment', sentiment)
-      })
-    }
-
-    const articles = await query.preload('analyses', (q) => {
-      q.preload('ticker')
-    }).paginate(page, limit)
-
-    return response.json(articles)
+    return response.json({
+      meta: {
+        total: result.total,
+        per_page: result.perPage,
+        current_page: result.page,
+        last_page: result.lastPage,
+      },
+      data: result.data,
+    })
   }
 
   public async show({ params, response }: HttpContextContract) {
-    const article = await Article.query()
-      .where('id', params.id)
-      .preload('analyses', (q) => {
-        q.preload('ticker').orderBy('relevance_score', 'desc')
-      })
-      .preload('scrapeSource')
-      .firstOrFail()
+    const article = await MeilisearchService.getArticle(Number(params.id))
+    if (!article) return response.notFound({ error: 'Article not found' })
 
-    return response.json(article.serialize())
+    // Fetch analyses for this article
+    const { hits: analyses } = await MeilisearchService['searchIndex']('analyses', {
+      filter: `articleId = ${article.id}`,
+      sort: ['relevanceScore:desc'],
+      limit: 50,
+    })
+
+    return response.json({ ...article, analyses })
   }
 
   public async search({ request, response }: HttpContextContract) {
-    const results = await OpenSearchService.searchArticles({
+    const results = await MeilisearchService.searchArticles({
       query: request.input('q'),
       ticker: request.input('ticker'),
       sentiment: request.input('sentiment'),
@@ -66,10 +69,7 @@ export default class ArticlesController {
   public async triggerAnalysis({ request, response }: HttpContextContract) {
     const limit = request.input('limit', 50)
 
-    const unanalyzed = await Article.query()
-      .where('is_analyzed', false)
-      .orderBy('created_at', 'desc')
-      .limit(limit)
+    const unanalyzed = await MeilisearchService.getUnanalyzedArticles(limit)
 
     if (unanalyzed.length === 0) {
       return response.json({ message: 'No unanalyzed articles found' })
@@ -83,6 +83,38 @@ export default class ArticlesController {
     return response.json({
       message: `Queued ${unanalyzed.length} articles for analysis`,
       count: unanalyzed.length,
+    })
+  }
+
+  public async backfill({ request, response }: HttpContextContract) {
+    const { default: Ticker } = await import('App/Models/Ticker')
+    const symbol = request.input('symbol', '')
+    const days = Number(request.input('days', 1825))
+    const fetchContent = request.input('fetch_content', false)
+
+    let tickers: any[]
+    if (symbol) {
+      const ticker = await Ticker.findBy('symbol', symbol.toUpperCase())
+      if (!ticker) return response.notFound({ error: 'Ticker not found' })
+      tickers = [ticker]
+    } else {
+      tickers = await Ticker.query().where('is_active', true)
+    }
+
+    if (tickers.length === 0) {
+      return response.json({ message: 'No active tickers', queued: 0 })
+    }
+
+    await QueueService.addBulk(
+      QUEUE_NAMES.BACKFILL_NEWS,
+      tickers.map((t) => ({
+        data: { symbol: t.symbol, days, fetchContent },
+      }))
+    )
+
+    return response.json({
+      message: `News backfill queued for ${tickers.length} tickers (${days} days)`,
+      queued: tickers.length,
     })
   }
 

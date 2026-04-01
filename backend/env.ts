@@ -19,11 +19,15 @@ export default Env.rules({
   REDIS_PORT: Env.schema.number(),
   REDIS_PASSWORD: Env.schema.string.optional(),
 
-  OPENSEARCH_NODE: Env.schema.string(),
+  MEILI_URL: Env.schema.string.optional(),
+  MEILI_KEY: Env.schema.string.optional(),
   SCRAPE_INTERVAL_MINUTES: Env.schema.number.optional(),
   ANALYSIS_BATCH_SIZE: Env.schema.number.optional(),
 
   IB_HOST: Env.schema.string.optional(),
   IB_PORT: Env.schema.number.optional(),
   IB_CLIENT_ID: Env.schema.number.optional(),
+
+  GCP_PROJECT_ID: Env.schema.string.optional(),
+  TRAINING_API_URL: Env.schema.string.optional(),
 })

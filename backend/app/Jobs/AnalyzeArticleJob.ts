@@ -1,13 +1,13 @@
 import { Job } from 'bullmq'
 import Logger from '@ioc:Adonis/Core/Logger'
-import Article from 'App/Models/Article'
+import MeilisearchService from 'App/Services/MeilisearchService'
 import TickerMatcherService from 'App/Services/TickerMatcherService'
 import QueueService, { QUEUE_NAMES } from './QueueService'
 
 export async function processAnalyzeArticle(job: Job) {
   const { articleId } = job.data
 
-  const article = await Article.find(articleId)
+  const article = await MeilisearchService.getArticle(articleId)
   if (!article) {
     Logger.warn('[AnalyzeArticle] Article %d not found', articleId)
     return { skipped: true }

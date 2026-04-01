@@ -10,7 +10,9 @@ Route.group(() => {
   Route.get('/jobs/active', 'DashboardController.activeJobs')
   Route.get('/jobs/failed', 'DashboardController.failedJobs')
   Route.post('/jobs/:queue/:id/retry', 'DashboardController.retryJob')
+  Route.post('/jobs/:queue/:id/cancel', 'DashboardController.cancelJob')
   Route.delete('/jobs/:queue/:id', 'DashboardController.removeFailedJob')
+  Route.post('/jobs/drain', 'DashboardController.drainQueues')
   Route.post('/prune', 'DashboardController.prune')
 
   // Articles
@@ -20,6 +22,7 @@ Route.group(() => {
   Route.get('/articles/:id', 'ArticlesController.show')
   Route.post('/articles/scrape', 'ArticlesController.triggerScrape')
   Route.post('/articles/analyze', 'ArticlesController.triggerAnalysis')
+  Route.post('/articles/backfill', 'ArticlesController.backfill')
 
   // Tickers
   Route.get('/tickers', 'TickersController.index')
@@ -55,6 +58,31 @@ Route.group(() => {
   Route.get('/trading/orders/:id', 'TradingController.show')
   Route.post('/trading/orders', 'TradingController.placeOrder')
   Route.post('/trading/orders/:id/cancel', 'TradingController.cancelOrder')
+
+  // Algo Trading
+  Route.get('/algo/config', 'AlgoController.getConfig')
+  Route.put('/algo/config', 'AlgoController.updateConfig')
+  Route.post('/algo/enable', 'AlgoController.enable')
+  Route.post('/algo/disable', 'AlgoController.disable')
+  Route.post('/algo/run', 'AlgoController.triggerRun')
+  Route.get('/algo/decisions', 'AlgoController.decisions')
+  Route.get('/algo/positions', 'AlgoController.positions')
+  Route.post('/algo/positions/:id/close', 'AlgoController.forceClose')
+  Route.get('/algo/stats', 'AlgoController.stats')
+
+  // Training (NN model service proxy)
+  Route.get('/training/health', 'TrainingController.health')
+  Route.get('/training/config', 'TrainingController.config')
+  Route.get('/training/model', 'TrainingController.modelInfo')
+  Route.post('/training/predict', 'TrainingController.predict')
+  Route.post('/training/predict/batch', 'TrainingController.predictBatch')
+  Route.post('/training/train', 'TrainingController.startTraining')
+  Route.get('/training/train/status', 'TrainingController.trainingStatus')
+  Route.post('/training/backfill', 'TrainingController.startBackfill')
+  Route.get('/training/backfill/status', 'TrainingController.backfillStatus')
+
+  // Metrics
+  Route.get('/metrics', 'MetricsController.index')
 
   // Logs
   Route.get('/logs', 'LogsController.index')

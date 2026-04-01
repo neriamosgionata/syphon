@@ -44,6 +44,22 @@
     }
   }
 
+  let backfilling = $state(false);
+  let backfillMsg = $state('');
+
+  async function backfillNews() {
+    backfilling = true;
+    backfillMsg = '';
+    try {
+      const res = await api.backfillNews();
+      backfillMsg = res.message || `Backfill queued for ${res.queued} tickers`;
+    } catch {
+      backfillMsg = 'Failed to start news backfill';
+    }
+    backfilling = false;
+    setTimeout(() => backfillMsg = '', 5000);
+  }
+
   onMount(() => {
     api.sources().catch(() => []).then((s) => sources = s);
     load();
@@ -56,7 +72,17 @@
 </svelte:head>
 
 <div class="page">
-  <h1 style="margin-bottom: 1.5rem;">Articles</h1>
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+    <h1>Articles</h1>
+    <div style="display: flex; align-items: center; gap: 0.75rem;">
+      {#if backfillMsg}
+        <span class="backfill-msg">{backfillMsg}</span>
+      {/if}
+      <button class="btn btn-primary" disabled={backfilling} onclick={backfillNews}>
+        {backfilling ? 'Backfilling...' : 'Backfill History'}
+      </button>
+    </div>
+  </div>
 
   <div class="filters card" style="margin-bottom: 1.5rem;">
     <div class="filter-row">
@@ -125,5 +151,9 @@
     display: grid;
     gap: 1rem;
     grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  }
+  .backfill-msg {
+    font-size: 0.85rem;
+    color: var(--accent);
   }
 </style>
