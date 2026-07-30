@@ -3,7 +3,7 @@ import { BaseModel, column, belongsTo, BelongsTo } from '@ioc:Adonis/Lucid/Orm'
 import Ticker from './Ticker'
 import Analysis from './Analysis'
 
-export type Broker = 'ibkr' | 'kraken'
+export type Broker = 'ibkr' | 'kraken' | 'binance'
 export type TradeSide = 'BUY' | 'SELL'
 export type OrderType = 'MKT' | 'LMT' | 'STP' | 'STP_LMT' | 'TRAIL'
 export type TradeStatus =

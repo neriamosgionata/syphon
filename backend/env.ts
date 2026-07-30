@@ -28,6 +28,9 @@ export default Env.rules({
   IB_PORT: Env.schema.number.optional(),
   IB_CLIENT_ID: Env.schema.number.optional(),
 
+  BINANCE_API_KEY: Env.schema.string.optional(),
+  BINANCE_API_SECRET: Env.schema.string.optional(),
+
   GCP_PROJECT_ID: Env.schema.string.optional(),
   TRAINING_API_URL: Env.schema.string.optional(),
 })

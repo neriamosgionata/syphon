@@ -6,6 +6,7 @@ import Database from '@ioc:Adonis/Lucid/Database'
 import QuantEngine, { TickerAnalysis, ScreenerResult } from 'App/Services/QuantEngine'
 import IBKRService from 'App/Services/IBKRService'
 import KrakenService from 'App/Services/KrakenService'
+import BinanceService from 'App/Services/BinanceService'
 import QueueService, { QUEUE_NAMES } from 'App/Jobs/QueueService'
 import NotificationService from 'App/Services/NotificationService'
 import MeilisearchService from 'App/Services/MeilisearchService'
@@ -353,7 +354,7 @@ export default class AlgoTradingService {
             quantity: pos.quantity,
             broker: this.config.broker as any,
             status: 'pending',
-            exchange: this.config.broker === 'kraken' ? 'spot' : 'SMART',
+            exchange: this.config.broker === 'kraken' || this.config.broker === 'binance' ? 'spot' : 'SMART',
             currency: 'USD',
             filledQuantity: 0,
             timeInForce: this.config.timeInForce,
@@ -486,7 +487,7 @@ export default class AlgoTradingService {
         quantity,
         broker: this.config.broker as any,
         status: 'pending',
-        exchange: this.config.broker === 'kraken' ? 'spot' : 'SMART',
+        exchange: this.config.broker === 'kraken' || this.config.broker === 'binance' ? 'spot' : 'SMART',
         currency: 'USD',
         filledQuantity: 0,
         timeInForce: this.config.timeInForce,
@@ -750,6 +751,11 @@ export default class AlgoTradingService {
         if (!KrakenService.isConnected) return 0
         const tb = await KrakenService.getTradeBalance()
         return parseFloat(tb.eb || '0')
+      } else if (this.config.broker === 'binance') {
+        if (!BinanceService.isConnected) return 0
+        const account = await BinanceService.getAccountInfo()
+        const usdt = account.balances?.find((b: any) => b.asset === 'USDT')
+        return parseFloat(usdt?.free || '0') + parseFloat(usdt?.locked || '0')
       } else {
         if (!IBKRService.isConnected) return 0
         const account = await IBKRService.getAccountSummary()

@@ -90,4 +90,15 @@ Route.group(() => {
 
   // Notifications (SSE)
   Route.get('/notifications/stream', 'NotificationsController.stream')
+
+  // Fast Trading (millisecond path, in-memory, WS-driven)
+  Route.post('/fast/start', 'FastTradingController.start')
+  Route.post('/fast/stop', 'FastTradingController.stop')
+  Route.get('/fast/status', 'FastTradingController.status')
+  Route.get('/fast/orders', 'FastTradingController.index')
+  Route.get('/fast/orders/:clientOrderId', 'FastTradingController.show')
+  Route.post('/fast/orders', 'FastTradingController.placeOrder')
+  Route.post('/fast/orders/:clientOrderId/cancel', 'FastTradingController.cancelOrder')
+  Route.get('/fast/prices/:symbol', 'FastTradingController.price')
+  Route.post('/fast/subscribe', 'FastTradingController.subscribe')
 }).prefix('/api')
