@@ -56,9 +56,32 @@ class KrakenService {
   private futuresKey: string = ''
   private futuresSecret: string = ''
   private _connected: boolean = false
+  private lastNonce = 0
+  private lastFuturesNonce = 0n
 
   public get isConnected(): boolean {
     return this._connected
+  }
+
+  /**
+   * Kraken requires strictly increasing nonces per API key. Date.now() * 1000
+   * collides when two requests land in the same millisecond (concurrent order
+   * polling + placement), which Kraken rejects with "Invalid nonce".
+   */
+  private nextNonce(): number {
+    const base = Date.now() * 1000
+    this.lastNonce = Math.max(base, this.lastNonce + 1)
+    return this.lastNonce
+  }
+
+  /**
+   * Futures API nonces are strings but must also be strictly increasing.
+   * Monotonic counter appended to the timestamp guarantees uniqueness even
+   * for same-millisecond requests.
+   */
+  private nextFuturesNonce(): string {
+    const base = BigInt(Date.now()) * 1000n + this.lastFuturesNonce++
+    return base.toString()
   }
 
   // ---------------------------------------------------------------------------
@@ -101,7 +124,7 @@ class KrakenService {
   private async publicRequest(path: string, params: Record<string, any> = {}): Promise<any> {
     const qs = Object.keys(params).length ? '?' + querystring.stringify(params) : ''
     const res = await fetch(`${KRAKEN_BASE}${path}${qs}`)
-    const json = await res.json()
+    const json: any = await res.json()
     if (json.error && json.error.length > 0) {
       throw new Error(json.error.join('; '))
     }
@@ -109,7 +132,7 @@ class KrakenService {
   }
 
   private async privateRequest(path: string, params: Record<string, any> = {}): Promise<any> {
-    const nonce = Date.now() * 1000 // microsecond-precision nonce
+    const nonce = this.nextNonce()
     const body = { nonce, ...params }
     const signature = getKrakenSignature(path, body, this.apiSecret)
 
@@ -123,7 +146,7 @@ class KrakenService {
       body: querystring.stringify(body),
     })
 
-    const json = await res.json()
+    const json: any = await res.json()
     if (json.error && json.error.length > 0) {
       throw new Error(json.error.join('; '))
     }
@@ -132,7 +155,7 @@ class KrakenService {
 
   private async futuresRequest(method: string, path: string, params: Record<string, any> = {}): Promise<any> {
     const postData = method === 'POST' ? querystring.stringify(params) : ''
-    const nonce = Date.now().toString()
+    const nonce = this.nextFuturesNonce()
     const signature = getFuturesSignature(path, postData, nonce, this.futuresSecret)
 
     const url = method === 'GET' && Object.keys(params).length
@@ -150,7 +173,7 @@ class KrakenService {
       ...(method === 'POST' && postData ? { body: postData } : {}),
     })
 
-    const json = await res.json()
+    const json: any = await res.json()
     if (json.result && json.result !== 'success' && json.error) {
       throw new Error(json.error)
     }
@@ -227,7 +250,13 @@ class KrakenService {
         }
       }
       if (trade.orderType === 'TRAIL' && trade.trailAmount) {
-        params.price = `+${trade.trailAmount}`
+        // Kraken trailing-stop: `price` = activation price (numeric), `price2`
+        // = trailing offset (with +/- prefix). The old code put the offset in
+        // `price`, which the API rejects.
+        if (trade.stopPrice) {
+          params.price = String(trade.stopPrice)
+        }
+        params.price2 = `+${trade.trailAmount}`
       }
 
       // Margin leverage (exchange field: e.g. "2x", "3x", "5x")
@@ -317,7 +346,7 @@ class KrakenService {
       if (newStatus) trade.status = newStatus
 
       const volExec = parseFloat(order.vol_exec || '0')
-      trade.filledQuantity = Math.floor(volExec) || volExec
+      trade.filledQuantity = volExec
 
       if (order.price && parseFloat(order.price) > 0) {
         trade.fillPrice = parseFloat(order.price)
@@ -468,6 +497,66 @@ class KrakenService {
 
   public isFuturesTrade(trade: Trade): boolean {
     return trade.exchange.toLowerCase() === 'futures'
+  }
+
+  /**
+   * Poll futures order status from the futures API.
+   * The spot QueryOrders endpoint cannot resolve futures order IDs, so
+   * futures trades would otherwise stay 'submitted' forever.
+   */
+  public async syncFuturesOrderStatus(trade: Trade): Promise<Trade> {
+    const orderId = trade.externalOrderId
+    if (!orderId) return trade
+
+    try {
+      const result = await this.futuresRequest('POST', '/derivatives/api/v3/orders/status', {
+        order_ids: orderId,
+      })
+      const order = result?.orders?.[0]
+      if (!order) return trade
+
+      const statusMap: Record<string, Trade['status']> = {
+        untouched: 'submitted',
+        untriggered: 'submitted',
+        cancel_requested: 'submitted',
+        partially_filled: 'partially_filled',
+        filled: 'filled',
+        cancelled: 'cancelled',
+        cancelled_externally: 'cancelled',
+      }
+
+      const newStatus = statusMap[order.status]
+      if (newStatus) trade.status = newStatus
+
+      const filledQty = parseFloat(order.filled || '0')
+      if (filledQty > 0) trade.filledQuantity = filledQty
+
+      if (order.avgEntryPrice && parseFloat(order.avgEntryPrice) > 0) {
+        trade.fillPrice = parseFloat(order.avgEntryPrice)
+      }
+
+      if (newStatus === 'filled') {
+        trade.filledAt = DateTime.now()
+      } else if (newStatus === 'cancelled') {
+        trade.cancelledAt = DateTime.now()
+      }
+
+      await trade.save()
+      return trade
+    } catch (error) {
+      Logger.error('[Kraken Futures] Failed to sync order %s: %s', orderId, error.message)
+      return trade
+    }
+  }
+
+  /**
+   * Status sync for both spot and futures trades.
+   */
+  public async syncOrderStatusAny(trade: Trade): Promise<Trade> {
+    if (this.isFuturesTrade(trade)) {
+      return this.syncFuturesOrderStatus(trade)
+    }
+    return this.syncOrderStatus(trade)
   }
 
   public async placeOrderAny(trade: Trade): Promise<Trade> {

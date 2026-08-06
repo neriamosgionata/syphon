@@ -333,7 +333,10 @@ export default class TradingController {
   public async stats({ request, response }: HttpContextContract) {
     const symbol = request.input('symbol')
 
-    const whereClause = symbol ? `WHERE t.symbol = '${symbol.toUpperCase()}'` : ''
+    // Parameterized: the symbol is user input and must not be interpolated
+    // into the SQL text.
+    const whereClause = symbol ? 'WHERE t.symbol = ?' : ''
+    const whereParams = symbol ? [symbol.toUpperCase()] : []
 
     const [overview, bySymbol, byStatus, recentFills] = await Promise.all([
       Database.rawQuery(`
@@ -346,7 +349,7 @@ export default class TradingController {
           SUM(COALESCE(realized_pnl, 0)) as total_realized_pnl
         FROM trades t
         ${whereClause}
-      `),
+      `, whereParams),
       Database.rawQuery(`
         SELECT
           t.symbol,
@@ -366,7 +369,7 @@ export default class TradingController {
         FROM trades t
         ${whereClause}
         GROUP BY status
-      `),
+      `, whereParams),
       Trade.query()
         .where('status', 'filled')
         .preload('ticker')

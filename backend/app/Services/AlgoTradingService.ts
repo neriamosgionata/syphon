@@ -59,6 +59,9 @@ interface NNPrediction {
 
 // ─── Service ────────────────────────────────────────────────
 
+const TERMINAL_TRADE_STATUSES = ['filled', 'cancelled', 'error', 'inactive']
+const STUCK_TRADE_RECOVERY_MINUTES = 60
+
 export default class AlgoTradingService {
   private runId: string
   private config!: AlgoConfig
@@ -141,13 +144,18 @@ export default class AlgoTradingService {
 
       // Step 3: Get current state
       await this.progress(15, 'Loading portfolio state')
-      const openPositions = await AlgoPosition.query().where('status', 'open')
-      const closingPositions = await AlgoPosition.query().where('status', 'closing')
+      const [openPositions, closingPositions, pendingPositions] = await Promise.all([
+        AlgoPosition.query().where('status', 'open'),
+        AlgoPosition.query().where('status', 'closing'),
+        AlgoPosition.query().where('status', 'pending_entry'),
+      ])
       result.positionsBefore = openPositions.length
 
       // Step 4: Run screener
       await this.progress(25, 'Running QuantEngine screener')
-      const engine = new QuantEngine()
+      // QuantEngine is an exported singleton instance — constructing it would
+      // throw "not a constructor" and abort every algo run.
+      const engine = QuantEngine
       const screenerResult = await engine.screener({ days: 365, minArticles: 0 })
 
       const screenerMap = new Map<string, ScreenerTicker>()
@@ -189,13 +197,13 @@ export default class AlgoTradingService {
       // Step 6: Process entries
       await this.progress(70, 'Evaluating entry candidates')
       const currentOpenCount = await AlgoPosition.query()
-        .whereIn('status', ['open', 'closing'])
+        .whereIn('status', ['open', 'closing', 'pending_entry'])
         .count('* as total')
       const activePositionCount = Number(currentOpenCount[0].$extras.total)
 
       // Symbols already in position or pending
       const positionedSymbols = new Set<string>()
-      for (const pos of [...openPositions, ...closingPositions]) {
+      for (const pos of [...openPositions, ...closingPositions, ...pendingPositions]) {
         positionedSymbols.add(pos.symbol)
       }
 
@@ -287,7 +295,7 @@ export default class AlgoTradingService {
   private async evaluateExit(
     pos: AlgoPosition,
     screenerMap: Map<string, ScreenerTicker>,
-    engine: QuantEngine,
+    engine: typeof QuantEngine,
     portfolioValue: number
   ): Promise<{ decision: 'exit' | 'hold' }> {
     const screenerData = screenerMap.get(pos.symbol)
@@ -406,7 +414,7 @@ export default class AlgoTradingService {
 
   private async evaluateEntry(
     candidate: ScreenerTicker,
-    engine: QuantEngine,
+    engine: typeof QuantEngine,
     portfolioValue: number,
     currentExposurePct: number
   ): Promise<{ exposurePct: number } | null> {
@@ -448,10 +456,18 @@ export default class AlgoTradingService {
       return null
     }
 
-    const quantity = Math.floor((portfolioValue * effectiveSizePct) / analysis.currentPrice)
-    if (quantity < 1) {
+    // Position sizing: stocks trade in whole shares, crypto in fractions.
+    // Flooring to whole shares for crypto would reject nearly every position
+    // (e.g. $1000 of BTC at $100k = 0 shares).
+    const isCrypto = this.config.broker === 'kraken' || this.config.broker === 'binance'
+    const rawQuantity = (portfolioValue * effectiveSizePct) / analysis.currentPrice
+    const quantity = isCrypto
+      ? Math.floor(rawQuantity * 1e6) / 1e6
+      : Math.floor(rawQuantity)
+
+    if (quantity <= 0) {
       await this.logDecision(candidate.symbol, await this.getTickerId(candidate.symbol), 'skip',
-        `position too small: $${(portfolioValue * effectiveSizePct).toFixed(0)} < 1 share at $${analysis.currentPrice}`, {
+        `position too small: $${(portfolioValue * effectiveSizePct).toFixed(0)} at $${analysis.currentPrice}`, {
           compositeScore: analysis.compositeScore,
           conviction: rec.conviction,
           regime: rec.regime,
@@ -462,9 +478,12 @@ export default class AlgoTradingService {
     const stopLoss = rec.stopLoss || analysis.currentPrice * 0.95
     const takeProfit = rec.takeProfit || analysis.currentPrice * 1.10
 
-    // Blend NN prediction if available (QuantEngine 60%, NN 40%)
-    const { adjustment: nnAdj, nnData } = this.getNNScoreAdjustment(candidate.symbol)
-    const blendedScore = analysis.compositeScore + nnAdj
+    // Blend NN prediction with QuantEngine score (60% quant, 40% NN)
+    const { nnScore, nnData } = this.getNNScore(candidate.symbol)
+    const blendedScore = nnScore === null
+      ? analysis.compositeScore
+      : analysis.compositeScore * 0.6 + nnScore * 0.4
+    const nnAdj = blendedScore - analysis.compositeScore
 
     const nnInfo = nnData
       ? `, NN: ${nnData.direction} (${(nnData.confidence * 100).toFixed(0)}% conf, r3h=${(nnData.returns.r3h * 100).toFixed(2)}%)`
@@ -494,7 +513,9 @@ export default class AlgoTradingService {
       })
       tradeId = trade.id
 
-      // Create algo position
+      // Create algo position — pending_entry until the order actually fills,
+      // so unfilled entries don't consume exposure, trigger exits, or count
+      // as real positions. reconcilePositions promotes it to 'open' on fill.
       const algoPos = await AlgoPosition.create({
         tickerId: ticker.id,
         symbol: candidate.symbol,
@@ -509,7 +530,7 @@ export default class AlgoTradingService {
         entryRegime: rec.regime,
         entryReason,
         entryTradeId: trade.id,
-        status: 'open',
+        status: 'pending_entry',
         forceClose: false,
         openedAt: DateTime.now(),
       })
@@ -548,40 +569,86 @@ export default class AlgoTradingService {
   // ── Position reconciliation ─────────────────────────────────
 
   public async reconcilePositions(): Promise<void> {
-    // Reconcile entries: update entry price from fill
-    const openPositions = await AlgoPosition.query()
-      .where('status', 'open')
-      .preload('entryTrade')
+    const [pendingPositions, openPositions, closingPositions] = await Promise.all([
+      AlgoPosition.query().where('status', 'pending_entry').preload('entryTrade'),
+      AlgoPosition.query().where('status', 'open').preload('entryTrade'),
+      AlgoPosition.query().where('status', 'closing').preload('exitTrade'),
+    ])
 
+    // Pending entries: promote to open on fill, close on failure, recover if stuck
+    for (const pos of pendingPositions) {
+      const trade = pos.entryTrade
+      if (!trade) continue
+
+      if (trade.status === 'filled') {
+        pos.status = 'open'
+        if (trade.fillPrice) {
+          pos.entryPrice = trade.fillPrice
+          pos.currentPrice = trade.fillPrice
+        }
+        await pos.save()
+        Logger.info('[Algo] Entry filled for %s @ %s, position open', pos.symbol, pos.entryPrice)
+        continue
+      }
+
+      if (TERMINAL_TRADE_STATUSES.includes(trade.status)) {
+        pos.status = 'closed'
+        pos.exitReason = `entry trade ${trade.status}: ${trade.errorMessage || trade.status}`
+        pos.closedAt = DateTime.now()
+        pos.realizedPnl = 0
+        await pos.save()
+        Logger.warn('[Algo] Closed position %s: entry trade %s', pos.symbol, trade.status)
+        continue
+      }
+
+      // Entry order stuck in a non-terminal state (broker hiccup, lost job)
+      await this.recoverStuckTrade(trade)
+      if (trade.status === 'filled') {
+        pos.status = 'open'
+        if (trade.fillPrice) {
+          pos.entryPrice = trade.fillPrice
+          pos.currentPrice = trade.fillPrice
+        }
+        await pos.save()
+      } else if (TERMINAL_TRADE_STATUSES.includes(trade.status)) {
+        pos.status = 'closed'
+        pos.exitReason = `entry trade ${trade.status}: ${trade.errorMessage || trade.status}`
+        pos.closedAt = DateTime.now()
+        pos.realizedPnl = 0
+        await pos.save()
+        Logger.warn('[Algo] Closed position %s: entry trade %s (recovered)', pos.symbol, trade.status)
+      }
+    }
+
+    // Reconcile open entries: update entry price from fill
     for (const pos of openPositions) {
-      if (pos.entryTrade?.status === 'filled' && pos.entryTrade.fillPrice) {
-        if (pos.entryPrice !== pos.entryTrade.fillPrice) {
-          pos.entryPrice = pos.entryTrade.fillPrice
+      const trade = pos.entryTrade
+      if (!trade) continue
+
+      if (trade.status === 'filled' && trade.fillPrice) {
+        if (pos.entryPrice !== trade.fillPrice) {
+          pos.entryPrice = trade.fillPrice
           await pos.save()
           Logger.debug('[Algo] Reconciled entry price for %s: %s', pos.symbol, pos.entryPrice)
         }
       }
-      // If entry trade failed, close the algo position
-      if (pos.entryTrade?.status === 'error' || pos.entryTrade?.status === 'cancelled') {
+      if (TERMINAL_TRADE_STATUSES.includes(trade.status) && trade.status !== 'filled') {
         pos.status = 'closed'
-        pos.exitReason = `entry trade ${pos.entryTrade.status}: ${pos.entryTrade.errorMessage || 'cancelled'}`
+        pos.exitReason = `entry trade ${trade.status}: ${trade.errorMessage || trade.status}`
         pos.closedAt = DateTime.now()
         pos.realizedPnl = 0
         await pos.save()
-        Logger.warn('[Algo] Closed position %s: entry trade %s', pos.symbol, pos.entryTrade.status)
+        Logger.warn('[Algo] Closed position %s: entry trade %s', pos.symbol, trade.status)
       }
     }
 
     // Reconcile exits: finalize closed positions
-    const closingPositions = await AlgoPosition.query()
-      .where('status', 'closing')
-      .preload('exitTrade')
-
     for (const pos of closingPositions) {
-      if (!pos.exitTrade) continue
+      const trade = pos.exitTrade
+      if (!trade) continue
 
-      if (pos.exitTrade.status === 'filled') {
-        const exitPrice = pos.exitTrade.fillPrice || pos.currentPrice || pos.entryPrice
+      if (trade.status === 'filled') {
+        const exitPrice = trade.fillPrice || pos.currentPrice || pos.entryPrice
         const direction = pos.side === 'BUY' ? 1 : -1
         const pnl = (exitPrice - pos.entryPrice) * pos.quantity * direction
 
@@ -591,16 +658,80 @@ export default class AlgoTradingService {
         pos.closedAt = DateTime.now()
         await pos.save()
         Logger.info('[Algo] Position closed: %s P&L $%.2f', pos.symbol, pnl)
+        continue
       }
 
-      // If exit trade failed, reset to open for retry on next cycle
-      if (pos.exitTrade.status === 'error' || pos.exitTrade.status === 'cancelled') {
+      if (TERMINAL_TRADE_STATUSES.includes(trade.status)) {
         pos.status = 'open'
         pos.exitTradeId = null
         pos.exitReason = null
         await pos.save()
         Logger.warn('[Algo] Exit trade failed for %s, resetting to open', pos.symbol)
+        continue
       }
+
+      // Exit order stuck (e.g. broker disconnected, monitor job lost):
+      // re-sync from broker, then try to cancel so the position can retry
+      // on the next run instead of occupying a slot forever.
+      await this.recoverStuckTrade(trade)
+      if (trade.status === 'filled') {
+        const exitPrice = trade.fillPrice || pos.currentPrice || pos.entryPrice
+        const direction = pos.side === 'BUY' ? 1 : -1
+        const pnl = (exitPrice - pos.entryPrice) * pos.quantity * direction
+
+        pos.status = 'closed'
+        pos.exitPrice = exitPrice
+        pos.realizedPnl = pnl
+        pos.closedAt = DateTime.now()
+        await pos.save()
+        Logger.info('[Algo] Position closed (recovered exit): %s P&L $%.2f', pos.symbol, pnl)
+      } else if (TERMINAL_TRADE_STATUSES.includes(trade.status)) {
+        pos.status = 'open'
+        pos.exitTradeId = null
+        pos.exitReason = null
+        await pos.save()
+        Logger.warn('[Algo] Exit trade cancelled after recovery for %s, resetting to open', pos.symbol)
+      }
+    }
+  }
+
+  /**
+   * Recover a trade stuck in a non-terminal state for too long: re-sync with
+   * the broker (REST-able brokers only), then attempt to cancel the order so
+   * its position doesn't stay wedged. IBKR status arrives via socket callbacks
+   * after cancelOrder, so recovery there completes on the next cycle.
+   *
+   * GTC limit entries are intentionally left alone: a patient limit order may
+   * legitimately wait days to fill, and cancelling it every cycle would never
+   * fill the position.
+   */
+  private async recoverStuckTrade(trade: Trade): Promise<void> {
+    const ageMinutes = DateTime.now().diff(trade.createdAt, 'minutes').minutes
+    if (ageMinutes < STUCK_TRADE_RECOVERY_MINUTES) return
+
+    try {
+      if (trade.broker === 'kraken' && !TERMINAL_TRADE_STATUSES.includes(trade.status)) {
+        await KrakenService.syncOrderStatusAny(trade)
+      } else if (trade.broker === 'binance' && !TERMINAL_TRADE_STATUSES.includes(trade.status)) {
+        await BinanceService.syncOrderStatus(trade)
+      }
+
+      if (TERMINAL_TRADE_STATUSES.includes(trade.status)) return
+
+      if (trade.orderType === 'LMT' && (!trade.timeInForce || trade.timeInForce === 'GTC')) {
+        Logger.debug('[Algo] Leaving GTC limit trade %d untouched (patient entry)', trade.id)
+        return
+      }
+
+      if (trade.broker === 'kraken') {
+        await KrakenService.cancelOrderAny(trade)
+      } else if (trade.broker === 'binance') {
+        await BinanceService.cancelOrder(trade)
+      } else {
+        await IBKRService.cancelOrder(trade)
+      }
+    } catch (err) {
+      Logger.warn('[Algo] Stuck trade recovery failed for trade %d: %s', trade.id, err.message)
     }
   }
 
@@ -630,15 +761,16 @@ export default class AlgoTradingService {
     let totalReturnPct = 0
     let totalDaysHeld = 0
 
-    // For drawdown calculation
-    let peak = 0
-    let cumPnl = 0
+    // For drawdown calculation: track the equity curve (1.0 + cumulative % returns).
+    // The old peak-of-raw-P&L approach started at 0, so any opening losses were
+    // invisible and the units were dollars, not a ratio.
+    let equity = 1
+    let peakEquity = 1
     let maxDrawdown = 0
 
     for (const pos of closed) {
       const pnl = Number(pos.realizedPnl) || 0
       totalPnl += pnl
-      cumPnl += pnl
 
       if (pnl > 0) {
         winCount++
@@ -659,8 +791,9 @@ export default class AlgoTradingService {
         totalDaysHeld += pos.closedAt.diff(pos.openedAt, 'days').days
       }
 
-      if (cumPnl > peak) peak = cumPnl
-      const dd = peak > 0 ? (peak - cumPnl) / peak : 0
+      equity += returnPct / 100
+      if (equity > peakEquity) peakEquity = equity
+      const dd = peakEquity > 0 ? (peakEquity - equity) / peakEquity : 0
       if (dd > maxDrawdown) maxDrawdown = dd
     }
 
@@ -712,7 +845,7 @@ export default class AlgoTradingService {
         return
       }
 
-      const data = await resp.json()
+      const data: any = await resp.json()
       for (const pred of (data.predictions || [])) {
         this.nnPredictions.set(pred.pair, pred)
       }
@@ -722,7 +855,13 @@ export default class AlgoTradingService {
     }
   }
 
-  private getNNScoreAdjustment(symbol: string): { adjustment: number; nnData: NNPrediction | null } {
+  /**
+   * Map a NN prediction to a score on the same -100..100 scale as the
+   * QuantEngine composite. The old implementation returned an additive bonus
+   * (max ±14.4) while claiming a 40% weight; the caller now blends properly:
+   * blended = quant * 0.6 + nnScore * 0.4.
+   */
+  private getNNScore(symbol: string): { nnScore: number | null; nnData: NNPrediction | null } {
     // Map symbol back to Kraken pair
     const symbolToPair: Record<string, string> = {
       'BTC': 'XXBTZUSD', 'ETH': 'XETHZUSD', 'SOL': 'SOLUSD',
@@ -730,17 +869,15 @@ export default class AlgoTradingService {
       'LINK': 'LINKUSD', 'AVAX': 'AVAXUSD',
     }
     const pair = symbolToPair[symbol] || symbolToPair[symbol.replace(/USD$/, '')]
-    const pred = pair ? this.nnPredictions.get(pair) : null
-    if (!pred || pred.confidence < 0.3) return { adjustment: 0, nnData: pred }
+    const pred = pair ? this.nnPredictions.get(pair) ?? null : null
+    if (!pred || pred.confidence < 0.3) return { nnScore: null, nnData: pred }
 
-    // NN weight: 40% of composite, QuantEngine: 60%
-    // Convert NN direction + confidence to a score adjustment (-40 to +40)
     let directionMultiplier = 0
     if (pred.direction === 'up') directionMultiplier = 1
     else if (pred.direction === 'down') directionMultiplier = -1
 
-    const adjustment = directionMultiplier * pred.confidence * 40 * 0.4
-    return { adjustment, nnData: pred }
+    const nnScore = directionMultiplier * pred.confidence * 100
+    return { nnScore, nnData: pred }
   }
 
   // ── Helpers ─────────────────────────────────────────────────
@@ -753,9 +890,7 @@ export default class AlgoTradingService {
         return parseFloat(tb.eb || '0')
       } else if (this.config.broker === 'binance') {
         if (!BinanceService.isConnected) return 0
-        const account = await BinanceService.getAccountInfo()
-        const usdt = account.balances?.find((b: any) => b.asset === 'USDT')
-        return parseFloat(usdt?.free || '0') + parseFloat(usdt?.locked || '0')
+        return await BinanceService.getTotalUsdtValue()
       } else {
         if (!IBKRService.isConnected) return 0
         const account = await IBKRService.getAccountSummary()

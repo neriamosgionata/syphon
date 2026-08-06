@@ -33,9 +33,10 @@ class IBKRService {
   private ib: IBApi | null = null
   private connected: boolean = false
   private nextOrderId: number = 0
-  private positions: IBKRPosition[] = []
-  private accountSummary: IBKRAccountSummary = {}
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectDelayMs = 30000
+  private orderIdPromise: Promise<void> | null = null
+  private resolveOrderIdPromise: (() => void) | null = null
 
   public get isConnected(): boolean {
     return this.connected
@@ -80,6 +81,11 @@ class IBKRService {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
+    if (this.resolveOrderIdPromise) {
+      this.resolveOrderIdPromise()
+      this.resolveOrderIdPromise = null
+      this.orderIdPromise = null
+    }
     if (this.ib) {
       this.ib.disconnect()
       this.ib = null
@@ -88,14 +94,33 @@ class IBKRService {
     }
   }
 
+  /**
+   * Auto-reconnect loop with exponential backoff. The old single-shot retry
+   * stopped permanently after one failed attempt if TWS/Gateway was still
+   * down.
+   */
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null
+      const ok = await this.connect()
+      if (ok) {
+        this.reconnectDelayMs = 30000
+      } else if (!this.connected) {
+        this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, 300000)
+        Logger.warn('[IBKR] Reconnect failed, retrying in %ds', this.reconnectDelayMs / 1000)
+        this.scheduleReconnect()
+      }
+    }, this.reconnectDelayMs)
+  }
+
   private setupEventHandlers() {
     if (!this.ib) return
 
     this.ib.on(EventName.disconnected, () => {
       this.connected = false
       Logger.warn('[IBKR] Disconnected from TWS/Gateway')
-      // Auto-reconnect after 30s
-      this.reconnectTimer = setTimeout(() => this.connect(), 30000)
+      this.scheduleReconnect()
     })
 
     this.ib.on(EventName.error, (err: Error, code: number, reqId: number) => {
@@ -109,6 +134,11 @@ class IBKRService {
 
     this.ib.on(EventName.nextValidId, (orderId: number) => {
       this.nextOrderId = orderId
+      if (this.resolveOrderIdPromise) {
+        this.resolveOrderIdPromise()
+        this.resolveOrderIdPromise = null
+        this.orderIdPromise = null
+      }
       Logger.debug('[IBKR] Next valid order ID: %d', orderId)
     })
 
@@ -213,6 +243,31 @@ class IBKRService {
     return this.nextOrderId++
   }
 
+  /**
+   * IB assigns order IDs asynchronously via nextValidId after connecting.
+   * Placing an order before it arrives would use orderId 0, which TWS rejects
+   * and leaves the trade stuck in 'submitted'.
+   */
+  private async ensureOrderIdReady(): Promise<boolean> {
+    if (this.nextOrderId > 0) return true
+
+    if (!this.orderIdPromise) {
+      this.orderIdPromise = new Promise((resolve) => {
+        this.resolveOrderIdPromise = resolve
+      })
+      setTimeout(() => {
+        if (this.resolveOrderIdPromise) {
+          this.resolveOrderIdPromise()
+          this.resolveOrderIdPromise = null
+          this.orderIdPromise = null
+        }
+      }, 10000)
+    }
+
+    await this.orderIdPromise
+    return this.nextOrderId > 0
+  }
+
   private buildContract(symbol: string, exchange: string = 'SMART', currency: string = 'USD'): Contract {
     return {
       symbol,
@@ -284,6 +339,14 @@ class IBKRService {
       }
     }
 
+    const idReady = await this.ensureOrderIdReady()
+    if (!idReady) {
+      trade.status = 'error'
+      trade.errorMessage = 'No valid order ID from TWS/Gateway (nextValidId not received)'
+      await trade.save()
+      return trade
+    }
+
     const orderId = this.getNextOrderId()
     const contract = this.buildContract(trade.symbol, trade.exchange, trade.currency)
     const order = this.buildOrder(orderId, trade.side, trade.orderType, trade.quantity, {
@@ -352,11 +415,13 @@ class IBKRService {
     }
 
     return new Promise((resolve) => {
-      this.positions = []
+      // Local state: concurrent calls (e.g. TradingController.status firing
+      // positions + account in parallel) must not clobber each other's data.
+      const positions: IBKRPosition[] = []
 
       const onPosition = (account: string, contract: Contract, pos: number, avgCost: number) => {
         if (pos !== 0) {
-          this.positions.push({
+          positions.push({
             account,
             symbol: contract.symbol || '',
             secType: contract.secType || '',
@@ -369,7 +434,7 @@ class IBKRService {
 
       const onEnd = () => {
         this.ib!.off(EventName.position, onPosition)
-        resolve([...this.positions])
+        resolve(positions)
       }
 
       this.ib!.on(EventName.position, onPosition)
@@ -380,7 +445,7 @@ class IBKRService {
       setTimeout(() => {
         this.ib!.off(EventName.position, onPosition)
         this.ib!.off(EventName.positionEnd, onEnd)
-        resolve([...this.positions])
+        resolve(positions)
       }, 10000)
     })
   }
@@ -392,7 +457,7 @@ class IBKRService {
     }
 
     return new Promise((resolve) => {
-      this.accountSummary = {}
+      const summary: IBKRAccountSummary = {}
       const reqId = 9001
 
       const onSummary = (
@@ -402,12 +467,12 @@ class IBKRService {
         value: string,
         currency: string,
       ) => {
-        this.accountSummary[tag] = { value, currency }
+        summary[tag] = { value, currency }
       }
 
       const onEnd = () => {
         this.ib!.off(EventName.accountSummary, onSummary)
-        resolve({ ...this.accountSummary })
+        resolve(summary)
       }
 
       this.ib!.on(EventName.accountSummary, onSummary)
@@ -423,7 +488,7 @@ class IBKRService {
         this.ib!.off(EventName.accountSummary, onSummary)
         this.ib!.off(EventName.accountSummaryEnd, onEnd)
         this.ib!.cancelAccountSummary(reqId)
-        resolve({ ...this.accountSummary })
+        resolve(summary)
       }, 10000)
     })
   }

@@ -22,13 +22,62 @@ export default class AlgoController {
       'timeInForce', 'cooldownMinutes', 'excludedSymbols',
     ]
 
+    const numericRanges: Record<string, [number, number]> = {
+      entryScoreThreshold: [1, 100],
+      minConviction: [0, 1],
+      minArticles: [0, 50],
+      maxPositions: [1, 50],
+      maxExposurePct: [0.1, 1],
+      maxSinglePositionPct: [0.01, 0.5],
+      dailyLossLimitPct: [0.01, 0.2],
+      exitScoreThreshold: [-100, 0],
+      maxHoldingDays: [1, 365],
+      cooldownMinutes: [1, 60],
+    }
+
+    const stringEnums: Record<string, string[]> = {
+      broker: ['ibkr', 'kraken', 'binance'],
+      orderType: ['MKT', 'LMT'],
+      timeInForce: ['DAY', 'GTC'],
+    }
+
+    const validRegimes = ['trending_up', 'trending_down', 'ranging', 'volatile']
+
     for (const field of allowedFields) {
       // Convert camelCase from body to snake_case keys too
       const snakeField = field.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())
-      const value = body[field] ?? body[snakeField]
-      if (value !== undefined) {
-        ;(config as any)[field] = value
+      let value = body[field] ?? body[snakeField]
+      if (value === undefined) continue
+
+      if (field === 'dryRun') {
+        value = value === true || value === 'true' || value === 1 || value === '1'
+      } else if (numericRanges[field]) {
+        const num = Number(value)
+        if (!Number.isFinite(num)) {
+          return response.badRequest({ error: `${field} must be a number` })
+        }
+        const [min, max] = numericRanges[field]
+        if (num < min || num > max) {
+          return response.badRequest({ error: `${field} must be between ${min} and ${max}` })
+        }
+        value = num
+      } else if (stringEnums[field]) {
+        if (!stringEnums[field].includes(value)) {
+          return response.badRequest({ error: `${field} must be one of: ${stringEnums[field].join(', ')}` })
+        }
+      } else if (field === 'allowedRegimes' || field === 'excludedSymbols') {
+        if (!Array.isArray(value)) {
+          return response.badRequest({ error: `${field} must be an array` })
+        }
+        if (field === 'allowedRegimes') {
+          const invalid = value.filter((r: string) => !validRegimes.includes(r))
+          if (invalid.length > 0) {
+            return response.badRequest({ error: `allowedRegimes contains invalid values: ${invalid.join(', ')}` })
+          }
+        }
       }
+
+      ;(config as any)[field] = value
     }
 
     await config.save()
@@ -91,7 +140,10 @@ export default class AlgoController {
       .preload('exitTrade')
       .orderBy('created_at', 'desc')
 
-    if (status !== 'all') {
+    if (status === 'open') {
+      // Show entries awaiting fill alongside real open positions
+      query.whereIn('status', ['open', 'pending_entry'])
+    } else if (status !== 'all') {
       query.where('status', status)
     }
 
@@ -100,7 +152,7 @@ export default class AlgoController {
     // Compute unrealized P&L for open positions
     const result = positions.map((pos) => {
       const json = pos.serialize()
-      if (pos.status === 'open' || pos.status === 'closing') {
+      if (pos.status === 'open' || pos.status === 'pending_entry' || pos.status === 'closing') {
         const price = pos.currentPrice || pos.entryPrice
         const direction = pos.side === 'BUY' ? 1 : -1
         json.unrealized_pnl = (price - pos.entryPrice) * pos.quantity * direction

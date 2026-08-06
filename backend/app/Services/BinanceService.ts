@@ -125,6 +125,47 @@ class BinanceService {
     return balances
   }
 
+  /**
+   * Total portfolio value in USDT across all assets (stablecoins at 1:1,
+   * other assets priced via USDT pairs, falling back to BTC pairs). The old
+   * USDT-only count undervalued portfolios holding other coins, which skewed
+   * algo exposure sizing.
+   */
+  public async getTotalUsdtValue(): Promise<number> {
+    const account = await this.privateRequest('/api/v3/account')
+    const STABLECOINS = new Set(['USDT', 'USDC', 'BUSD', 'TUSD', 'FDUSD', 'DAI', 'USDP'])
+
+    let total = 0
+    const toValue: { asset: string; amount: number }[] = []
+
+    for (const b of account.balances || []) {
+      const amount = parseFloat(b.free || '0') + parseFloat(b.locked || '0')
+      if (amount <= 0) continue
+      if (STABLECOINS.has(b.asset)) {
+        total += amount
+      } else {
+        toValue.push({ asset: b.asset, amount })
+      }
+    }
+
+    for (const { asset, amount } of toValue) {
+      try {
+        const quote = await this.getTicker(`${asset}USDT`)
+        total += amount * parseFloat(quote.price)
+      } catch {
+        try {
+          const btcUsd = await this.getTicker('BTCUSDT')
+          const assetBtc = await this.getTicker(`${asset}BTC`)
+          total += amount * parseFloat(assetBtc.price) * parseFloat(btcUsd.price)
+        } catch {
+          Logger.debug('[Binance] Could not price %s — skipped in portfolio value', asset)
+        }
+      }
+    }
+
+    return total
+  }
+
   public async getOpenOrders(symbol?: string): Promise<BinanceOrderInfo[]> {
     const params: Record<string, any> = {}
     if (symbol) params.symbol = symbol
@@ -266,6 +307,20 @@ class BinanceService {
       const quoteQty = parseFloat(order.cummulativeQuoteQty || '0')
       if (volExec > 0 && quoteQty > 0) {
         trade.fillPrice = quoteQty / volExec
+      }
+
+      // Binance order queries don't include fees; pull them from the fills
+      if (volExec > 0) {
+        try {
+          const fills = await this.privateRequest('/api/v3/myTrades', { symbol, orderId: Number(orderId) })
+          let commission = 0
+          for (const f of fills || []) {
+            commission += parseFloat(f.commission || '0')
+          }
+          if (commission > 0) trade.commission = commission
+        } catch (err) {
+          Logger.debug('[Binance] Commission sync failed for order %s: %s', orderId, err.message)
+        }
       }
 
       if (newStatus === 'filled') {

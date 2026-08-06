@@ -55,8 +55,10 @@ class BinanceWebSocketService {
   private accountListeners = new Set<(data: any) => void>()
 
   private reconnectAttempts = new Map<StreamName, number>()
+  private reconnectTimers = new Map<StreamName, ReturnType<typeof setTimeout>>()
   private maxReconnectAttempts = 20
   private baseReconnectMs = 500
+  private intentionalCloses = new Set<WebSocket>()
 
   // ---------------------------------------------------------------------------
   // Lifecycle
@@ -88,10 +90,15 @@ class BinanceWebSocketService {
 
   public disconnect(): void {
     for (const [name, ws] of this.connections) {
-      ws.close(1000, 'shutdown')
+      this.closeIntentionally(ws, 1000, 'shutdown')
       Logger.debug('[BinanceWS] Closed %s stream', name)
     }
     this.connections.clear()
+    // Cancel pending reconnects so a stream doesn't resurrect after shutdown
+    for (const timer of this.reconnectTimers.values()) {
+      clearTimeout(timer)
+    }
+    this.reconnectTimers.clear()
     if (this.listenKeyTimer) {
       clearInterval(this.listenKeyTimer)
       this.listenKeyTimer = null
@@ -152,10 +159,22 @@ class BinanceWebSocketService {
   // Connection helpers
   // ---------------------------------------------------------------------------
 
+  /**
+   * Close a socket without triggering the auto-reconnect path. Used when the
+   * close is deliberate (replacement stream, shutdown, symbol resubscribe).
+   */
+  private closeIntentionally(ws: WebSocket | undefined, code = 1000, reason = 'reconnect'): void {
+    if (!ws) return
+    this.intentionalCloses.add(ws)
+    try {
+      ws.close(code, reason)
+    } catch { /* socket already closing */ }
+  }
+
   private connectStream(name: StreamName, url: string): void {
     const existing = this.connections.get(name)
-    if (existing && existing.readyState === WebSocket.OPEN) {
-      existing.close(1000, 'reconnect')
+    if (existing && existing.readyState !== WebSocket.CLOSED) {
+      this.closeIntentionally(existing)
     }
 
     Logger.debug('[BinanceWS] Connecting %s stream', name)
@@ -175,8 +194,11 @@ class BinanceWebSocketService {
 
     ws.on('close', (code: number, reason: Buffer) => {
       Logger.warn('[BinanceWS] %s stream closed (code=%d): %s', name, code, reason.toString())
-      this.connections.delete(name)
-      this.scheduleReconnect(name)
+      const intentional = this.intentionalCloses.delete(ws)
+      // Only clear the map entry if this socket is still the current one;
+      // a replaced socket must not evict its replacement.
+      if (this.connections.get(name) === ws) this.connections.delete(name)
+      if (!intentional) this.scheduleReconnect(name)
     })
 
     ws.on('error', (err: Error) => {
@@ -198,7 +220,11 @@ class BinanceWebSocketService {
     const delay = Math.min(this.baseReconnectMs * Math.pow(2, attempts - 1), 30000)
     Logger.info('[BinanceWS] Reconnecting %s in %dms (attempt %d)', name, delay, attempts)
 
-    setTimeout(() => {
+    const existing = this.reconnectTimers.get(name)
+    if (existing) clearTimeout(existing)
+
+    const timer = setTimeout(() => {
+      this.reconnectTimers.delete(name)
       if (name === 'prices') {
         this.connectStream('prices', this.buildPriceUrl())
       } else if (name === 'userData') {
@@ -210,11 +236,14 @@ class BinanceWebSocketService {
           .catch(() => this.scheduleReconnect('userData'))
       }
     }, delay)
+    this.reconnectTimers.set(name, timer)
   }
 
   private reconnectStream(name: StreamName): void {
-    const ws = this.connections.get(name)
-    if (ws) ws.close(1000, 'reconnect')
+    // connectStream closes the existing socket intentionally and opens a
+    // replacement immediately; the old socket's close handler is marked
+    // intentional so it won't schedule a second reconnect.
+    if (name === 'prices') this.connectStream('prices', this.buildPriceUrl())
   }
 
   private buildPriceUrl(): string {
@@ -266,7 +295,7 @@ class BinanceWebSocketService {
       method: 'POST',
       headers: { 'X-MBX-APIKEY': this.apiKey },
     })
-    const json = await res.json()
+    const json: any = await res.json()
     if (json.code && json.msg) throw new Error(json.msg)
     return json.listenKey
   }

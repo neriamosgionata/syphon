@@ -1064,11 +1064,18 @@ class QuantEngineService {
     return returns
   }
 
-  private async getSentimentData(tickerId: number, days: number): Promise<SentimentData> {
-    const cutoff = new Date(Date.now() - days * 86400000).toISOString()
+  private async getSentimentData(
+    tickerId: number,
+    days: number,
+    preloaded?: any[]
+  ): Promise<SentimentData> {
+    let analyses = preloaded
+    if (!analyses) {
+      const cutoff = new Date(Date.now() - days * 86400000).toISOString()
+      analyses = await MeilisearchService.getAnalysesForTicker(tickerId, cutoff)
+    }
     const halfCutoff = new Date(Date.now() - (days / 2) * 86400000).toISOString()
 
-    const analyses = await MeilisearchService.getAnalysesForTicker(tickerId, cutoff)
     if (analyses.length === 0) {
       return { totalArticles: 0, avgScore: 0, recentTrend: 0 }
     }
@@ -1117,7 +1124,7 @@ class QuantEngineService {
   public async analyzeTickerData(
     ticker: Ticker,
     snapshots: any[],
-    options: { days?: number } = {}
+    options: { days?: number; analyses?: any[] } = {}
   ): Promise<TickerAnalysis | null> {
     const days = options.days || 365
 
@@ -1187,7 +1194,7 @@ class QuantEngineService {
     const fiftyTwoWeekLow = meta.fiftyTwoWeekLow ? Number(meta.fiftyTwoWeekLow) : null
 
     // Sentiment
-    const sentimentData = await this.getSentimentData(ticker.id, days)
+    const sentimentData = await this.getSentimentData(ticker.id, days, options.analyses)
 
     // Regime detection
     const regime = detectRegime(adxResult, sma50, sma200, vol20d, price)
@@ -1235,7 +1242,10 @@ class QuantEngineService {
       symbol: ticker.symbol,
       name: ticker.name,
       exchange: ticker.exchange,
-      currentPrice: ticker.currentPrice,
+      // Use the latest snapshot close (the same price the indicators are
+      // computed on) rather than the MariaDB tickers.current_price, which is
+      // only refreshed on the cron schedule and can be stale by up to 45 min.
+      currentPrice: price > 0 ? price : ticker.currentPrice,
       dataPoints: bars.length,
 
       sma20, sma50, sma200,
@@ -1287,7 +1297,13 @@ class QuantEngineService {
 
     // Preload all snapshots in batch from Meilisearch
     const tickerIds = tickers.map((t) => t.id)
-    const allSnapshots = await MeilisearchService.getSnapshotsForTickers(tickerIds)
+    const [allSnapshots, allAnalyses] = await Promise.all([
+      MeilisearchService.getSnapshotsForTickers(tickerIds),
+      MeilisearchService.getAnalysesForTickers(
+        tickerIds,
+        new Date(Date.now() - days * 86400000).toISOString()
+      ),
+    ])
 
     // Group snapshots by tickerId
     const snapshotsByTicker = new Map<number, any[]>()
@@ -1297,51 +1313,71 @@ class QuantEngineService {
       snapshotsByTicker.set(s.tickerId, existing)
     }
 
+    // Group analyses by tickerId (single batch query instead of one per ticker)
+    const analysesByTicker = new Map<number, any[]>()
+    for (const a of allAnalyses) {
+      const existing = analysesByTicker.get(a.tickerId) || []
+      existing.push(a)
+      analysesByTicker.set(a.tickerId, existing)
+    }
+
     // Preload SPY returns
     await this.getSPYReturns()
 
     const results: ScreenerResult['tickers'] = []
 
-    for (const ticker of tickers) {
-      try {
-        const tickerSnapshots = snapshotsByTicker.get(ticker.id) || []
-        if (tickerSnapshots.length < 5) continue
+    // Analyze tickers with bounded concurrency: work is I/O-bound (Meilisearch
+    // sentiment + local math), so sequential processing wastes latency.
+    const CONCURRENCY = 6
+    let cursor = 0
+    const workerCount = Math.min(CONCURRENCY, tickers.length)
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (cursor < tickers.length) {
+        const ticker = tickers[cursor++]
+        try {
+          const tickerSnapshots = snapshotsByTicker.get(ticker.id) || []
+          if (tickerSnapshots.length < 5) continue
 
-        const analysis = await this.analyzeTickerData(ticker, tickerSnapshots, { days })
-        if (!analysis) continue
-        if (minArticles > 0 && (analysis.sentiment?.totalArticles || 0) < minArticles) continue
+          const analysis = await this.analyzeTickerData(ticker, tickerSnapshots, {
+            days,
+            analyses: analysesByTicker.get(ticker.id),
+          })
+          if (!analysis) continue
+          if (minArticles > 0 && (analysis.sentiment?.totalArticles || 0) < minArticles) continue
 
-        const smaTrend: 'bullish' | 'bearish' | 'neutral' | null =
-          analysis.sma50 && analysis.sma200
-            ? analysis.sma50 > analysis.sma200 ? 'bullish' : 'bearish'
-            : null
+          const smaTrend: 'bullish' | 'bearish' | 'neutral' | null =
+            analysis.sma50 && analysis.sma200
+              ? analysis.sma50 > analysis.sma200 ? 'bullish' : 'bearish'
+              : null
 
-        results.push({
-          symbol: analysis.symbol,
-          name: analysis.name,
-          price: analysis.currentPrice,
-          rsi14: analysis.rsi14 ? Math.round(analysis.rsi14 * 10) / 10 : null,
-          macd_histogram: analysis.macd ? Math.round(analysis.macd.histogram * 100) / 100 : null,
-          sma_trend: smaTrend,
-          bollinger_position: analysis.bollingerBands ? Math.round(analysis.bollingerBands.percentB * 100) / 100 : null,
-          volatility20d: analysis.volatility20d ? Math.round(analysis.volatility20d * 1000) / 10 : null,
-          volume_ratio: analysis.volumeRatio ? Math.round(analysis.volumeRatio * 100) / 100 : null,
-          return20d: analysis.return20d ? Math.round(analysis.return20d * 10000) / 100 : null,
-          sharpe: analysis.sharpeRatio ? Math.round(analysis.sharpeRatio * 100) / 100 : null,
-          beta: analysis.beta ? Math.round(analysis.beta * 100) / 100 : null,
-          max_drawdown: analysis.maxDrawdown ? Math.round(analysis.maxDrawdown * 10000) / 100 : null,
-          sentiment_score: analysis.sentiment ? Math.round(analysis.sentiment.avgScore * 1000) / 1000 : null,
-          article_count: analysis.sentiment?.totalArticles || 0,
-          composite_score: analysis.compositeScore,
-          signal: analysis.quantSignal,
-          conviction: analysis.recommendation.conviction,
-          regime: analysis.recommendation.regime,
-          patterns: analysis.patterns.map((p) => p.name),
-        })
-      } catch (err) {
-        Logger.warn('[Quant] Failed to analyze %s: %s', ticker.symbol, (err as Error).message)
+          results.push({
+            symbol: analysis.symbol,
+            name: analysis.name,
+            price: analysis.currentPrice,
+            rsi14: analysis.rsi14 ? Math.round(analysis.rsi14 * 10) / 10 : null,
+            macd_histogram: analysis.macd ? Math.round(analysis.macd.histogram * 100) / 100 : null,
+            sma_trend: smaTrend,
+            bollinger_position: analysis.bollingerBands ? Math.round(analysis.bollingerBands.percentB * 100) / 100 : null,
+            volatility20d: analysis.volatility20d ? Math.round(analysis.volatility20d * 1000) / 10 : null,
+            volume_ratio: analysis.volumeRatio ? Math.round(analysis.volumeRatio * 100) / 100 : null,
+            return20d: analysis.return20d ? Math.round(analysis.return20d * 10000) / 100 : null,
+            sharpe: analysis.sharpeRatio ? Math.round(analysis.sharpeRatio * 100) / 100 : null,
+            beta: analysis.beta ? Math.round(analysis.beta * 100) / 100 : null,
+            max_drawdown: analysis.maxDrawdown ? Math.round(analysis.maxDrawdown * 10000) / 100 : null,
+            sentiment_score: analysis.sentiment ? Math.round(analysis.sentiment.avgScore * 1000) / 1000 : null,
+            article_count: analysis.sentiment?.totalArticles || 0,
+            composite_score: analysis.compositeScore,
+            signal: analysis.quantSignal,
+            conviction: analysis.recommendation.conviction,
+            regime: analysis.recommendation.regime,
+            patterns: analysis.patterns.map((p) => p.name),
+          })
+        } catch (err) {
+          Logger.warn('[Quant] Failed to analyze %s: %s', ticker.symbol, (err as Error).message)
+        }
       }
-    }
+    })
+    await Promise.all(workers)
 
     results.sort((a, b) => b.composite_score - a.composite_score)
 

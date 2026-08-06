@@ -13,7 +13,7 @@ export default class FastTradingController {
 
     const symbols = request.input('symbols', 'BTC,ETH,SOL')
       .split(',')
-      .map((s: string) => s.trim().toUpperCase())
+      .map((s: string) => s.trim().toUpperCase().replace(/USDT$/, ''))
 
     await FastTradeEngine.start(symbols)
     return response.json({
@@ -157,7 +157,7 @@ export default class FastTradingController {
   public async subscribe({ request, response }: HttpContextContract) {
     const symbols = request.input('symbols', '')
       .split(',')
-      .map((s: string) => s.trim().toUpperCase())
+      .map((s: string) => s.trim().toUpperCase().replace(/USDT$/, ''))
       .filter(Boolean)
 
     for (const s of symbols) {

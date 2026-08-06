@@ -27,27 +27,47 @@ class MeilisearchService {
       ...opts,
     })
     if (resp.status === 204) return null
-    const body = await resp.json().catch(() => null)
+    const body: any = await resp.json().catch(() => null)
     if (!resp.ok && resp.status !== 404) {
       throw new Error(`Meilisearch ${resp.status}: ${body?.message || resp.statusText}`)
     }
     return body
   }
 
-  private async createIndex(uid: string, primaryKey: string) {
+  /**
+   * Ensure an index has its primary key set. Modern Meilisearch removed the
+   * dedicated create-index route (POST/PUT /indexes return 405): indexes are
+   * created implicitly by the first settings/document write, and the primary
+   * key is set afterwards via PATCH /indexes/:uid.
+   *
+   * Without an explicit primary key, documents containing several `*Id`
+   * fields (e.g. articleId + id) fail primary-key inference and every write
+   * to the index is silently rejected.
+   */
+  private async ensurePrimaryKey(uid: string, primaryKey: string) {
+    try {
+      const existing = await this.request(`/indexes/${uid}`)
+      if (existing?.primaryKey) return
+    } catch {
+      // Index not found yet — the settings PATCH (which runs before this)
+      // creates it; the PATCH below may still race it and fail, in which case
+      // the next boot recovers.
+    }
     try {
       await this.request(`/indexes/${uid}`, {
-        method: 'POST',
-        body: JSON.stringify({ uid, primaryKey }),
+        method: 'PATCH',
+        body: JSON.stringify({ primaryKey }),
       })
-    } catch {
-      // Index may already exist
+    } catch (err) {
+      Logger.warn('[Meili] primaryKey set failed for %s: %s', uid, err.message)
     }
   }
 
   public async ensureIndex() {
+    // Settings PATCH both creates missing indexes (implicitly) and applies
+    // filterable/sortable/pagination settings; primary key is set after so
+    // the index exists when the PATCH is issued.
     // ── Articles ──
-    await this.createIndex(ARTICLES_INDEX, 'id')
     await this.request(`/indexes/${ARTICLES_INDEX}/settings`, {
       method: 'PATCH',
       body: JSON.stringify({
@@ -60,9 +80,9 @@ class MeilisearchService {
         pagination: { maxTotalHits: 50000 },
       }),
     })
+    await this.ensurePrimaryKey(ARTICLES_INDEX, 'id')
 
     // ── Logs ──
-    await this.createIndex(LOGS_INDEX, 'id')
     await this.request(`/indexes/${LOGS_INDEX}/settings`, {
       method: 'PATCH',
       body: JSON.stringify({
@@ -71,9 +91,9 @@ class MeilisearchService {
         sortableAttributes: ['timestamp'],
       }),
     })
+    await this.ensurePrimaryKey(LOGS_INDEX, 'id')
 
     // ── Analyses ──
-    await this.createIndex(ANALYSES_INDEX, 'id')
     await this.request(`/indexes/${ANALYSES_INDEX}/settings`, {
       method: 'PATCH',
       body: JSON.stringify({
@@ -86,9 +106,9 @@ class MeilisearchService {
         pagination: { maxTotalHits: 50000 },
       }),
     })
+    await this.ensurePrimaryKey(ANALYSES_INDEX, 'id')
 
     // ── Snapshots ──
-    await this.createIndex(SNAPSHOTS_INDEX, 'id')
     await this.request(`/indexes/${SNAPSHOTS_INDEX}/settings`, {
       method: 'PATCH',
       body: JSON.stringify({
@@ -98,9 +118,9 @@ class MeilisearchService {
         pagination: { maxTotalHits: 100000 },
       }),
     })
+    await this.ensurePrimaryKey(SNAPSHOTS_INDEX, 'id')
 
     // ── Decisions ──
-    await this.createIndex(DECISIONS_INDEX, 'id')
     await this.request(`/indexes/${DECISIONS_INDEX}/settings`, {
       method: 'PATCH',
       body: JSON.stringify({
@@ -112,6 +132,7 @@ class MeilisearchService {
         pagination: { maxTotalHits: 50000 },
       }),
     })
+    await this.ensurePrimaryKey(DECISIONS_INDEX, 'id')
 
     Logger.info('Meilisearch indexes ready')
   }
@@ -419,6 +440,23 @@ class MeilisearchService {
       filter,
       sort: ['createdAt:asc'],
       limit: 10000,
+    })
+    return hits
+  }
+
+  /**
+   * Batch variant for the screener: fetches analyses for many tickers in a
+   * single Meilisearch query instead of one roundtrip per ticker.
+   */
+  public async getAnalysesForTickers(tickerIds: number[], since?: string): Promise<any[]> {
+    if (tickerIds.length === 0) return []
+    const filter: string[] = [`tickerId IN [${tickerIds.join(', ')}]`]
+    if (since) filter.push(`createdAt >= "${since}"`)
+
+    const { hits } = await this.searchIndex(ANALYSES_INDEX, {
+      filter,
+      sort: ['createdAt:asc'],
+      limit: 50000,
     })
     return hits
   }

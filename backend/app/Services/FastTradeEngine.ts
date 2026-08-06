@@ -133,6 +133,17 @@ class FastTradeEngine {
     const clientOrderId = crypto.randomUUID()
     const symbol = `${opts.symbol.toUpperCase()}USDT`
     const orderType = opts.orderType || 'MARKET'
+    // trades.order_type is an ENUM of IBKR-style codes; map Binance names
+    // onto it or every INSERT fails with "Data truncated for column
+    // 'order_type'".
+    const dbOrderType: Record<string, string> = {
+      MARKET: 'MKT',
+      LIMIT: 'LMT',
+      STOP_LOSS: 'STP',
+      STOP_LOSS_LIMIT: 'STP_LMT',
+      TRAILING_STOP_MARKET: 'TRAIL',
+    }
+    const canonicalOrderType = dbOrderType[orderType] || 'MKT'
 
     // Resolve ticker ID (cached)
     const tickerId = await this.resolveTickerId(opts.symbol.toUpperCase())
@@ -140,7 +151,7 @@ class FastTradeEngine {
       const state: FastOrderState = {
         clientOrderId,
         externalOrderId: null, tradeId: null, tickerId: null,
-        symbol: opts.symbol.toUpperCase(), side: opts.side, orderType,
+        symbol: opts.symbol.toUpperCase(), side: opts.side, orderType: canonicalOrderType,
         quantity: opts.quantity, limitPrice: null, stopPrice: null,
         status: 'error', filledQuantity: 0, fillPrice: null,
         commission: null, commissionAsset: null, submittedAt: Date.now(),
@@ -148,6 +159,7 @@ class FastTradeEngine {
         errorMessage: 'Failed to resolve ticker in database', dirty: false,
       }
       this.orders.set(clientOrderId, state)
+      this.enqueueFlush(state)
       return state
     }
 
@@ -158,7 +170,7 @@ class FastTradeEngine {
       tickerId,
       symbol: opts.symbol.toUpperCase(),
       side: opts.side,
-      orderType,
+      orderType: canonicalOrderType,
       quantity: opts.quantity,
       limitPrice: opts.price || null,
       stopPrice: opts.stopPrice || null,
@@ -359,12 +371,45 @@ class FastTradeEngine {
     this.flushing = true
 
     const batch = this.flushQueue.splice(0)
+
+    // Timeout guard: a hung DB must not wedge the flush loop forever
+    // (flushing stays true, in-memory queue grows unbounded).
+    let failed = false
+    const persist = this.persistBatch(batch).catch((err) => {
+      failed = true
+      Logger.error('[FastTrade] DB flush failed (%d orders): %s', batch.length, err.message)
+    })
+
+    const outcome = await Promise.race([
+      persist.then(() => 'settled' as const),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 10000)),
+    ])
+
+    if (outcome === 'timeout') {
+      // Let the in-flight transaction settle (commit or rollback) before
+      // re-queueing, so a concurrent retry can't double-INSERT the same
+      // orders. If it committed, state.tradeId was assigned and the next
+      // flush takes the UPDATE path.
+      Logger.warn('[FastTrade] Flush exceeded 10s, waiting for settlement')
+      await persist
+    }
+
+    if (failed) {
+      this.flushQueue.unshift(...batch)
+    } else {
+      for (const state of batch) this.pendingFlushIds.delete(state.clientOrderId)
+    }
+
+    this.flushing = false
+  }
+
+  private async persistBatch(batch: FastOrderState[]): Promise<void> {
     const trx = await Database.transaction()
 
     try {
       for (const state of batch) {
         if (state.tradeId) {
-          await trx.rawQuery(`
+          const [updateResult] = await trx.rawQuery(`
             UPDATE trades
             SET status = ?, filled_quantity = ?, fill_price = ?,
                 commission = ?, error_message = ?,
@@ -380,52 +425,58 @@ class FastTradeEngine {
             state.cancelledAt ? new Date(state.cancelledAt).toISOString().slice(0, 19).replace('T', ' ') : null,
             state.tradeId,
           ])
+          // Row missing (e.g. a previous INSERT was rolled back after the
+          // in-memory tradeId was assigned) — fall back to INSERT.
+          if (Number(updateResult?.affectedRows) === 0) {
+            state.tradeId = null
+            await this.insertTradeRow(trx, state)
+          }
         } else {
-          const now = new Date().toISOString().slice(0, 19).replace('T', ' ')
-          const [result] = await trx.rawQuery(`
-            INSERT INTO trades
-              (ticker_id, symbol, side, order_type, quantity, limit_price, stop_price,
-               external_order_id, status, filled_quantity, fill_price,
-               commission, error_message, broker, exchange, currency,
-               time_in_force, submitted_at, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `, [
-            state.tickerId,
-            state.symbol,
-            state.side,
-            state.orderType,
-            state.quantity,
-            state.limitPrice,
-            state.stopPrice,
-            state.externalOrderId,
-            state.status,
-            state.filledQuantity,
-            state.fillPrice,
-            state.commission,
-            state.errorMessage,
-            'binance',
-            'spot',
-            'USDT',
-            'GTC',
-            state.submittedAt ? new Date(state.submittedAt).toISOString().slice(0, 19).replace('T', ' ') : now,
-            now,
-            now,
-          ])
-          state.tradeId = Number(result.insertId)
+          await this.insertTradeRow(trx, state)
         }
         state.dirty = false
       }
 
-      for (const state of batch) this.pendingFlushIds.delete(state.clientOrderId)
-
       await trx.commit()
-      this.flushing = false
     } catch (err) {
       await trx.rollback()
-      this.flushing = false
-      Logger.error('[FastTrade] DB flush failed (%d orders): %s', batch.length, err.message)
-      this.flushQueue.unshift(...batch)
+      throw err
     }
+  }
+
+  private async insertTradeRow(trx: any, state: FastOrderState): Promise<void> {
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ')
+    const [result] = await trx.rawQuery(`
+      INSERT INTO trades
+        (ticker_id, symbol, side, order_type, quantity, limit_price, stop_price,
+         external_order_id, client_order_id, status, filled_quantity, fill_price,
+         commission, error_message, broker, exchange, currency,
+         time_in_force, submitted_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      state.tickerId,
+      state.symbol,
+      state.side,
+      state.orderType,
+      state.quantity,
+      state.limitPrice,
+      state.stopPrice,
+      state.externalOrderId,
+      state.clientOrderId,
+      state.status,
+      state.filledQuantity,
+      state.fillPrice,
+      state.commission,
+      state.errorMessage,
+      'binance',
+      'spot',
+      'USDT',
+      'GTC',
+      state.submittedAt ? new Date(state.submittedAt).toISOString().slice(0, 19).replace('T', ' ') : now,
+      now,
+      now,
+    ])
+    state.tradeId = Number(result.insertId)
   }
 
   // ---------------------------------------------------------------------------
@@ -436,7 +487,7 @@ class FastTradeEngine {
     try {
       const rows = await Database.rawQuery(`
         SELECT id, symbol, side, order_type, quantity, limit_price, stop_price,
-               external_order_id, status, filled_quantity, fill_price, commission,
+               external_order_id, client_order_id, status, filled_quantity, fill_price, commission,
                submitted_at, error_message, ticker_id
         FROM trades
         WHERE broker = 'binance' AND status IN ('pending', 'submitted', 'partially_filled')
@@ -445,9 +496,10 @@ class FastTradeEngine {
       `)
 
       const trades = rows[0] || rows
+      const recovered: FastOrderState[] = []
       for (const row of trades) {
         if (!row.external_order_id) continue
-        const clientOrderId = crypto.randomUUID()
+        const clientOrderId = row.client_order_id || crypto.randomUUID()
 
         const state: FastOrderState = {
           clientOrderId,
@@ -473,12 +525,71 @@ class FastTradeEngine {
         }
 
         this.orders.set(clientOrderId, state)
+        recovered.push(state)
       }
 
       Logger.info('[FastTrade] Recovered %d active orders from DB', trades.length)
+
+      // Sync recovered orders against the exchange so fills/statuses missed
+      // while the engine was down (or orders without a persisted
+      // client_order_id) converge to their true state.
+      await this.reconcileWithExchange(recovered)
     } catch (err) {
       Logger.error('[FastTrade] DB recovery failed: %s', err.message)
     }
+  }
+
+  /**
+   * Query Binance for the current state of recovered orders and apply it.
+   * Needed because execution reports are keyed by the original clientOrderId,
+   * which legacy rows (and any order placed before the client_order_id column
+   * existed) do not have persisted.
+   */
+  private async reconcileWithExchange(states: FastOrderState[]): Promise<void> {
+    const pending = states.filter(
+      (s) => s.externalOrderId && ['pending', 'submitted', 'partially_filled'].includes(s.status)
+    )
+    if (pending.length === 0) return
+
+    await Promise.allSettled(
+      pending.map(async (state) => {
+        try {
+          const symbol = `${state.symbol}USDT`
+          const result = await this.signedRequest('/api/v3/order', {
+            symbol,
+            orderId: Number(state.externalOrderId),
+          })
+
+          const statusMap: Record<string, FastOrderStatus> = {
+            NEW: 'submitted',
+            PARTIALLY_FILLED: 'partially_filled',
+            FILLED: 'filled',
+            CANCELED: 'cancelled',
+            REJECTED: 'error',
+            EXPIRED: 'cancelled',
+          }
+
+          const newStatus = statusMap[result.status]
+          if (newStatus && state.status !== newStatus) {
+            state.status = newStatus
+            state.dirty = true
+          }
+
+          const volExec = parseFloat(result.executedQty || '0')
+          if (volExec > 0) state.filledQuantity = volExec
+          const quoteQty = parseFloat(result.cummulativeQuoteQty || '0')
+          if (volExec > 0 && quoteQty > 0) state.fillPrice = quoteQty / volExec
+
+          const eventTime = result.updateTime || result.time || Date.now()
+          if (newStatus === 'filled' && !state.filledAt) state.filledAt = eventTime
+          else if (newStatus === 'cancelled' && !state.cancelledAt) state.cancelledAt = eventTime
+
+          this.enqueueFlush(state)
+        } catch (err) {
+          Logger.warn('[FastTrade] Exchange reconcile failed for %s: %s', state.symbol, err.message)
+        }
+      })
+    )
   }
 
   public pruneCompletedOrders(maxAgeMs: number = 3600000): number {

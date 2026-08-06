@@ -3,7 +3,7 @@ import { BaseModel, column, belongsTo, BelongsTo } from '@ioc:Adonis/Lucid/Orm'
 import Ticker from './Ticker'
 import Trade from './Trade'
 
-export type AlgoPositionStatus = 'open' | 'closing' | 'closed'
+export type AlgoPositionStatus = 'open' | 'pending_entry' | 'closing' | 'closed'
 
 export default class AlgoPosition extends BaseModel {
   public static table = 'algo_positions'

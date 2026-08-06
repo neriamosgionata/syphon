@@ -17,7 +17,7 @@ export async function processMonitorOrder(job: Job) {
 
   // For non-IBKR trades, actively poll order status since there are no socket callbacks
   if (trade.broker === 'kraken' && !TERMINAL_STATUSES.includes(trade.status)) {
-    await KrakenService.syncOrderStatus(trade)
+    await KrakenService.syncOrderStatusAny(trade)
   }
   if (trade.broker === 'binance' && !TERMINAL_STATUSES.includes(trade.status)) {
     await BinanceService.syncOrderStatus(trade)
