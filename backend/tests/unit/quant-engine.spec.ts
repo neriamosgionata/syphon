@@ -1,4 +1,7 @@
 import { test } from '@japa/runner'
+import { installIocHooks, restoreIocHooks, createRedisStub } from './helpers/ioc-hooks'
+
+let originalIocHooks: any = null
 
 let QE: any
 
@@ -21,6 +24,22 @@ test.group('QuantEngine internals', (group) => {
       rawQuery: async () => [[]],
     }))
 
+    // NOTE: MEILI_* must mirror the real environment. The MeilisearchService
+    // singleton is constructed at import time (module cache) and later reused
+    // by the functional suite in the same process — poisoning it here with a
+    // stub key breaks every Meili-backed endpoint there.
+    app.container.singleton('Adonis/Core/Env', () => ({
+      get: (key: string, defaultVal?: any) => {
+        const vals: Record<string, any> = {
+          MEILI_URL: process.env.MEILI_URL || 'http://localhost:7700',
+          MEILI_KEY: process.env.MEILI_KEY || '',
+        }
+        return vals[key] ?? defaultVal ?? ''
+      },
+    }))
+
+    app.container.singleton('Adonis/Addons/Redis', () => createRedisStub())
+
     const ModelStub = class {
       static query() {
         return { where: () => ModelStub.query(), orderBy: () => ModelStub.query(), first: async () => null }
@@ -30,15 +49,15 @@ test.group('QuantEngine internals', (group) => {
     app.container.bind('App/Models/Ticker', () => ModelStub)
     app.container.bind('App/Models/TickerSnapshot', () => ModelStub)
 
-    global[Symbol.for('ioc.use')] = app.container.use.bind(app.container)
-    global[Symbol.for('ioc.make')] = app.container.make.bind(app.container)
-    global[Symbol.for('ioc.call')] = app.container.call.bind(app.container)
+    originalIocHooks = installIocHooks(app)
 
     const mod = await import('../../app/Services/QuantEngine')
     QE = mod._internals
   })
 
   // --- Basic math ---
+
+  group.teardown(() => restoreIocHooks(originalIocHooks))
 
   test('mean computes average', ({ assert }) => {
     assert.equal(QE.mean([1, 2, 3, 4, 5]), 3)

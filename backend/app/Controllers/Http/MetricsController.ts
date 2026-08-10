@@ -52,17 +52,48 @@ export default class MetricsController {
 
   private async getDatabaseMetrics() {
     try {
-      const result = await Database.rawQuery('SHOW TABLE STATUS')
-      const tables = (result[0] || []).map((row: any) => ({
-        name: row.Name,
-        rows: Number(row.Rows || 0),
-        dataSize: Number(row.Data_length || 0),
-        indexSize: Number(row.Index_length || 0),
-        totalSize: Number(row.Data_length || 0) + Number(row.Index_length || 0),
-      }))
+      // Database.connection() returns a QueryClient — dialect info lives on
+      // .dialect.name ('better-sqlite3' for the better-sqlite3 client).
+      const isSqlite = Database.connection().dialect.name === 'better-sqlite3'
+      let tables: any[]
+      let totalSize = 0
+      let totalRows = 0
 
-      const totalSize = tables.reduce((sum: number, t: any) => sum + t.totalSize, 0)
-      const totalRows = tables.reduce((sum: number, t: any) => sum + t.rows, 0)
+      if (isSqlite) {
+        const [pageCountRes, pageSizeRes] = await Promise.all([
+          Database.rawQuery('PRAGMA page_count'),
+          Database.rawQuery('PRAGMA page_size'),
+        ])
+        const pageCount = Number(pageCountRes[0]?.page_count ?? pageCountRes[0]?.c ?? 0)
+        const pageSize = Number(pageSizeRes[0]?.page_size ?? pageSizeRes[0]?.c ?? 0)
+        totalSize = pageCount * pageSize
+
+        const tableRes = await Database.rawQuery(
+          `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
+        )
+        const tableNames = tableRes.map((row: any) => row.name)
+        const counts = await Promise.all(
+          tableNames.map((name: string) =>
+            Database.rawQuery(`SELECT COUNT(*) as cnt FROM "${name}"`)
+          )
+        )
+        tables = tableNames.map((name: string, i: number) => {
+          const rows = Number(counts[i][0]?.cnt ?? 0)
+          totalRows += rows
+          return { name, rows, dataSize: 0, indexSize: 0, totalSize: 0 }
+        })
+      } else {
+        const result = await Database.rawQuery('SHOW TABLE STATUS')
+        tables = (result[0] || []).map((row: any) => ({
+          name: row.Name,
+          rows: Number(row.Rows || 0),
+          dataSize: Number(row.Data_length || 0),
+          indexSize: Number(row.Index_length || 0),
+          totalSize: Number(row.Data_length || 0) + Number(row.Index_length || 0),
+        }))
+        totalSize = tables.reduce((sum: number, t: any) => sum + t.totalSize, 0)
+        totalRows = tables.reduce((sum: number, t: any) => sum + t.rows, 0)
+      }
 
       return { tables, totalSize, totalRows }
     } catch (err) {

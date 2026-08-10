@@ -338,7 +338,10 @@ export default class TradingController {
     const whereClause = symbol ? 'WHERE t.symbol = ?' : ''
     const whereParams = symbol ? [symbol.toUpperCase()] : []
 
-    const [overview, bySymbol, byStatus, recentFills] = await Promise.all([
+    // MySQL raw() returns [rows, fields]; better-sqlite3 returns the rows array.
+    const unwrap = (res: any): any[] => (Array.isArray(res?.[0]) ? res[0] : res)
+
+    const [overviewRes, bySymbolRes, byStatusRes, recentFills] = await Promise.all([
       Database.rawQuery(`
         SELECT
           COUNT(*) as total_trades,
@@ -378,9 +381,9 @@ export default class TradingController {
     ])
 
     return response.json({
-      overview: overview[0][0],
-      bySymbol: bySymbol[0],
-      byStatus: byStatus[0],
+      overview: unwrap(overviewRes)[0],
+      bySymbol: unwrap(bySymbolRes),
+      byStatus: unwrap(byStatusRes),
       recentFills: recentFills.map((t) => t.serialize()),
     })
   }

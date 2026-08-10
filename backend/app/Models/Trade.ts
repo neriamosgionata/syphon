@@ -83,7 +83,10 @@ export default class Trade extends BaseModel {
   @column()
   public broker: Broker
 
-  @column()
+  @column({
+    prepare: (value: any) => (value ? JSON.stringify(value) : null),
+    consume: (value: any) => (typeof value === 'string' ? JSON.parse(value) : value),
+  })
   public ibMetadata: Record<string, any> | null
 
   @column()

@@ -1,34 +1,4 @@
 services:
-  mariadb:
-    image: mariadb:11
-    container_name: syphon-mariadb
-    restart: unless-stopped
-    environment:
-      MARIADB_ROOT_PASSWORD: syphon_root_pass
-      MARIADB_DATABASE: syphon
-      MARIADB_USER: syphon
-      MARIADB_PASSWORD: syphon_pass
-    command: >
-      --innodb-buffer-pool-size=128M
-      --innodb-log-file-size=32M
-      --max-connections=30
-      --key-buffer-size=16M
-      --table-open-cache=200
-      --tmp-table-size=16M
-    ports:
-      - "3307:3306"
-    volumes:
-      - mariadb_data:/var/lib/mysql
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   redis:
     image: redis:7-alpine
     container_name: syphon-redis
@@ -56,6 +26,7 @@ services:
       MEILI_NO_ANALYTICS: "true"
       MEILI_ENV: production
       MEILI_MASTER_KEY: syphon_meili_key
+      MEILI_MAX_INDEXING_MEMORY: 384M
     ports:
       - "7700:7700"
     volumes:
@@ -63,7 +34,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 128M
+          memory: 512M
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:7700/health"]
       interval: 10s
@@ -75,11 +46,6 @@ services:
     container_name: syphon-trainer
     restart: unless-stopped
     environment:
-      MYSQL_HOST: mariadb
-      MYSQL_PORT: "3306"
-      MYSQL_USER: syphon
-      MYSQL_PASSWORD: syphon_pass
-      MYSQL_DATABASE: syphon
       MODEL_DIR: /app/checkpoints
     ports:
       - "8000:8000"
@@ -90,12 +56,8 @@ services:
       resources:
         limits:
           memory: 512M
-    depends_on:
-      mariadb:
-        condition: service_healthy
 
 volumes:
-  mariadb_data:
   redis_data:
   meili_data:
   training_checkpoints:

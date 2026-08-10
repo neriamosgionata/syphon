@@ -28,7 +28,10 @@ class MeilisearchService {
     })
     if (resp.status === 204) return null
     const body: any = await resp.json().catch(() => null)
-    if (!resp.ok && resp.status !== 404) {
+    if (!resp.ok) {
+      // 404 = "document/index not found" — maps to null so callers can
+      // distinguish absence from failure (getDoc, getAnalysis, ...).
+      if (resp.status === 404) return null
       throw new Error(`Meilisearch ${resp.status}: ${body?.message || resp.statusText}`)
     }
     return body
@@ -186,8 +189,9 @@ class MeilisearchService {
   ): Promise<{ hits: any[]; total: number }> {
     const body: any = {
       q: opts.q || '',
-      offset: opts.offset || 0,
-      limit: opts.limit || 20,
+      offset: Number(opts.offset) || 0,
+      // Preserve an explicit 0 (count-only calls); default to 20 otherwise.
+      limit: opts.limit === undefined || opts.limit === null ? 20 : Number(opts.limit),
     }
     if (opts.filter) body.filter = opts.filter
     if (opts.sort) body.sort = opts.sort
@@ -271,8 +275,8 @@ class MeilisearchService {
     sort?: string
     dir?: 'asc' | 'desc'
   }): Promise<{ data: any[]; total: number; page: number; perPage: number; lastPage: number }> {
-    const page = params.page || 1
-    const limit = params.limit || 20
+    const page = Number(params.page) || 1
+    const limit = Number(params.limit) || 20
     const offset = (page - 1) * limit
     const filter: string[] = []
 
@@ -405,8 +409,8 @@ class MeilisearchService {
     sort?: string
     dir?: 'asc' | 'desc'
   }): Promise<{ data: any[]; total: number; page: number; perPage: number; lastPage: number }> {
-    const page = params.page || 1
-    const limit = params.limit || 20
+    const page = Number(params.page) || 1
+    const limit = Number(params.limit) || 20
     const offset = (page - 1) * limit
     const filter: string[] = []
 
@@ -584,8 +588,8 @@ class MeilisearchService {
     symbol?: string
     decision?: string
   }): Promise<{ data: any[]; total: number; page: number; perPage: number; lastPage: number }> {
-    const page = params.page || 1
-    const limit = params.limit || 50
+    const page = Number(params.page) || 1
+    const limit = Number(params.limit) || 50
     const offset = (page - 1) * limit
     const filter: string[] = []
 

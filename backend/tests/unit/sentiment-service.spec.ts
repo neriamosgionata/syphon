@@ -1,4 +1,7 @@
 import { test } from '@japa/runner'
+import { installIocHooks, restoreIocHooks } from './helpers/ioc-hooks'
+
+let originalIocHooks: any = null
 
 /**
  * SentimentService unit tests
@@ -21,12 +24,12 @@ test.group('SentimentService', (group) => {
     }))
 
     // Register the IoC container globally
-    global[Symbol.for('ioc.use')] = app.container.use.bind(app.container)
-    global[Symbol.for('ioc.make')] = app.container.make.bind(app.container)
-    global[Symbol.for('ioc.call')] = app.container.call.bind(app.container)
+    originalIocHooks = installIocHooks(app)
 
     SentimentService = (await import('../../app/Services/SentimentService')).default
   })
+
+  group.teardown(() => restoreIocHooks(originalIocHooks))
 
   test('analyze returns valid sentiment result structure', ({ assert }) => {
     const result = SentimentService.analyze('The stock market is showing strong growth and record profits')

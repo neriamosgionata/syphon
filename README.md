@@ -38,7 +38,7 @@ syphon/
 
 | Service | Image | Port | Memory | Purpose |
 |---------|-------|------|--------|---------|
-| MariaDB 11 | `mariadb:11` | 3307 | 512M | Relational store (tickers, trades, configs) |
+| SQLite (better-sqlite3) | in-process file (`backend/syphon.sqlite3`, WAL) | - | - | Relational store (tickers, trades, configs) |
 | Redis 7 | `redis:7-alpine` | 6379 | 96M | BullMQ broker, caching, ID generation |
 | Meilisearch | `getmeili/meilisearch:latest` | 7700 | 128M | Primary store for articles, analyses, snapshots, decisions + full-text search |
 | Trainer | `./training` (Python 3.11) | 8000 | 512M | PyTorch inference server |
@@ -48,7 +48,7 @@ syphon/
 | Layer | Technology | Version |
 |-------|-----------|---------|
 | Backend framework | AdonisJS | 5.9.0 |
-| ORM | Lucid (MySQL 2 driver) | 18.4.2 |
+| ORM | Lucid (better-sqlite3 driver) | 18.4.2 |
 | Job queue | BullMQ | 5.70.4 |
 | Frontend framework | SvelteKit | 2.53.4 |
 | UI library | Svelte 5 (runes) | 5.53.7 |
@@ -64,7 +64,7 @@ syphon/
 ### Data Storage Split
 
 - **Meilisearch** (bulk, searchable): articles, analyses, ticker snapshots, algo decisions, application logs
-- **MariaDB** (small, relational, ACID): tickers, scrape sources, trades, algo configs, algo positions
+- **SQLite** (small, relational, ACID): tickers, scrape sources, trades, algo configs, algo positions
 
 ---
 
@@ -79,7 +79,7 @@ syphon/
 ### 1. Start Infrastructure
 
 ```bash
-docker compose up -d mariadb redis meilisearch
+docker compose up -d redis meilisearch
 docker compose ps   # wait for all services to be healthy
 ```
 
@@ -151,8 +151,11 @@ NODE_ENV=development
 APP_KEY=syphon-dev-key-change-in-production-32ch
 APP_NAME=syphon
 
-# Database (MariaDB)
-DB_CONNECTION=mysql
+# Database (SQLite — better-sqlite3, WAL mode)
+DB_CONNECTION=sqlite
+SQLITE_FILENAME=/path/to/syphon.sqlite3
+
+# MariaDB fallback (only used when DB_CONNECTION=mysql)
 MYSQL_HOST=127.0.0.1
 MYSQL_PORT=3307
 MYSQL_USER=syphon
@@ -460,7 +463,7 @@ Seven queues process async work. All jobs: 3 retry attempts with exponential bac
 2. ANALYZE    TickerMatcherService matches articles to tickers ->
               SentimentService scores each match -> analyses saved to Meilisearch
                                                |
-3. REFRESH    Cron triggers Google Finance fetch -> current price in MariaDB
+3. REFRESH    Cron triggers Google Finance fetch -> current price in SQLite
               + daily OHLCV snapshot upsert in Meilisearch
                                                |
 4. QUANT      QuantEngine loads snapshots + sentiment ->
@@ -487,7 +490,7 @@ Seven queues process async work. All jobs: 3 retry attempts with exponential bac
 | `decisions` | `id` (Redis auto-incr) | runId, symbol, decision, tickerId, createdAt | createdAt, compositeScore | 50,000 |
 | `logs` | `{timestamp}-{counter}` | level, context, timestamp | timestamp | default |
 
-### MariaDB Tables
+### SQLite Tables
 
 | Table | Purpose | Key Columns |
 |-------|---------|-------------|
@@ -562,7 +565,7 @@ The batch screener preloads all snapshots and analyses in a single query to avoi
 
 Each algo run (triggered by cron at :15 and :45, or manually):
 
-1. Load algo config from MariaDB
+1. Load algo config from SQLite
 2. Verify broker connection (IBKR or Kraken)
 3. Fetch portfolio value from broker
 4. Run QuantEngine screener across all active tickers
@@ -668,7 +671,7 @@ Target labels based on 3-hour forward return:
 ### Data Sources
 
 - **Price data**: Kraken public OHLC API (5-minute bars), stored as Parquet
-- **Sentiment data**: MariaDB analyses table (joined via crypto symbol mapping)
+- **Sentiment data**: SQLite analyses table (joined via crypto symbol mapping)
 - **Default pairs**: XXBTZUSD (BTC), XETHZUSD (ETH), SOLUSD, XRPUSD, ADAUSD
 
 ### Integration with Backend
@@ -766,7 +769,7 @@ npm run test:watch      # Vitest watch mode
 
 ```bash
 docker compose up -d                            # Start all services
-docker compose up -d mariadb redis meilisearch  # Infrastructure only
+docker compose up -d redis meilisearch  # Infrastructure only
 docker compose logs -f meilisearch              # Tail service logs
 docker compose ps                               # Check health status
 docker compose down                             # Stop all
@@ -789,7 +792,7 @@ docker compose down -v                          # Stop + remove volumes
 
 The infrastructure is optimized for low memory:
 
-- **MariaDB**: tuned buffer pool (128M), max 30 connections, reduced log/cache sizes
+- **SQLite**: better-sqlite3 in-process driver, WAL mode, busy_timeout 5s, foreign_keys ON
 - **Redis**: 64MB memory limit, `noeviction` policy
 - **Meilisearch**: 128MB limit (replaces OpenSearch, ~10x lighter)
 - **Total infrastructure memory**: ~736MB (without trainer)
@@ -804,7 +807,7 @@ The training service is intended to run on a separate machine with more resource
 |---------|------|
 | Backend API | 3333 |
 | Frontend dev | 5173 |
-| MariaDB | 3307 (maps to internal 3306) |
+| SQLite | file://backend/syphon.sqlite3 (WAL) |
 | Redis | 6379 |
 | Meilisearch | 7700 |
 | Training API | 8000 |

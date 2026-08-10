@@ -1,4 +1,7 @@
 import { test } from '@japa/runner'
+import { installIocHooks, restoreIocHooks } from './helpers/ioc-hooks'
+
+let originalIocHooks: any = null
 
 let NotificationService: any
 
@@ -12,12 +15,12 @@ test.group('NotificationService', (group) => {
       warn: () => {},
       error: () => {},
     }))
-    global[Symbol.for('ioc.use')] = app.container.use.bind(app.container)
-    global[Symbol.for('ioc.make')] = app.container.make.bind(app.container)
-    global[Symbol.for('ioc.call')] = app.container.call.bind(app.container)
+    originalIocHooks = installIocHooks(app)
 
     NotificationService = (await import('../../app/Services/NotificationService')).default
   })
+
+  group.teardown(() => restoreIocHooks(originalIocHooks))
 
   test('subscribe returns an unsubscribe function', ({ assert }) => {
     const unsubscribe = NotificationService.subscribe(() => {})

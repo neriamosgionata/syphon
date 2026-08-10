@@ -7,9 +7,9 @@
     "build": "node ace build --production",
     "start": "node server.js",
     "lint": "eslint . --ext=.ts",
-    "test": "node -r @adonisjs/assembler/build/register tests/bootstrap.ts",
-    "test:unit": "node -r @adonisjs/assembler/build/register tests/bootstrap.ts --groups=unit",
-    "test:functional": "node -r @adonisjs/assembler/build/register tests/bootstrap.ts --groups=functional",
+    "test": "node -r @adonisjs/assembler/build/register tests/bootstrap.ts unit && node -r @adonisjs/assembler/build/register tests/bootstrap.ts functional",
+    "test:unit": "node -r @adonisjs/assembler/build/register tests/bootstrap.ts unit",
+    "test:functional": "node -r @adonisjs/assembler/build/register tests/bootstrap.ts functional",
     "worker": "node ace queue:listen"
   },
   "dependencies": {
@@ -19,6 +19,7 @@
     "@adonisjs/repl": "3.1.11",
     "@google-cloud/bigquery": "^8.1.1",
     "@stoqey/ib": "1.5.3",
+    "better-sqlite3": "^13.0.3",
     "bullmq": "5.70.4",
     "cheerio": "1.0.0",
     "luxon": "3.7.2",

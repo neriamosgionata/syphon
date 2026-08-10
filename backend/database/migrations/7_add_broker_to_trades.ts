@@ -5,8 +5,8 @@ export default class AddBrokerToTrades extends BaseSchema {
 
   public async up() {
     this.schema.alterTable(this.tableName, (table) => {
-      table.string('broker', 20).defaultTo('ibkr').notNullable().after('currency')
-      table.string('external_order_id', 100).nullable().after('ib_perm_id')
+      table.string('broker', 20).defaultTo('ibkr').notNullable()
+      table.string('external_order_id', 100).nullable()
       table.index(['broker', 'status'])
     })
   }

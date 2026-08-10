@@ -48,10 +48,3 @@ targets:
 inference:
   port: 8000
   model_dir: ./checkpoints
-
-database:
-  host: ${MYSQL_HOST:-127.0.0.1}
-  port: ${MYSQL_PORT:-3307}
-  user: ${MYSQL_USER:-syphon}
-  password: ${MYSQL_PASSWORD:-syphon_pass}
-  database: ${MYSQL_DATABASE:-syphon}

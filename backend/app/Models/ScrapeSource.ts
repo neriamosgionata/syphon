@@ -18,7 +18,10 @@ export default class ScrapeSource extends BaseModel {
   @column()
   public url: string
 
-  @column()
+  @column({
+    prepare: (value: any) => (value ? JSON.stringify(value) : null),
+    consume: (value: any) => (typeof value === 'string' ? JSON.parse(value) : value),
+  })
   public config: Record<string, any> | null
 
   @column()

@@ -10,7 +10,7 @@ export default class Trades extends BaseSchema {
       table.string('symbol', 20).notNullable()
       table.enum('side', ['BUY', 'SELL']).notNullable()
       table.enum('order_type', ['MKT', 'LMT', 'STP', 'STP_LMT', 'TRAIL']).notNullable()
-      table.integer('quantity').notNullable()
+      table.decimal('quantity', 18, 8).notNullable()
       table.decimal('limit_price', 12, 4).nullable()
       table.decimal('stop_price', 12, 4).nullable()
       table.decimal('trail_amount', 12, 4).nullable()
@@ -23,7 +23,7 @@ export default class Trades extends BaseSchema {
         'cancelled', 'error', 'inactive',
       ]).defaultTo('pending')
       table.decimal('fill_price', 12, 4).nullable()
-      table.integer('filled_quantity').defaultTo(0)
+      table.decimal('filled_quantity', 18, 8).defaultTo(0)
       table.decimal('commission', 10, 4).nullable()
       table.decimal('realized_pnl', 14, 4).nullable()
       table.string('error_message', 500).nullable()

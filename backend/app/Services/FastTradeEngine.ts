@@ -57,6 +57,12 @@ class FastTradeEngine {
   private flushIntervalMs = 100
   private tickerIdCache = new Map<string, number>()
 
+  // Database.connection() returns a QueryClient — dialect info lives on
+  // .dialect.name (dialectName on the QueryClient is undefined).
+  private get isSqlite(): boolean {
+    return Database.connection().dialect.name === 'better-sqlite3'
+  }
+
   private _running = false
   private unsubscribeOrderUpdate: (() => void) | null = null
 
@@ -339,7 +345,7 @@ class FastTradeEngine {
     if (this.tickerIdCache.has(symbol)) return this.tickerIdCache.get(symbol)!
     try {
       const rows = await Database.rawQuery('SELECT id FROM tickers WHERE symbol = ? LIMIT 1', [symbol])
-      const tickers = rows[0] || rows
+      const tickers = this.isSqlite ? rows : rows[0]
       if (tickers[0]?.id) {
         this.tickerIdCache.set(symbol, tickers[0].id)
         return tickers[0].id
@@ -347,12 +353,12 @@ class FastTradeEngine {
     } catch { /* SELECT failed, try INSERT */ }
 
     try {
-      await Database.rawQuery(
-        'INSERT IGNORE INTO tickers (symbol, name, is_active) VALUES (?, ?, 1)',
-        [symbol, symbol]
-      )
+      const insertSql = this.isSqlite
+        ? 'INSERT OR IGNORE INTO tickers (symbol, name, is_active) VALUES (?, ?, 1)'
+        : 'INSERT IGNORE INTO tickers (symbol, name, is_active) VALUES (?, ?, 1)'
+      await Database.rawQuery(insertSql, [symbol, symbol])
       const rows = await Database.rawQuery('SELECT id FROM tickers WHERE symbol = ? LIMIT 1', [symbol])
-      const tickers = rows[0] || rows
+      const tickers = this.isSqlite ? rows : rows[0]
       const id = tickers[0]?.id || null
       if (id) this.tickerIdCache.set(symbol, id)
       return id
@@ -409,7 +415,7 @@ class FastTradeEngine {
     try {
       for (const state of batch) {
         if (state.tradeId) {
-          const [updateResult] = await trx.rawQuery(`
+          const updateResult = await trx.rawQuery(`
             UPDATE trades
             SET status = ?, filled_quantity = ?, fill_price = ?,
                 commission = ?, error_message = ?,
@@ -425,9 +431,13 @@ class FastTradeEngine {
             state.cancelledAt ? new Date(state.cancelledAt).toISOString().slice(0, 19).replace('T', ' ') : null,
             state.tradeId,
           ])
+          // MySQL exposes affectedRows; better-sqlite3 returns { changes }.
+          const affected = Number(
+            updateResult?.affectedRows ?? updateResult?.changes ?? 0
+          )
           // Row missing (e.g. a previous INSERT was rolled back after the
           // in-memory tradeId was assigned) — fall back to INSERT.
-          if (Number(updateResult?.affectedRows) === 0) {
+          if (affected === 0) {
             state.tradeId = null
             await this.insertTradeRow(trx, state)
           }
@@ -446,7 +456,7 @@ class FastTradeEngine {
 
   private async insertTradeRow(trx: any, state: FastOrderState): Promise<void> {
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ')
-    const [result] = await trx.rawQuery(`
+    const result = await trx.rawQuery(`
       INSERT INTO trades
         (ticker_id, symbol, side, order_type, quantity, limit_price, stop_price,
          external_order_id, client_order_id, status, filled_quantity, fill_price,
@@ -476,7 +486,9 @@ class FastTradeEngine {
       now,
       now,
     ])
-    state.tradeId = Number(result.insertId)
+    // MySQL ResultSetHeader exposes insertId; better-sqlite3 returns
+    // { lastInsertRowid }.
+    state.tradeId = Number(result?.insertId ?? result?.lastInsertRowid)
   }
 
   // ---------------------------------------------------------------------------
@@ -495,7 +507,7 @@ class FastTradeEngine {
         LIMIT 50
       `)
 
-      const trades = rows[0] || rows
+      const trades = this.isSqlite ? rows : rows[0]
       const recovered: FastOrderState[] = []
       for (const row of trades) {
         if (!row.external_order_id) continue

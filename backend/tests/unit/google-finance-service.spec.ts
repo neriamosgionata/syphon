@@ -1,4 +1,7 @@
 import { test } from '@japa/runner'
+import { installIocHooks, restoreIocHooks, createRedisStub } from './helpers/ioc-hooks'
+
+let originalIocHooks: any = null
 
 let GoogleFinanceService: any
 
@@ -135,7 +138,6 @@ function createModelStub() {
 test.group('GoogleFinanceService', (group) => {
   let originalFetchHTML: any
   let originalFetchHistoricalFromStooq: any
-
   group.setup(async () => {
     const { Application } = await import('@adonisjs/application')
     const app = new Application(__dirname, 'test', {})
@@ -149,12 +151,23 @@ test.group('GoogleFinanceService', (group) => {
     }))
 
     // Mock Env
+    // NOTE: MEILI_* must mirror the real environment. The MeilisearchService
+    // singleton is constructed at import time (module cache) and later reused
+    // by the functional suite in the same process — poisoning it here with a
+    // stub key breaks every Meili-backed endpoint there.
     app.container.singleton('Adonis/Core/Env', () => ({
       get: (key: string, defaultVal?: string) => {
-        const vals: Record<string, string> = { FINANCE_PROVIDER: 'google' }
+        const vals: Record<string, string> = {
+          FINANCE_PROVIDER: 'google',
+          MEILI_URL: process.env.MEILI_URL || 'http://localhost:7700',
+          MEILI_KEY: process.env.MEILI_KEY || '',
+        }
         return vals[key] ?? defaultVal ?? ''
       },
     }))
+
+    // Mock Redis (MeilisearchService does Redis.incr for id generation)
+    app.container.singleton('Adonis/Addons/Redis', () => createRedisStub())
 
     // Mock the models so IoC resolution works
     const tickerStub = createModelStub()
@@ -162,9 +175,7 @@ test.group('GoogleFinanceService', (group) => {
     app.container.singleton('App/Models/Ticker', () => tickerStub)
     app.container.singleton('App/Models/TickerSnapshot', () => snapshotStub)
 
-    global[Symbol.for('ioc.use')] = app.container.use.bind(app.container)
-    global[Symbol.for('ioc.make')] = app.container.make.bind(app.container)
-    global[Symbol.for('ioc.call')] = app.container.call.bind(app.container)
+    originalIocHooks = installIocHooks(app)
 
     GoogleFinanceService = (await import('../../app/Services/GoogleFinanceService')).default
     originalFetchHTML = GoogleFinanceService['fetchHTML'].bind(GoogleFinanceService)
@@ -182,6 +193,8 @@ test.group('GoogleFinanceService', (group) => {
   })
 
   // --- fetchQuote tests ---
+
+  group.teardown(() => restoreIocHooks(originalIocHooks))
 
   test('fetchQuote extracts price from data-last-price attribute', async ({ assert }) => {
     GoogleFinanceService['fetchHTML'] = async () => QUOTE_PAGE_HTML

@@ -1,6 +1,20 @@
 import { test } from '@japa/runner'
+import { seedQuantData, cleanupQuantData } from './quant-seed'
 
-test.group('Quant API', () => {
+test.group('Quant API', (group) => {
+  let seedHandle: any = null
+
+  group.setup(async () => {
+    seedHandle = await seedQuantData()
+  })
+
+  group.teardown(async () => {
+    if (seedHandle) {
+      await cleanupQuantData(seedHandle)
+      seedHandle = null
+    }
+  })
+
   test('GET /api/quant/screener returns screener data', async ({ client, assert }) => {
     const response = await client.get('/api/quant/screener')
 

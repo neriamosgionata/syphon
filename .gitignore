@@ -38,3 +38,7 @@ coverage
 
 # Vite
 vite.config.ts.timestamp-*
+
+# SQLite database
+backend/syphon.sqlite3
+backend/syphon.sqlite3-*

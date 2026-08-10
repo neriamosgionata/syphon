@@ -60,11 +60,14 @@ export default class TickersController {
       `SELECT DISTINCT exchange FROM tickers WHERE is_active = 1 AND exchange IS NOT NULL AND exchange != '' ORDER BY exchange`
     )
 
+    // MySQL raw() returns [rows, fields]; better-sqlite3 returns the rows array.
+    const unwrap = (res: any): any[] => (Array.isArray(res?.[0]) ? res[0] : res)
+
     return response.json({
       ...tickers.toJSON(),
       filters: {
-        sectors: (sectors[0] || []).map((r: any) => r.sector),
-        exchanges: (exchanges[0] || []).map((r: any) => r.exchange),
+        sectors: unwrap(sectors).map((r: any) => r.sector),
+        exchanges: unwrap(exchanges).map((r: any) => r.exchange),
       },
     })
   }
@@ -94,7 +97,9 @@ export default class TickersController {
     return response.json({
       ticker: ticker.serialize(),
       analyses: analyses.map((a) => a.serialize()),
-      sentimentSummary: sentimentSummary[0],
+      sentimentSummary: Array.isArray(sentimentSummary?.[0])
+        ? sentimentSummary[0]
+        : sentimentSummary,
     })
   }
 
