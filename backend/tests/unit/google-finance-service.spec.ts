@@ -1,9 +1,12 @@
 import { test } from '@japa/runner'
-import { installIocHooks, restoreIocHooks, createRedisStub } from './helpers/ioc-hooks'
+import GoogleFinanceServiceModule from '../../app/services/GoogleFinanceService.js'
 
-let originalIocHooks: any = null
+// Keep the public API (fetchQuote / searchTicker / fetchHistorical) fully typed;
+// private parsing/network members the tests stub are reachable via the loose
+// index signature.
+type GoogleFinanceServiceType = typeof GoogleFinanceServiceModule & { [key: string]: any }
 
-let GoogleFinanceService: any
+const GoogleFinanceService = GoogleFinanceServiceModule as GoogleFinanceServiceType
 
 // Sample HTML fragments for mocking Google Finance responses
 const QUOTE_PAGE_HTML = `
@@ -87,16 +90,12 @@ AF_initDataCallback({key: 'ds:5', data: [[1704067200,185.50,186.70,184.30,186.00
 </body></html>
 `
 
-const HISTORICAL_WINDOW_DATA_HTML = `
+const HISTORICAL_NO_DATA_HTML = `
 <html><body>
 <script>
-window.chartData = {"prices":[{"timestamp":1704067200,"open":185.5,"high":186.7,"low":184.3,"close":186.0,"volume":45000000},{"timestamp":1704153600,"open":186.2,"high":188.0,"low":185.8,"close":187.5,"volume":52000000}]};
+AF_initDataCallback({key: 'ds:5', data: []});
 </script>
 </body></html>
-`
-
-const HISTORICAL_NO_DATA_HTML = `
-<html><body><div>Quote page with no embedded chart data</div></body></html>
 `
 
 const QUOTE_DATA_ATTRID_HTML = `
@@ -119,65 +118,10 @@ const QUOTE_HEADING_FALLBACK_HTML = `
 </html>
 `
 
-// Stub model class for Ticker and TickerSnapshot
-function createModelStub() {
-  return {
-    findBy: async () => null,
-    create: async (data: any) => ({ ...data, id: 1 }),
-    query: () => ({
-      where: function () { return this },
-      preload: function () { return this },
-      orderBy: function () { return this },
-      limit: function () { return this },
-      first: async () => null,
-      firstOrFail: async () => ({ id: 1, symbol: 'TEST', snapshots: [] }),
-    }),
-  }
-}
-
 test.group('GoogleFinanceService', (group) => {
   let originalFetchHTML: any
   let originalFetchHistoricalFromStooq: any
-  group.setup(async () => {
-    const { Application } = await import('@adonisjs/application')
-    const app = new Application(__dirname, 'test', {})
-
-    // Mock Logger
-    app.container.singleton('Adonis/Core/Logger', () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-    }))
-
-    // Mock Env
-    // NOTE: MEILI_* must mirror the real environment. The MeilisearchService
-    // singleton is constructed at import time (module cache) and later reused
-    // by the functional suite in the same process — poisoning it here with a
-    // stub key breaks every Meili-backed endpoint there.
-    app.container.singleton('Adonis/Core/Env', () => ({
-      get: (key: string, defaultVal?: string) => {
-        const vals: Record<string, string> = {
-          FINANCE_PROVIDER: 'google',
-          MEILI_URL: process.env.MEILI_URL || 'http://localhost:7700',
-          MEILI_KEY: process.env.MEILI_KEY || '',
-        }
-        return vals[key] ?? defaultVal ?? ''
-      },
-    }))
-
-    // Mock Redis (MeilisearchService does Redis.incr for id generation)
-    app.container.singleton('Adonis/Addons/Redis', () => createRedisStub())
-
-    // Mock the models so IoC resolution works
-    const tickerStub = createModelStub()
-    const snapshotStub = createModelStub()
-    app.container.singleton('App/Models/Ticker', () => tickerStub)
-    app.container.singleton('App/Models/TickerSnapshot', () => snapshotStub)
-
-    originalIocHooks = installIocHooks(app)
-
-    GoogleFinanceService = (await import('../../app/Services/GoogleFinanceService')).default
+  group.setup(() => {
     originalFetchHTML = GoogleFinanceService['fetchHTML'].bind(GoogleFinanceService)
     originalFetchHistoricalFromStooq = GoogleFinanceService['fetchHistoricalFromStooq'].bind(GoogleFinanceService)
   })
@@ -194,8 +138,6 @@ test.group('GoogleFinanceService', (group) => {
 
   // --- fetchQuote tests ---
 
-  group.teardown(() => restoreIocHooks(originalIocHooks))
-
   test('fetchQuote extracts price from data-last-price attribute', async ({ assert }) => {
     GoogleFinanceService['fetchHTML'] = async () => QUOTE_PAGE_HTML
     GoogleFinanceService['exchangeCache'].set('AAPL', 'NASDAQ')
@@ -203,8 +145,8 @@ test.group('GoogleFinanceService', (group) => {
     const quote = await GoogleFinanceService.fetchQuote('AAPL')
 
     assert.isNotNull(quote)
-    assert.equal(quote.regularMarketPrice, 189.84)
-    assert.equal(quote.symbol, 'AAPL')
+    assert.equal(quote?.regularMarketPrice, 189.84)
+    assert.equal(quote?.symbol, 'AAPL')
   })
 
   test('fetchQuote extracts company name from page title', async ({ assert }) => {
@@ -214,7 +156,7 @@ test.group('GoogleFinanceService', (group) => {
     const quote = await GoogleFinanceService.fetchQuote('AAPL')
 
     assert.isNotNull(quote)
-    assert.equal(quote.shortName, 'Apple Inc')
+    assert.equal(quote?.shortName, 'Apple Inc')
   })
 
   test('fetchQuote extracts name from heading when title matches symbol', async ({ assert }) => {
@@ -224,8 +166,8 @@ test.group('GoogleFinanceService', (group) => {
     const quote = await GoogleFinanceService.fetchQuote('NVDA')
 
     assert.isNotNull(quote)
-    assert.equal(quote.shortName, 'NVIDIA Corporation')
-    assert.equal(quote.regularMarketPrice, 880.00)
+    assert.equal(quote?.shortName, 'NVIDIA Corporation')
+    assert.equal(quote?.regularMarketPrice, 880.00)
   })
 
   test('fetchQuote extracts 52-week range from stat rows', async ({ assert }) => {
@@ -234,8 +176,8 @@ test.group('GoogleFinanceService', (group) => {
 
     const quote = await GoogleFinanceService.fetchQuote('AAPL')
 
-    assert.equal(quote.fiftyTwoWeekLow, 142.00)
-    assert.equal(quote.fiftyTwoWeekHigh, 199.62)
+    assert.equal(quote?.fiftyTwoWeekLow, 142.00)
+    assert.equal(quote?.fiftyTwoWeekHigh, 199.62)
   })
 
   test('fetchQuote extracts 52-week range from data-attrid attribute', async ({ assert }) => {
@@ -245,9 +187,9 @@ test.group('GoogleFinanceService', (group) => {
     const quote = await GoogleFinanceService.fetchQuote('TSLA')
 
     assert.isNotNull(quote)
-    assert.equal(quote.regularMarketPrice, 245.30)
-    assert.equal(quote.fiftyTwoWeekLow, 124.50)
-    assert.equal(quote.fiftyTwoWeekHigh, 278.98)
+    assert.equal(quote?.regularMarketPrice, 245.30)
+    assert.equal(quote?.fiftyTwoWeekLow, 124.50)
+    assert.equal(quote?.fiftyTwoWeekHigh, 278.98)
   })
 
   test('fetchQuote parses market cap with T suffix', async ({ assert }) => {
@@ -256,7 +198,7 @@ test.group('GoogleFinanceService', (group) => {
 
     const quote = await GoogleFinanceService.fetchQuote('AAPL')
 
-    assert.equal(quote.marketCap, 2.95e12)
+    assert.equal(quote?.marketCap, 2.95e12)
   })
 
   test('fetchQuote extracts P/E ratio', async ({ assert }) => {
@@ -265,7 +207,7 @@ test.group('GoogleFinanceService', (group) => {
 
     const quote = await GoogleFinanceService.fetchQuote('AAPL')
 
-    assert.equal(quote.trailingPE, 31.25)
+    assert.equal(quote?.trailingPE, 31.25)
   })
 
   test('fetchQuote computes EPS from price and P/E', async ({ assert }) => {
@@ -274,8 +216,8 @@ test.group('GoogleFinanceService', (group) => {
 
     const quote = await GoogleFinanceService.fetchQuote('AAPL')
 
-    assert.isNotNull(quote.epsTrailingTwelveMonths)
-    assert.closeTo(quote.epsTrailingTwelveMonths, 189.84 / 31.25, 0.01)
+    assert.isNotNull(quote?.epsTrailingTwelveMonths)
+    assert.closeTo(quote?.epsTrailingTwelveMonths ?? 0, 189.84 / 31.25, 0.01)
   })
 
   test('fetchQuote extracts dividend yield as decimal', async ({ assert }) => {
@@ -284,7 +226,7 @@ test.group('GoogleFinanceService', (group) => {
 
     const quote = await GoogleFinanceService.fetchQuote('AAPL')
 
-    assert.closeTo(quote.dividendYield, 0.0052, 0.0001)
+    assert.closeTo(quote?.dividendYield ?? 0, 0.0052, 0.0001)
   })
 
   test('fetchQuote extracts average volume', async ({ assert }) => {
@@ -293,7 +235,7 @@ test.group('GoogleFinanceService', (group) => {
 
     const quote = await GoogleFinanceService.fetchQuote('AAPL')
 
-    assert.equal(quote.averageDailyVolume3Month, 54.2e6)
+    assert.equal(quote?.averageDailyVolume3Month, 54.2e6)
   })
 
   test('fetchQuote returns null when no price found', async ({ assert }) => {
@@ -342,7 +284,7 @@ test.group('GoogleFinanceService', (group) => {
 
     const quote = await GoogleFinanceService.fetchQuote('aapl')
 
-    assert.equal(quote.symbol, 'AAPL')
+    assert.equal(quote?.symbol, 'AAPL')
   })
 
   // --- searchTicker tests ---
@@ -554,7 +496,7 @@ test.group('GoogleFinanceService', (group) => {
 
     const quote = await GoogleFinanceService.fetchQuote('TEST')
 
-    assert.equal(quote.marketCap, 150.3e9)
+    assert.equal(quote?.marketCap, 150.3e9)
   })
 
   test('market cap parsing handles M suffix', async ({ assert }) => {
@@ -564,7 +506,7 @@ test.group('GoogleFinanceService', (group) => {
 
     const quote = await GoogleFinanceService.fetchQuote('TEST')
 
-    assert.equal(quote.marketCap, 850e6)
+    assert.equal(quote?.marketCap, 850e6)
   })
 
   test('market cap parsing handles K suffix', async ({ assert }) => {
@@ -574,7 +516,7 @@ test.group('GoogleFinanceService', (group) => {
 
     const quote = await GoogleFinanceService.fetchQuote('TEST')
 
-    assert.equal(quote.marketCap, 500e3)
+    assert.equal(quote?.marketCap, 500e3)
   })
 
   test('price parsing strips currency symbols and commas', async ({ assert }) => {
@@ -586,9 +528,9 @@ test.group('GoogleFinanceService', (group) => {
 
     const quote = await GoogleFinanceService.fetchQuote('TEST')
 
-    assert.equal(quote.regularMarketPrice, 1234.56)
-    assert.equal(quote.fiftyTwoWeekLow, 1100.00)
-    assert.equal(quote.fiftyTwoWeekHigh, 1500.00)
+    assert.equal(quote?.regularMarketPrice, 1234.56)
+    assert.equal(quote?.fiftyTwoWeekLow, 1100.00)
+    assert.equal(quote?.fiftyTwoWeekHigh, 1500.00)
   })
 
   // --- fetchQuote edge cases ---
@@ -605,7 +547,7 @@ test.group('GoogleFinanceService', (group) => {
     const quote = await GoogleFinanceService.fetchQuote('TEST')
 
     assert.isNotNull(quote)
-    assert.equal(quote.exchange, 'NYSE')
+    assert.equal(quote?.exchange, 'NYSE')
     // Should have tried NASDAQ first (no data), then NYSE (found data)
     assert.isTrue(triedUrls.some((u) => u.includes(':NASDAQ')))
     assert.isTrue(triedUrls.some((u) => u.includes(':NYSE')))
@@ -623,13 +565,13 @@ test.group('GoogleFinanceService', (group) => {
     const quote = await GoogleFinanceService.fetchQuote('MIN')
 
     assert.isNotNull(quote)
-    assert.equal(quote.regularMarketPrice, 50.00)
-    assert.isNull(quote.marketCap)
-    assert.isNull(quote.fiftyTwoWeekHigh)
-    assert.isNull(quote.fiftyTwoWeekLow)
-    assert.isNull(quote.trailingPE)
-    assert.isNull(quote.dividendYield)
-    assert.isNull(quote.averageDailyVolume3Month)
+    assert.equal(quote?.regularMarketPrice, 50.00)
+    assert.isNull(quote?.marketCap)
+    assert.isNull(quote?.fiftyTwoWeekHigh)
+    assert.isNull(quote?.fiftyTwoWeekLow)
+    assert.isNull(quote?.trailingPE)
+    assert.isNull(quote?.dividendYield)
+    assert.isNull(quote?.averageDailyVolume3Month)
   })
 
   test('fetchQuote EPS is null when P/E is null', async ({ assert }) => {
@@ -643,7 +585,7 @@ test.group('GoogleFinanceService', (group) => {
 
     const quote = await GoogleFinanceService.fetchQuote('NOPE')
 
-    assert.isNull(quote.epsTrailingTwelveMonths)
+    assert.isNull(quote?.epsTrailingTwelveMonths)
   })
 
   test('fetchQuote shortName defaults to uppercased symbol when no title/heading match', async ({ assert }) => {
@@ -657,7 +599,7 @@ test.group('GoogleFinanceService', (group) => {
 
     const quote = await GoogleFinanceService.fetchQuote('xyz')
 
-    assert.equal(quote.shortName, 'XYZ')
+    assert.equal(quote?.shortName, 'XYZ')
   })
 
   // --- exchange resolution edge cases ---
@@ -672,7 +614,7 @@ test.group('GoogleFinanceService', (group) => {
     const quote = await GoogleFinanceService.fetchQuote('TEST', 'LON')
 
     assert.isNotNull(quote)
-    assert.equal(quote.exchange, 'LON')
+    assert.equal(quote?.exchange, 'LON')
     // Should have tried LON first and found data immediately
     assert.equal(triedUrls.length, 1)
     assert.isTrue(triedUrls[0].includes(':LON'))
@@ -700,7 +642,7 @@ test.group('GoogleFinanceService', (group) => {
     const quote = await GoogleFinanceService.fetchQuote('CACHED')
 
     assert.isNotNull(quote)
-    assert.equal(quote.exchange, 'NYSEARCA')
+    assert.equal(quote?.exchange, 'NYSEARCA')
   })
 
   test('fetchQuote skips exchanges that throw errors', async ({ assert }) => {
@@ -714,7 +656,7 @@ test.group('GoogleFinanceService', (group) => {
     const quote = await GoogleFinanceService.fetchQuote('TEST')
 
     assert.isNotNull(quote)
-    assert.equal(quote.exchange, 'NYSE')
+    assert.equal(quote?.exchange, 'NYSE')
     assert.isTrue(callCount >= 2)
   })
 
@@ -936,7 +878,7 @@ test.group('GoogleFinanceService', (group) => {
   // --- FinanceService facade tests ---
 
   test('FinanceService facade exports service with expected interface', async ({ assert }) => {
-    const FinanceService = (await import('../../app/Services/FinanceService')).default
+    const FinanceService = (await import('../../app/services/FinanceService.js')).default
 
     assert.isFunction(FinanceService.fetchQuote)
     assert.isFunction(FinanceService.fetchHistorical)

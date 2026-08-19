@@ -29,11 +29,11 @@ async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 15000): Pr
   return false
 }
 
-async function seedTicker(Database: any): Promise<{ id: number; created: boolean }> {
-  const rows = unwrapRows(await Database.rawQuery('SELECT id FROM tickers WHERE symbol = ?', [SEED_SYMBOL]))
+async function seedTicker(db: any): Promise<{ id: number; created: boolean }> {
+  const rows = unwrapRows(await db.rawQuery('SELECT id FROM tickers WHERE symbol = ?', [SEED_SYMBOL]))
   if (rows.length > 0) return { id: Number(rows[0].id), created: false }
 
-  const res = await Database.rawQuery(
+  const res = await db.rawQuery(
     `INSERT INTO tickers (symbol, name, is_active, created_at, updated_at)
      VALUES (?, ?, 1, datetime('now'), datetime('now'))`,
     [SEED_SYMBOL, SEED_SYMBOL]
@@ -103,10 +103,10 @@ function buildAnalyses(tickerId: number): { docs: any[]; ids: string[] } {
 }
 
 export async function seedQuantData(): Promise<SeedHandle> {
-  const { default: Database } = await import('@ioc:Adonis/Lucid/Database')
-  const { default: Meili } = await import('App/Services/MeilisearchService')
+  const { default: db } = await import('@adonisjs/lucid/services/db')
+  const { default: Meili } = await import('#services/MeilisearchService')
 
-  const { id: tickerId, created: createdTicker } = await seedTicker(Database)
+  const { id: tickerId, created: createdTicker } = await seedTicker(db)
 
   const { docs: snapshotDocs, ids: snapshotIds } = buildSnapshots(tickerId)
   await Meili.saveSnapshots(snapshotDocs)
@@ -131,14 +131,14 @@ export async function seedQuantData(): Promise<SeedHandle> {
 }
 
 export async function cleanupQuantData(handle: SeedHandle): Promise<void> {
-  const { default: Database } = await import('@ioc:Adonis/Lucid/Database')
-  const { default: Meili } = await import('App/Services/MeilisearchService')
+  const { default: db } = await import('@adonisjs/lucid/services/db')
+  const { default: Meili } = await import('#services/MeilisearchService')
 
   // Deletes only the documents this run seeded (ids are deterministic).
   await Meili['deleteDocs']('snapshots', handle.snapshotIds)
   await Meili['deleteDocs']('analyses', handle.analysisIds)
 
   if (handle.createdTicker) {
-    await Database.rawQuery('DELETE FROM tickers WHERE id = ?', [handle.tickerId])
+    await db.rawQuery('DELETE FROM tickers WHERE id = ?', [handle.tickerId])
   }
 }

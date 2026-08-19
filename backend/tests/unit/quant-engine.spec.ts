@@ -1,63 +1,9 @@
 import { test } from '@japa/runner'
-import { installIocHooks, restoreIocHooks, createRedisStub } from './helpers/ioc-hooks'
+import { _internals } from '../../app/services/QuantEngine.js'
 
-let originalIocHooks: any = null
+const QE: any = _internals
 
-let QE: any
-
-test.group('QuantEngine internals', (group) => {
-  group.setup(async () => {
-    const { join } = await import('path')
-    const { Application } = await import('@adonisjs/application')
-    const app = new Application(join(__dirname, '../..'), 'test', {
-      aliases: { App: 'app' },
-    })
-
-    app.container.singleton('Adonis/Core/Logger', () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-    }))
-
-    app.container.singleton('Adonis/Lucid/Database', () => ({
-      rawQuery: async () => [[]],
-    }))
-
-    // NOTE: MEILI_* must mirror the real environment. The MeilisearchService
-    // singleton is constructed at import time (module cache) and later reused
-    // by the functional suite in the same process — poisoning it here with a
-    // stub key breaks every Meili-backed endpoint there.
-    app.container.singleton('Adonis/Core/Env', () => ({
-      get: (key: string, defaultVal?: any) => {
-        const vals: Record<string, any> = {
-          MEILI_URL: process.env.MEILI_URL || 'http://localhost:7700',
-          MEILI_KEY: process.env.MEILI_KEY || '',
-        }
-        return vals[key] ?? defaultVal ?? ''
-      },
-    }))
-
-    app.container.singleton('Adonis/Addons/Redis', () => createRedisStub())
-
-    const ModelStub = class {
-      static query() {
-        return { where: () => ModelStub.query(), orderBy: () => ModelStub.query(), first: async () => null }
-      }
-      static findBy() { return null }
-    }
-    app.container.bind('App/Models/Ticker', () => ModelStub)
-    app.container.bind('App/Models/TickerSnapshot', () => ModelStub)
-
-    originalIocHooks = installIocHooks(app)
-
-    const mod = await import('../../app/Services/QuantEngine')
-    QE = mod._internals
-  })
-
-  // --- Basic math ---
-
-  group.teardown(() => restoreIocHooks(originalIocHooks))
+test.group('QuantEngine internals', () => {
 
   test('mean computes average', ({ assert }) => {
     assert.equal(QE.mean([1, 2, 3, 4, 5]), 3)

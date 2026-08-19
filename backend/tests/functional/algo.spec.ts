@@ -8,7 +8,7 @@ import { test } from '@japa/runner'
 let originalConfig: Record<string, any> | null = null
 
 async function loadConfigRow() {
-  const { default: AlgoConfig } = await import('App/Models/AlgoConfig')
+  const { default: AlgoConfig } = await import('#models/AlgoConfig')
   const row = await AlgoConfig.find(1)
   return row ? row.toJSON() : null
 }
@@ -31,7 +31,7 @@ test.group('Algo API', (group) => {
     })
     // enabled/disabled_reason aren't fully restorable via the API (disabling
     // always writes 'manually disabled'), so patch them on the model.
-    const { default: AlgoConfig } = await import('App/Models/AlgoConfig')
+    const { default: AlgoConfig } = await import('#models/AlgoConfig')
     const row = await AlgoConfig.find(1)
     if (row) {
       row.enabled = !!originalConfig.enabled

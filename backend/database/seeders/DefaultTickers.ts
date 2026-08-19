@@ -1,5 +1,5 @@
-import BaseSeeder from '@ioc:Adonis/Lucid/Seeder'
-import Ticker from 'App/Models/Ticker'
+import { BaseSeeder } from '@adonisjs/lucid/seeders'
+import Ticker from '#models/Ticker'
 
 export default class DefaultTickersSeeder extends BaseSeeder {
   public async run() {

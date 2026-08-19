@@ -1,14 +1,33 @@
 import { test } from '@japa/runner'
-import { installIocHooks, restoreIocHooks, createRedisStub } from './helpers/ioc-hooks'
+import { MeilisearchService } from '../../app/services/MeilisearchService.js'
 
 // MeilisearchService unit tests with a stubbed Redis counter and a captured
 // global fetch. These lock in the behaviors that were fixed: 404 -> null,
 // numeric coercion of pagination params, log buffering and snapshot chunking.
 
-let Meili: any
-let originalIocHooks: any = null
+// Public API stays typed; private members the tests manipulate are reachable
+// via the loose index signature.
+type TestableMeili = MeilisearchService & { [key: string]: any }
+
+let Meili: TestableMeili
 let fetchCalls: Array<{ url: string; init: any }> = []
 let redisStub: any
+
+/**
+ * Shared counter map so ids stay deterministic across tests.
+ */
+const redisCounters = new Map<string, number>()
+
+function createRedisStub() {
+  const incr = async (key: string) => {
+    const next = (redisCounters.get(key) || 0) + 1
+    redisCounters.set(key, next)
+    return next
+  }
+  return {
+    incr,
+  }
+}
 
 function stubFetch(handler: (url: string, init: any) => any) {
   ;(globalThis as any).fetch = async (url: string, init: any) => {
@@ -25,40 +44,14 @@ test.group('MeilisearchService', (group) => {
   let originalFetch: any
 
   group.setup(async () => {
-    const { Application } = await import('@adonisjs/application')
-    const app = new Application(__dirname, 'test', {})
-
-    app.container.singleton('Adonis/Core/Logger', () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-    }))
-
-    app.container.singleton('Adonis/Core/Env', () => ({
-      get: (key: string, defaultVal?: any) => {
-        const vals: Record<string, any> = {
-          MEILI_URL: process.env.MEILI_URL || 'http://localhost:7700',
-          MEILI_KEY: process.env.MEILI_KEY || '',
-        }
-        return vals[key] ?? defaultVal ?? ''
-      },
-    }))
-
     redisStub = createRedisStub()
-    app.container.singleton('Adonis/Addons/Redis', () => redisStub)
-
-    originalIocHooks = installIocHooks(app)
-
-    Meili = (await import('../../app/Services/MeilisearchService')).default
+    Meili = new MeilisearchService(redisStub)
     originalFetch = globalThis.fetch
   })
 
-  group.teardown(() => restoreIocHooks(originalIocHooks))
-
   group.each.setup(() => {
     fetchCalls = []
-    redisStub.counters.clear()
+    redisCounters.clear()
     Meili['logBuffer'] = []
     if (Meili['flushTimer']) {
       clearTimeout(Meili['flushTimer'])

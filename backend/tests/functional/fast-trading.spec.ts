@@ -106,7 +106,7 @@ test.group('Fast Trading API', () => {
     })
 
     assert.equal(res.status, 503)
-    const body = await res.json()
+    const body: any = await res.json()
     assert.match(body.error, /not running/i)
   })
 

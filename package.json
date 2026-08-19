@@ -21,6 +21,13 @@
     "test:frontend": "cd frontend && npm test"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^10.0.5"
+  },
+  "allowScripts": {
+    "@swc/core": true,
+    "better-sqlite3": true,
+    "esbuild": true,
+    "fsevents": true,
+    "msgpackr-extract": true
   }
 }

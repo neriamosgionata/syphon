@@ -1,16 +1,23 @@
 import { test } from '@japa/runner'
-import { installIocHooks, restoreIocHooks, createRedisStub } from './helpers/ioc-hooks'
+import { TickerMatcherService } from '../../app/services/TickerMatcherService.js'
 
 // TickerMatcherService.matchAndAnalyze orchestrates: relevance scoring ->
 // dedupe against existing analyses -> sentiment analysis -> save -> notify ->
-// mark article analyzed. SentimentService is exercised for real; the Meili
-// and Notification singletons are stubbed per test.
+// mark article analyzed. SentimentService is exercised for real; the Ticker
+// model, Meili and Notification singletons are injected as fakes per test.
 
-let Matcher: any
+let Matcher: TickerMatcherService
 let Meili: any
 let Notifications: any
-let originalIocHooks: any = null
 let activeTickers: any[]
+
+const fakeMeili = {
+  findAnalysis: async () => null,
+  saveAnalysis: async () => ({ id: '0_0' }),
+  updateArticle: async () => {},
+  getAnalysesForTicker: async () => [],
+}
+const fakeNotifications = { emit: () => {} }
 
 function makeTicker(id: number, symbol: string, name: string, currentPrice: number | null = null) {
   return { id, symbol, name, currentPrice }
@@ -27,43 +34,31 @@ const ARTICLE = {
 }
 
 test.group('TickerMatcherService', (group) => {
-  group.setup(async () => {
-    const { Application } = await import('@adonisjs/application')
-    const app = new Application(__dirname, 'test', {})
+  const fakeTickerModel = {
+    query: () => ({
+      where: () => activeTickers,
+    }),
+  }
 
-    app.container.singleton('Adonis/Core/Logger', () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-    }))
-
-    app.container.singleton('Adonis/Core/Env', () => ({
-      get: (key: string, defaultVal?: any) => {
-        const vals: Record<string, any> = {
-          MEILI_URL: process.env.MEILI_URL || 'http://localhost:7700',
-          MEILI_KEY: process.env.MEILI_KEY || '',
-        }
-        return vals[key] ?? defaultVal ?? ''
-      },
-    }))
-
-    app.container.singleton('Adonis/Addons/Redis', () => createRedisStub())
-
-    app.container.singleton('App/Models/Ticker', () => ({
-      query: () => ({
-        where: () => activeTickers,
-      }),
-    }))
-
-    originalIocHooks = installIocHooks(app)
-
-    Matcher = (await import('../../app/Services/TickerMatcherService')).default
-    Meili = (await import('../../app/Services/MeilisearchService')).default
-    Notifications = (await import('../../app/Services/NotificationService')).default
+  group.setup(() => {
+    Matcher = new TickerMatcherService({
+      tickerModel: fakeTickerModel as any,
+      meili: fakeMeili as any,
+      notifications: fakeNotifications as any,
+    })
+    Meili = fakeMeili
+    Notifications = fakeNotifications
   })
 
-  group.teardown(() => restoreIocHooks(originalIocHooks))
+  group.each.setup(() => {
+    activeTickers = []
+    Meili['findAnalysis'] = async () => null
+    Meili['saveAnalysis'] = async (a: any) => ({ id: `${a.articleId}_${a.tickerId}` })
+    Meili['updateArticle'] = async () => {}
+    Meili['getAnalysesForTicker'] = async () => []
+    Notifications['emit'] = () => {}
+  })
+
 
   group.each.setup(() => {
     activeTickers = []

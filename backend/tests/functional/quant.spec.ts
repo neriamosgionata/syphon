@@ -1,5 +1,5 @@
 import { test } from '@japa/runner'
-import { seedQuantData, cleanupQuantData } from './quant-seed'
+import { seedQuantData, cleanupQuantData } from './quant-seed.js'
 
 test.group('Quant API', (group) => {
   let seedHandle: any = null

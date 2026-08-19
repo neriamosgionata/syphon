@@ -1,15 +1,29 @@
-import Env from '@ioc:Adonis/Core/Env'
-import { DatabaseConfig } from '@ioc:Adonis/Lucid/Database'
+import app from '@adonisjs/core/services/app'
+import env from '#start/env'
+import { defineConfig } from '@adonisjs/lucid'
 
-const databaseConfig: DatabaseConfig = {
-  connection: Env.get('DB_CONNECTION'),
+const dbConfig = defineConfig({
+  /**
+   * Default connection used for all queries.
+   */
+  connection: env.get('DB_CONNECTION'),
+
   connections: {
+    /**
+     * SQLite connection (default).
+     */
     sqlite: {
       client: 'better-sqlite3',
+
       connection: {
-        filename: Env.get('SQLITE_FILENAME', `${process.cwd()}/syphon.sqlite3`),
+        filename: env.get('SQLITE_FILENAME', app.makePath('syphon.sqlite3')),
       },
+
+      /**
+       * Required by Knex for SQLite defaults.
+       */
       useNullAsDefault: true,
+
       pool: {
         afterCreate: (conn: any, done: any) => {
           conn.pragma('journal_mode = WAL')
@@ -19,28 +33,41 @@ const databaseConfig: DatabaseConfig = {
           done()
         },
       },
+
       migrations: {
         naturalSort: true,
+        paths: ['database/migrations'],
       },
-      healthCheck: true,
+
+      schemaGeneration: {
+        enabled: false,
+      },
+
       debug: false,
     },
+
+    /**
+     * MySQL / MariaDB connection.
+     */
     mysql: {
       client: 'mysql2',
+
       connection: {
-        host: Env.get('MYSQL_HOST'),
-        port: Env.get('MYSQL_PORT'),
-        user: Env.get('MYSQL_USER'),
-        password: Env.get('MYSQL_PASSWORD', ''),
-        database: Env.get('MYSQL_DB_NAME'),
+        host: env.get('MYSQL_HOST'),
+        port: env.get('MYSQL_PORT'),
+        user: env.get('MYSQL_USER'),
+        password: env.get('MYSQL_PASSWORD', ''),
+        database: env.get('MYSQL_DB_NAME'),
       },
+
       migrations: {
         naturalSort: true,
+        paths: ['database/migrations'],
       },
-      healthCheck: true,
+
       debug: false,
     },
   },
-}
+})
 
-export default databaseConfig
+export default dbConfig

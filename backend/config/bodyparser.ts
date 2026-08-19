@@ -1,31 +1,50 @@
-const bodyParserConfig = {
-  whitelistedMethods: ['POST', 'PUT', 'PATCH', 'DELETE'],
-  json: {
-    encoding: 'utf-8',
-    limit: '1mb',
-    strict: true,
-    types: ['application/json', 'application/json-patch+json', 'application/vnd.api+json', 'application/csp-report'],
-  },
+import { defineConfig } from '@adonisjs/core/bodyparser'
+
+const bodyParserConfig = defineConfig({
+  /**
+   * Parse request bodies for these HTTP methods.
+   */
+  allowedMethods: ['POST', 'PUT', 'PATCH', 'DELETE'],
+
+  /**
+   * Config for the "application/x-www-form-urlencoded"
+   * content-type parser.
+   */
   form: {
-    encoding: 'utf-8',
-    limit: '1mb',
-    queryString: {},
+    convertEmptyStringsToNull: true,
     types: ['application/x-www-form-urlencoded'],
   },
+
+  /**
+   * Config for the JSON parser.
+   */
+  json: {
+    convertEmptyStringsToNull: true,
+    types: [
+      'application/json',
+      'application/json-patch+json',
+      'application/vnd.api+json',
+      'application/csp-report',
+    ],
+  },
+
+  /**
+   * Config for the raw body parser.
+   */
   raw: {
-    encoding: 'utf-8',
-    limit: '1mb',
-    queryString: {},
     types: ['text/*'],
   },
+
+  /**
+   * Config for the "multipart/form-data" content-type parser.
+   */
   multipart: {
     autoProcess: true,
     processManually: [],
-    encoding: 'utf-8',
     maxFields: 1000,
     limit: '20mb',
     types: ['multipart/form-data'],
   },
-}
+})
 
 export default bodyParserConfig

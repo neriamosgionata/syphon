@@ -1,4 +1,4 @@
-import BaseSchema from '@ioc:Adonis/Lucid/Schema'
+import { BaseSchema } from '@adonisjs/lucid/schema'
 
 export default class TickerSnapshots extends BaseSchema {
   protected tableName = 'ticker_snapshots'

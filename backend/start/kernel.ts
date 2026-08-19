@@ -1,8 +1,27 @@
-import Server from '@ioc:Adonis/Core/Server'
+import router from '@adonisjs/core/services/router'
+import server from '@adonisjs/core/services/server'
 
-Server.middleware.register([
-  () => import('App/Middleware/Cors'),
-  () => import('@ioc:Adonis/Core/BodyParser'),
+/**
+ * The error handler is used to convert an exception
+ * to a HTTP response.
+ */
+server.errorHandler(() => import('#exceptions/Handler'))
+
+/**
+ * The server middleware stack runs middleware on all the HTTP
+ * requests, even if there is no route registered for
+ * the request URL.
+ */
+server.use([
+  () => import('#middleware/ContainerBindings'),
+  () => import('#middleware/ForceJsonResponse'),
+  () => import('@adonisjs/cors/cors_middleware'),
 ])
 
-Server.middleware.registerNamed({})
+/**
+ * The router middleware stack runs middleware on all the HTTP
+ * requests with a registered route.
+ */
+router.use([
+  () => import('@adonisjs/core/bodyparser_middleware'),
+])

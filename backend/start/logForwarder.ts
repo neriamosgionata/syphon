@@ -1,43 +1,29 @@
-import Logger from '@ioc:Adonis/Core/Logger'
-import MeilisearchService from 'App/Services/MeilisearchService'
+import logger from '@adonisjs/core/services/logger'
+import env from '#start/env'
+import MeilisearchService from '#services/MeilisearchService'
 import { DateTime } from 'luxon'
 import os from 'os'
 
-const LEVEL_NAMES: Record<number, string> = {
-  10: 'trace',
-  20: 'debug',
-  30: 'info',
-  40: 'warn',
-  50: 'error',
-  60: 'fatal',
-}
-
 /**
- * Hook into pino's underlying stream to capture all log entries
- * and forward them to Meilisearch
+ * Hook into the pino-based logger to capture all log entries
+ * and forward them to Meilisearch.
+ *
+ * Skipped in the test environment: tests boot the same preloads and a
+ * buffered flush can race with specs that stub `globalThis.fetch`
+ * (it would push log docs through the stub and break fetch-call assertions).
  */
 function setupLogForwarder() {
-  const pino = (Logger as any).pino || (Logger as any)['$logger']
-  if (!pino) return
+  if (env.get('NODE_ENV') === 'test') return
 
-  // Get the underlying writable stream
-  const originalWrite = pino.stream?.write || pino[Symbol.for('pino.stream')]?.write
-  if (!originalWrite) {
-    // Alternative: use pino's child logger hook
-    const origChild = pino.child?.bind(pino)
-    if (!origChild) return
-  }
-
-  // Use a simpler approach: poll by overriding the pino instance methods
   const levels = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const
   const hostname = os.hostname()
   const pid = process.pid
 
   for (const level of levels) {
-    const original = (Logger as any)[level]?.bind(Logger)
+    const original = (logger as any)[level]?.bind(logger)
     if (!original) continue
 
-    ;(Logger as any)[level] = function (...args: any[]) {
+    ;(logger as any)[level] = function (...args: any[]) {
       // Call original logger
       original(...args)
 
@@ -47,7 +33,7 @@ function setupLogForwarder() {
       let data: any
 
       if (typeof args[0] === 'string') {
-        // Format string pattern: Logger.info('message %s', val)
+        // Format string pattern: logger.info('message %s', val)
         message = args[0]
         const formatArgs = args.slice(1)
         let argIdx = 0

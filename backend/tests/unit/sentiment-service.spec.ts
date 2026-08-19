@@ -1,36 +1,13 @@
 import { test } from '@japa/runner'
-import { installIocHooks, restoreIocHooks } from './helpers/ioc-hooks'
-
-let originalIocHooks: any = null
+import SentimentService from '../../app/services/SentimentService.js'
 
 /**
  * SentimentService unit tests
- * We import the service directly since it only depends on `natural` (pure JS lib)
- * and the Logger (which we mock via IoC)
+ * The service only depends on `natural` (pure JS lib) and the app logger
+ * (booted by the test runner), so it can be imported directly.
  */
 
-let SentimentService: any
-
-test.group('SentimentService', (group) => {
-  group.setup(async () => {
-    // Mock the @ioc:Adonis/Core/Logger before importing
-    const { Application } = await import('@adonisjs/application')
-    const app = new Application(__dirname, 'test', {})
-    app.container.singleton('Adonis/Core/Logger', () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-    }))
-
-    // Register the IoC container globally
-    originalIocHooks = installIocHooks(app)
-
-    SentimentService = (await import('../../app/Services/SentimentService')).default
-  })
-
-  group.teardown(() => restoreIocHooks(originalIocHooks))
-
+test.group('SentimentService', () => {
   test('analyze returns valid sentiment result structure', ({ assert }) => {
     const result = SentimentService.analyze('The stock market is showing strong growth and record profits')
 

@@ -1,26 +1,7 @@
 import { test } from '@japa/runner'
-import { installIocHooks, restoreIocHooks } from './helpers/ioc-hooks'
+import NotificationService from '../../app/services/NotificationService.js'
 
-let originalIocHooks: any = null
-
-let NotificationService: any
-
-test.group('NotificationService', (group) => {
-  group.setup(async () => {
-    const { Application } = await import('@adonisjs/application')
-    const app = new Application(__dirname, 'test', {})
-    app.container.singleton('Adonis/Core/Logger', () => ({
-      debug: () => {},
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-    }))
-    originalIocHooks = installIocHooks(app)
-
-    NotificationService = (await import('../../app/Services/NotificationService')).default
-  })
-
-  group.teardown(() => restoreIocHooks(originalIocHooks))
+test.group('NotificationService', () => {
 
   test('subscribe returns an unsubscribe function', ({ assert }) => {
     const unsubscribe = NotificationService.subscribe(() => {})

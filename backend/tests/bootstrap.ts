@@ -1,81 +1,46 @@
-import 'reflect-metadata'
-import { join } from 'path'
-import getPort from 'get-port'
-import { configure, processCliArgs, run } from '@japa/runner'
-import { specReporter } from '@japa/spec-reporter'
 import { assert } from '@japa/assert'
 import { apiClient } from '@japa/api-client'
-import sourceMapSupport from 'source-map-support'
+import app from '@adonisjs/core/services/app'
+import type { Config } from '@japa/runner/types'
+import { pluginAdonisJS } from '@japa/plugin-adonisjs'
+import testUtils from '@adonisjs/core/services/test_utils'
 
-sourceMapSupport.install({ handleUncaughtExceptions: false })
+export const plugins: Config['plugins'] = [
+  assert(),
+  pluginAdonisJS(app),
+  apiClient(),
+]
 
-export let app: any
-
-async function startHttpServer() {
-  const { Ignitor } = await import('@adonisjs/core/build/standalone')
-  const ignitor = new Ignitor(join(__dirname, '..'))
-
-  app = ignitor.application('web')
-  await app.setup()
-  await app.registerProviders()
-  await app.bootProviders()
-  await app.requirePreloads()
-  await app.start()
-
-  const port = await getPort()
-  process.env.PORT = String(port)
-  process.env.HOST = '0.0.0.0'
-  process.env.NODE_ENV = 'test'
-
-  const server = app.container.use('Adonis/Core/Server')
-  // Real HTTP flow commits the route tree via `server.optimize()` (in
-  // HttpServer.start) after preloads. Without it the router tree stays empty
-  // and every request 404s.
-  server.optimize()
-  const httpServer = require('http').createServer(server.handle.bind(server))
-
-  await new Promise<void>((resolve) => {
-    httpServer.listen(port, () => resolve())
-  })
-
-  return `http://0.0.0.0:${port}`
+export const runnerHooks: Required<Pick<Config, 'setup' | 'teardown'>> = {
+  setup: [],
+  teardown: [
+    // Close every open handle (BullMQ queues/workers, Redis, DB, Binance WS)
+    // so the process can exit once the suite finishes. Without this, the 7
+    // BullMQ queue connections, the Redis service connection and the Binance
+    // WebSocket reconnect loop keep the test process alive forever.
+    async () => {
+      await app.terminate()
+      try {
+        const { default: redis } = await import('@adonisjs/redis/services/main')
+        await redis.quitAll()
+      } catch {
+        /* noop */
+      }
+      // The `POST /api/fast/subscribe` test calls BinanceWS.addSymbol, which
+      // opens a real Binance WebSocket and schedules auto-reconnects. Tear it
+      // down so the reconnect loop doesn't keep the process alive.
+      try {
+        const { default: BinanceWS } = await import('#services/BinanceWebSocketService')
+        BinanceWS.disconnect()
+      } catch {
+        /* noop */
+      }
+    },
+  ],
 }
 
-async function runTests() {
-  let baseUrl = ''
-
-  configure({
-    ...processCliArgs(process.argv.slice(2)),
-    suites: [
-      {
-        name: 'unit',
-        files: ['tests/unit/**/*.spec.ts'],
-        timeout: 10000,
-      },
-      {
-        name: 'functional',
-        files: ['tests/functional/**/*.spec.ts'],
-        timeout: 30000,
-        configure: (suite) => {
-          suite.setup(async () => {
-            baseUrl = await startHttpServer()
-            return async () => {
-              await app?.shutdown()
-            }
-          })
-        },
-      },
-    ],
-    plugins: [
-      assert(),
-      apiClient(() => baseUrl),
-    ],
-    reporters: [specReporter()],
-    importer: (filePath) => import(filePath),
-    forceExit: true,
-  })
-
-  await run()
+export const configureSuite: Config['configureSuite'] = (suite) => {
+  if (suite.name === 'functional') {
+    return suite.setup(() => testUtils.httpServer().start())
+  }
 }
-
-runTests()

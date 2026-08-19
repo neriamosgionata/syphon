@@ -1,27 +1,41 @@
-import Logger from '@ioc:Adonis/Core/Logger'
+import logger from '@adonisjs/core/services/logger'
+import app from '@adonisjs/core/services/app'
 import cron from 'node-cron'
-import Env from '@ioc:Adonis/Core/Env'
-import QueueService, { QUEUE_NAMES } from 'App/Jobs/QueueService'
-import { registerScrapeNewsWorker } from 'App/Jobs/ScrapeNewsJob'
-import { registerAnalyzeArticleWorker } from 'App/Jobs/AnalyzeArticleJob'
-import { registerFetchTickerWorker, queueAllTickerRefresh } from 'App/Jobs/FetchTickerJob'
-import { registerSubmitOrderWorker } from 'App/Jobs/SubmitOrderJob'
-import { registerMonitorOrderWorker } from 'App/Jobs/MonitorOrderJob'
-import { registerBackfillNewsWorker } from 'App/Jobs/BackfillNewsJob'
-import { registerAlgoTradingWorker } from 'App/Jobs/AlgoTradingJob'
-import ScraperService from 'App/Services/ScraperService'
-import MeilisearchService from 'App/Services/MeilisearchService'
-import AlgoConfig from 'App/Models/AlgoConfig'
+import env from '#start/env'
+import QueueService, { QUEUE_NAMES } from '#jobs/QueueService'
+import { registerScrapeNewsWorker } from '#jobs/ScrapeNewsJob'
+import { registerAnalyzeArticleWorker } from '#jobs/AnalyzeArticleJob'
+import { registerFetchTickerWorker, queueAllTickerRefresh } from '#jobs/FetchTickerJob'
+import { registerSubmitOrderWorker } from '#jobs/SubmitOrderJob'
+import { registerMonitorOrderWorker } from '#jobs/MonitorOrderJob'
+import { registerBackfillNewsWorker } from '#jobs/BackfillNewsJob'
+import { registerAlgoTradingWorker } from '#jobs/AlgoTradingJob'
+import ScraperService from '#services/ScraperService'
+import MeilisearchService from '#services/MeilisearchService'
+import AlgoConfig from '#models/AlgoConfig'
 
 async function boot() {
   try {
     // Ensure Meilisearch indexes exist
     await MeilisearchService.ensureIndex()
-    Logger.info('Meilisearch indexes ready')
+    logger.info('Meilisearch indexes ready')
 
     // Ensure default scrape sources
     await ScraperService.ensureDefaultSources()
-    Logger.info('Scrape sources initialized')
+    logger.info('Scrape sources initialized')
+
+    // Ensure algo config defaults
+    await AlgoConfig.ensureDefault()
+    logger.info('Algo config initialized')
+
+    // BullMQ workers and cron only make sense in a long-running server process.
+    // Ace commands that manage the schema (migration/seed/refresh) run in the
+    // "console" environment and release every DB connection at the end of their
+    // run — spawning workers there is both wrong and fragile.
+    if (app.getEnvironment() !== 'web') {
+      logger.info('[Jobs] Skipping workers/cron (environment: %s)', app.getEnvironment())
+      return
+    }
 
     // Register BullMQ workers
     registerScrapeNewsWorker()
@@ -31,35 +45,43 @@ async function boot() {
     registerMonitorOrderWorker()
     registerBackfillNewsWorker()
     registerAlgoTradingWorker()
-    Logger.info('BullMQ workers registered')
+    logger.info('BullMQ workers registered')
 
-    // Ensure algo config defaults
-    await AlgoConfig.ensureDefault()
-    Logger.info('Algo config initialized')
+    // Recurring jobs are only scheduled for long-running environments. Tests
+    // boot the same preloads, and a cron tick mid-suite would enqueue network
+    // jobs that only slow the run down.
+    if (env.get('NODE_ENV') !== 'test') {
+      // Schedule recurring scrape job
+      const interval = env.get('SCRAPE_INTERVAL_MINUTES', 30)
+      cron.schedule(`*/${interval} * * * *`, async () => {
+        logger.info('[Cron] Triggering news scrape')
+        await QueueService.addJob(QUEUE_NAMES.SCRAPE_NEWS, {})
+      })
 
-    // Schedule recurring scrape job
-    const interval = Env.get('SCRAPE_INTERVAL_MINUTES', 30)
-    cron.schedule(`*/${interval} * * * *`, async () => {
-      Logger.info('[Cron] Triggering news scrape')
-      await QueueService.addJob(QUEUE_NAMES.SCRAPE_NEWS, {})
-    })
+      // Schedule ticker refresh every 30 minutes
+      cron.schedule('*/30 * * * *', async () => {
+        logger.info('[Cron] Triggering ticker refresh')
+        await queueAllTickerRefresh()
+      })
 
-    // Schedule ticker refresh every 30 minutes
-    cron.schedule('*/30 * * * *', async () => {
-      Logger.info('[Cron] Triggering ticker refresh')
-      await queueAllTickerRefresh()
-    })
+      // Schedule algo trading at :15 and :45 (offset from ticker refresh at :00/:30)
+      cron.schedule('15,45 * * * *', async () => {
+        logger.info('[Cron] Triggering algo trading run')
+        await QueueService.addJob(QUEUE_NAMES.ALGO_TRADING, {})
+      })
 
-    // Schedule algo trading at :15 and :45 (offset from ticker refresh at :00/:30)
-    cron.schedule('15,45 * * * *', async () => {
-      Logger.info('[Cron] Triggering algo trading run')
-      await QueueService.addJob(QUEUE_NAMES.ALGO_TRADING, {})
-    })
-
-    Logger.info('Cron jobs scheduled (scrape every %d min, ticker refresh every 30min, algo every 30min offset)', interval)
+      logger.info(
+        'Cron jobs scheduled (scrape every %d min, ticker refresh every 30min, algo every 30min offset)',
+        interval,
+      )
+    }
   } catch (error) {
-    Logger.error('Failed to boot jobs: %s', error.message)
+    logger.error('Failed to boot jobs: %s', error instanceof Error ? error.message : String(error))
   }
 }
 
-boot()
+// Top-level await is required here: the module import must not resolve until the
+// job infrastructure is fully booted. A fire-and-forget `boot()` lets `app.start()`
+// finish early, so a following ace command (e.g. migration:run, which releases every
+// DB connection at the end of its run) races with — and breaks — this preload.
+await boot()

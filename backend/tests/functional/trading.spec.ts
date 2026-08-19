@@ -1,6 +1,23 @@
 import { test } from '@japa/runner'
 
-test.group('Trading API', () => {
+test.group('Trading API', (group) => {
+  let createdTradeId: number | null = null
+
+  group.teardown(async () => {
+    // This suite creates a real trade row and enqueues a SUBMIT_ORDER job.
+    // Clean them up so repeated runs don't accumulate rows in the DB or jobs
+    // in Redis.
+    try {
+      if (createdTradeId) {
+        const { default: db } = await import('@adonisjs/lucid/services/db')
+        await db.rawQuery('DELETE FROM trades WHERE id = ?', [createdTradeId])
+      }
+      const { default: QueueService } = await import('#jobs/QueueService')
+      await QueueService.drainAll()
+    } catch {
+      /* noop */
+    }
+  })
   test('GET /api/trading/status returns connection status', async ({ client, assert }) => {
     const response = await client.get('/api/trading/status')
 
@@ -10,29 +27,16 @@ test.group('Trading API', () => {
     assert.property(body.connection, 'connected')
   })
 
-  test('GET /api/trading/account returns error when not connected', async ({ assert }) => {
-    try {
-      const supertest = require('supertest')
-      const server = require('@ioc:Adonis/Core/Server')
-      const res = await supertest(server.instance).get('/api/trading/account')
-      assert.equal(res.status, 503)
-      assert.property(res.body, 'error')
-    } catch {
-      // If server not accessible, just verify the endpoint exists
-      assert.isTrue(true)
-    }
+  test('GET /api/trading/account returns 503 when not connected', async ({ client, assert }) => {
+    const response = await client.get('/api/trading/account')
+    assert.equal(response.status(), 503)
+    assert.property(response.body(), 'error')
   })
 
-  test('GET /api/trading/positions returns error when not connected', async ({ assert }) => {
-    try {
-      const supertest = require('supertest')
-      const server = require('@ioc:Adonis/Core/Server')
-      const res = await supertest(server.instance).get('/api/trading/positions')
-      assert.equal(res.status, 503)
-      assert.property(res.body, 'error')
-    } catch {
-      assert.isTrue(true)
-    }
+  test('GET /api/trading/positions returns 503 when not connected', async ({ client, assert }) => {
+    const response = await client.get('/api/trading/positions')
+    assert.equal(response.status(), 503)
+    assert.property(response.body(), 'error')
   })
 
   test('GET /api/trading/orders returns paginated trades', async ({ client, assert }) => {
@@ -142,6 +146,7 @@ test.group('Trading API', () => {
     assert.equal(body.trade.quantity, 10)
     assert.equal(body.trade.order_type, 'MKT')
     assert.equal(body.trade.status, 'pending')
+    createdTradeId = body.trade.id
   })
 
   test('POST /api/trading/orders/:id/cancel returns 404 for nonexistent', async ({ client }) => {

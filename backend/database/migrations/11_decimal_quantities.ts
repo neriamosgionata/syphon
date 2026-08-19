@@ -1,4 +1,4 @@
-import BaseSchema from '@ioc:Adonis/Lucid/Schema'
+import { BaseSchema } from '@adonisjs/lucid/schema'
 
 /**
  * Crypto pairs trade in fractional units (e.g. 0.5 BTC). INTEGER columns
