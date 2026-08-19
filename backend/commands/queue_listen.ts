@@ -11,7 +11,6 @@ export default class QueueListen extends BaseCommand {
     const { registerSubmitOrderWorker } = await import('#jobs/SubmitOrderJob')
     const { registerMonitorOrderWorker } = await import('#jobs/MonitorOrderJob')
     const { registerBackfillNewsWorker } = await import('#jobs/BackfillNewsJob')
-    const { registerAlgoTradingWorker } = await import('#jobs/AlgoTradingJob')
 
     registerScrapeNewsWorker()
     registerAnalyzeArticleWorker()
@@ -19,7 +18,6 @@ export default class QueueListen extends BaseCommand {
     registerSubmitOrderWorker()
     registerMonitorOrderWorker()
     registerBackfillNewsWorker()
-    registerAlgoTradingWorker()
 
     this.logger.info('BullMQ workers are running. Press CTRL+C to stop.')
 

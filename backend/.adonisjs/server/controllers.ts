@@ -8,7 +8,6 @@ export const controllers = {
   Analysis: () => import('#controllers/AnalysisController'),
   Articles: () => import('#controllers/ArticlesController'),
   Dashboard: () => import('#controllers/DashboardController'),
-  FastTrading: () => import('#controllers/FastTradingController'),
   Logs: () => import('#controllers/LogsController'),
   Metrics: () => import('#controllers/MetricsController'),
   Notifications: () => import('#controllers/NotificationsController'),

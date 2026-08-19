@@ -49,10 +49,6 @@ export default await Env.create(new URL('../', import.meta.url), {
   IB_PORT: Env.schema.number.optional(),
   IB_CLIENT_ID: Env.schema.number.optional(),
 
-  // Binance
-  BINANCE_API_KEY: Env.schema.string.optional(),
-  BINANCE_API_SECRET: Env.schema.string.optional(),
-
   // Kraken
   KRAKEN_API_KEY: Env.schema.string.optional(),
   KRAKEN_API_SECRET: Env.schema.string.optional(),

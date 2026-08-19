@@ -2,7 +2,6 @@ import { Job } from 'bullmq'
 import logger from '@adonisjs/core/services/logger'
 import Trade from '#models/Trade'
 import KrakenService from '#services/KrakenService'
-import BinanceService from '#services/BinanceService'
 import NotificationService from '#services/NotificationService'
 import QueueService, { QUEUE_NAMES } from './QueueService.js'
 
@@ -18,9 +17,6 @@ export async function processMonitorOrder(job: Job) {
   // For non-IBKR trades, actively poll order status since there are no socket callbacks
   if (trade.broker === 'kraken' && !TERMINAL_STATUSES.includes(trade.status)) {
     await KrakenService.syncOrderStatusAny(trade)
-  }
-  if (trade.broker === 'binance' && !TERMINAL_STATUSES.includes(trade.status)) {
-    await BinanceService.syncOrderStatus(trade)
   }
 
   if (TERMINAL_STATUSES.includes(trade.status)) {
@@ -51,7 +47,7 @@ export async function processMonitorOrder(job: Job) {
   }
 
   // Re-queue for another check (REST-based brokers poll faster since it's REST-based)
-  const delay = (trade.broker === 'kraken' || trade.broker === 'binance') ? 3000 : 5000
+  const delay = trade.broker === 'kraken' ? 3000 : 5000
 
   await QueueService.addJob(
     QUEUE_NAMES.MONITOR_ORDER,

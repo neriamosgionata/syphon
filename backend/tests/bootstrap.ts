@@ -14,9 +14,9 @@ export const plugins: Config['plugins'] = [
 export const runnerHooks: Required<Pick<Config, 'setup' | 'teardown'>> = {
   setup: [],
   teardown: [
-    // Close every open handle (BullMQ queues/workers, Redis, DB, Binance WS)
-    // so the process can exit once the suite finishes. Without this, the 7
-    // BullMQ queue connections, the Redis service connection and the Binance
+    // Close every open handle (BullMQ queues/workers, Redis, DB, Kraken WS)
+    // so the process can exit once the suite finishes. Without this, the
+    // BullMQ queue connections, the Redis service connection and the Kraken
     // WebSocket reconnect loop keep the test process alive forever.
     async () => {
       await app.terminate()
@@ -26,12 +26,12 @@ export const runnerHooks: Required<Pick<Config, 'setup' | 'teardown'>> = {
       } catch {
         /* noop */
       }
-      // The `POST /api/fast/subscribe` test calls BinanceWS.addSymbol, which
-      // opens a real Binance WebSocket and schedules auto-reconnects. Tear it
-      // down so the reconnect loop doesn't keep the process alive.
+      // FastAlgoService/KrakenWS may have opened a real Kraken WebSocket and
+      // scheduled auto-reconnects. Tear it down so the reconnect loop doesn't
+      // keep the process alive.
       try {
-        const { default: BinanceWS } = await import('#services/BinanceWebSocketService')
-        BinanceWS.disconnect()
+        const { default: KrakenWS } = await import('#services/KrakenWebSocketService')
+        KrakenWS.disconnect()
       } catch {
         /* noop */
       }

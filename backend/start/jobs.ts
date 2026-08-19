@@ -9,10 +9,10 @@ import { registerFetchTickerWorker, queueAllTickerRefresh } from '#jobs/FetchTic
 import { registerSubmitOrderWorker } from '#jobs/SubmitOrderJob'
 import { registerMonitorOrderWorker } from '#jobs/MonitorOrderJob'
 import { registerBackfillNewsWorker } from '#jobs/BackfillNewsJob'
-import { registerAlgoTradingWorker } from '#jobs/AlgoTradingJob'
 import ScraperService from '#services/ScraperService'
 import MeilisearchService from '#services/MeilisearchService'
 import AlgoConfig from '#models/AlgoConfig'
+import FastAlgoService from '#services/FastAlgoService'
 
 async function boot() {
   try {
@@ -44,8 +44,11 @@ async function boot() {
     registerSubmitOrderWorker()
     registerMonitorOrderWorker()
     registerBackfillNewsWorker()
-    registerAlgoTradingWorker()
     logger.info('BullMQ workers registered')
+
+    // Intraminute algo loop (fast trading merged into the algo system).
+    // Self-contained: idles unless algo_config has fastEnabled + broker=kraken.
+    FastAlgoService.start()
 
     // Recurring jobs are only scheduled for long-running environments. Tests
     // boot the same preloads, and a cron tick mid-suite would enqueue network
@@ -64,14 +67,8 @@ async function boot() {
         await queueAllTickerRefresh()
       })
 
-      // Schedule algo trading at :15 and :45 (offset from ticker refresh at :00/:30)
-      cron.schedule('15,45 * * * *', async () => {
-        logger.info('[Cron] Triggering algo trading run')
-        await QueueService.addJob(QUEUE_NAMES.ALGO_TRADING, {})
-      })
-
       logger.info(
-        'Cron jobs scheduled (scrape every %d min, ticker refresh every 30min, algo every 30min offset)',
+        'Cron jobs scheduled (scrape every %d min, ticker refresh every 30min)',
         interval,
       )
     }

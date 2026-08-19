@@ -139,7 +139,7 @@ export const api = {
     request<any>('/algo/config', { method: 'PUT', body: JSON.stringify(config) }),
   algoEnable: () => request<any>('/algo/enable', { method: 'POST' }),
   algoDisable: () => request<any>('/algo/disable', { method: 'POST' }),
-  algoRun: () => request<any>('/algo/run', { method: 'POST' }),
+  algoFastStatus: () => request<any>('/algo/fast/status'),
   algoDecisions: (params?: Record<string, any>) => {
     const qs = params ? new URLSearchParams(params).toString() : '';
     return request<any>(`/algo/decisions${qs ? `?${qs}` : ''}`);

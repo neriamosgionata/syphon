@@ -48,7 +48,7 @@ test.group('Algo API', (group) => {
     assert.include([0, 1], body.enabled) // SQLite stores booleans as integers
     assert.include([0, 1], body.dry_run)
     assert.isString(body.broker)
-    assert.include(['ibkr', 'kraken', 'binance'], body.broker)
+    assert.include(['ibkr', 'kraken'], body.broker)
     assert.isNumber(body.entry_score_threshold)
     assert.isNumber(body.max_positions)
     assert.isArray(body.allowed_regimes)
@@ -59,7 +59,7 @@ test.group('Algo API', (group) => {
     const response = await client.put('/api/algo/config').json({
       entryScoreThreshold: 55,
       maxPositions: 7,
-      broker: 'binance',
+      broker: 'kraken',
       dryRun: false,
     })
 
@@ -67,7 +67,7 @@ test.group('Algo API', (group) => {
     const body = response.body()
     assert.equal(body.entry_score_threshold, 55)
     assert.equal(body.max_positions, 7)
-    assert.equal(body.broker, 'binance')
+    assert.equal(body.broker, 'kraken')
     assert.equal(body.dry_run, 0)
 
     // Restore whatever the suite started with
@@ -147,14 +147,6 @@ test.group('Algo API', (group) => {
     const config = await loadConfigRow()
     assert.equal(config?.enabled, 0)
     assert.equal(config?.disabled_reason, 'manually disabled')
-  })
-
-  test('POST /api/algo/run queues an algo trading job', async ({ client, assert }) => {
-    const response = await client.post('/api/algo/run')
-
-    response.assertStatus(200)
-    assert.isTrue(response.body().queued)
-    assert.property(response.body(), 'message')
   })
 
   test('GET /api/algo/decisions returns paginated decisions', async ({ client, assert }) => {

@@ -1,9 +1,8 @@
 import type { HttpContext } from '@adonisjs/core/http'
 import AlgoConfig from '#models/AlgoConfig'
 import AlgoPosition from '#models/AlgoPosition'
-import AlgoTradingService from '#services/AlgoTradingService'
+import FastAlgoService from '#services/FastAlgoService'
 import MeilisearchService from '#services/MeilisearchService'
-import QueueService, { QUEUE_NAMES } from '#jobs/QueueService'
 
 export default class AlgoController {
   public async getConfig({ response }: HttpContext) {
@@ -20,6 +19,9 @@ export default class AlgoController {
       'allowedRegimes', 'maxPositions', 'maxExposurePct', 'maxSinglePositionPct',
       'dailyLossLimitPct', 'exitScoreThreshold', 'maxHoldingDays', 'orderType',
       'timeInForce', 'cooldownMinutes', 'excludedSymbols',
+      'fastEnabled', 'fastIntervalSeconds', 'fastWatchlist', 'fastMomentumSeconds',
+      'fastMomentumThresholdPct', 'fastRsiLow', 'fastRsiHigh', 'fastStopLossPct',
+      'fastTakeProfitPct', 'fastExitReversalPct', 'fastCooldownSeconds',
     ]
 
     const numericRanges: Record<string, [number, number]> = {
@@ -33,10 +35,19 @@ export default class AlgoController {
       exitScoreThreshold: [-100, 0],
       maxHoldingDays: [1, 365],
       cooldownMinutes: [1, 60],
+      fastIntervalSeconds: [5, 300],
+      fastMomentumSeconds: [10, 600],
+      fastMomentumThresholdPct: [0, 10],
+      fastRsiLow: [1, 99],
+      fastRsiHigh: [1, 99],
+      fastStopLossPct: [0.1, 10],
+      fastTakeProfitPct: [0.1, 10],
+      fastExitReversalPct: [-10, 0],
+      fastCooldownSeconds: [10, 3600],
     }
 
     const stringEnums: Record<string, string[]> = {
-      broker: ['ibkr', 'kraken', 'binance'],
+      broker: ['ibkr', 'kraken'],
       orderType: ['MKT', 'LMT'],
       timeInForce: ['DAY', 'GTC'],
     }
@@ -50,6 +61,8 @@ export default class AlgoController {
       if (value === undefined) continue
 
       if (field === 'dryRun') {
+        value = value === true || value === 'true' || value === 1 || value === '1'
+      } else if (field === 'fastEnabled') {
         value = value === true || value === 'true' || value === 1 || value === '1'
       } else if (numericRanges[field]) {
         const num = Number(value)
@@ -65,7 +78,7 @@ export default class AlgoController {
         if (!stringEnums[field].includes(value)) {
           return response.badRequest({ error: `${field} must be one of: ${stringEnums[field].join(', ')}` })
         }
-      } else if (field === 'allowedRegimes' || field === 'excludedSymbols') {
+      } else if (field === 'allowedRegimes' || field === 'excludedSymbols' || field === 'fastWatchlist') {
         if (!Array.isArray(value)) {
           return response.badRequest({ error: `${field} must be an array` })
         }
@@ -98,11 +111,6 @@ export default class AlgoController {
     config.disabledReason = 'manually disabled'
     await config.save()
     return response.ok({ enabled: false, message: 'Algorithm disabled' })
-  }
-
-  public async triggerRun({ response }: HttpContext) {
-    await QueueService.addJob(QUEUE_NAMES.ALGO_TRADING, {})
-    return response.ok({ queued: true, message: 'Algo run queued' })
   }
 
   public async decisions({ request, response }: HttpContext) {
@@ -176,8 +184,17 @@ export default class AlgoController {
     return response.ok({ message: 'Position marked for close on next algo run' })
   }
 
+  public async fastStatus({ response }: HttpContext) {
+    const config = await AlgoConfig.getConfig()
+    return response.ok({
+      ...FastAlgoService.status(),
+      lastRunAt: config.lastRunAt,
+      disabledReason: config.disabledReason,
+    })
+  }
+
   public async stats({ response }: HttpContext) {
-    const stats = await AlgoTradingService.getStats()
+    const stats = await FastAlgoService.getStats()
 
     // Add some extra context
     const config = await AlgoConfig.getConfig()

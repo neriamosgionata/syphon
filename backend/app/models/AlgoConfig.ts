@@ -58,6 +58,43 @@ export default class AlgoConfig extends BaseModel {
   @column()
   declare cooldownMinutes: number
 
+  // Intraminute fast mode (Kraken fast engine)
+  @column()
+  declare fastEnabled: boolean
+
+  @column()
+  declare fastIntervalSeconds: number
+
+  @column({
+    prepare: (value: string[] | null) => (value && value.length ? JSON.stringify(value) : null),
+    consume: (value: string | null) => (typeof value === 'string' ? JSON.parse(value) : ['BTC', 'ETH', 'SOL']),
+  })
+  declare fastWatchlist: string[]
+
+  @column()
+  declare fastMomentumSeconds: number
+
+  @column()
+  declare fastMomentumThresholdPct: number
+
+  @column()
+  declare fastRsiLow: number
+
+  @column()
+  declare fastRsiHigh: number
+
+  @column()
+  declare fastStopLossPct: number
+
+  @column()
+  declare fastTakeProfitPct: number
+
+  @column()
+  declare fastExitReversalPct: number
+
+  @column()
+  declare fastCooldownSeconds: number
+
   @column({
     prepare: (value: string[]) => JSON.stringify(value),
     consume: (value: string) => (typeof value === 'string' ? JSON.parse(value) : value),
@@ -106,6 +143,17 @@ export default class AlgoConfig extends BaseModel {
       timeInForce: 'DAY',
       cooldownMinutes: 5,
       excludedSymbols: [],
+      fastEnabled: false,
+      fastIntervalSeconds: 10,
+      fastWatchlist: ['BTC', 'ETH', 'SOL'],
+      fastMomentumSeconds: 60,
+      fastMomentumThresholdPct: 0.15,
+      fastRsiLow: 35,
+      fastRsiHigh: 75,
+      fastStopLossPct: 0.5,
+      fastTakeProfitPct: 1.0,
+      fastExitReversalPct: -0.3,
+      fastCooldownSeconds: 180,
       lastRunAt: null,
       disabledReason: null,
     })

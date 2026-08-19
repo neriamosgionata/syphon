@@ -4,7 +4,6 @@ import type { Broker } from '#models/Trade'
 import Ticker from '#models/Ticker'
 import IBKRService from '#services/IBKRService'
 import KrakenService from '#services/KrakenService'
-import BinanceService from '#services/BinanceService'
 import QueueService, { QUEUE_NAMES } from '#jobs/QueueService'
 import db from '@adonisjs/lucid/services/db'
 
@@ -15,7 +14,6 @@ export default class TradingController {
   public async status({ response }: HttpContext) {
     const ibkrStatus = IBKRService.getConnectionStatus()
     const krakenStatus = KrakenService.getConnectionStatus()
-    const binanceStatus = BinanceService.getConnectionStatus()
 
     let ibkrAccount = {}
     let ibkrPositions: any[] = []
@@ -43,16 +41,6 @@ export default class TradingController {
       ])
     }
 
-    let binanceBalance = {}
-    let binanceOpenOrders: any[] = []
-
-    if (binanceStatus.connected) {
-      ;[binanceBalance, binanceOpenOrders] = await Promise.all([
-        BinanceService.getBalance().catch(() => ({})),
-        BinanceService.getOpenOrders().catch(() => [])
-      ])
-    }
-
     return response.json({
       // Legacy field for backwards compat
       connection: ibkrStatus,
@@ -66,12 +54,6 @@ export default class TradingController {
         tradeBalance: krakenTradeBalance,
         positions: krakenPositions,
         openOrders: krakenOpenOrders,
-      },
-      // Binance-specific
-      binance: {
-        connection: binanceStatus,
-        balance: binanceBalance,
-        openOrders: binanceOpenOrders,
       },
     })
   }
@@ -91,18 +73,6 @@ export default class TradingController {
         connected: false,
         broker: 'kraken',
         error: 'Failed to connect. Check KRAKEN_API_KEY and KRAKEN_API_SECRET.',
-      })
-    }
-
-    if (broker === 'binance') {
-      const result = await BinanceService.connect()
-      if (result) {
-        return response.json({ connected: true, broker: 'binance', message: 'Connected to Binance' })
-      }
-      return response.serviceUnavailable({
-        connected: false,
-        broker: 'binance',
-        error: 'Failed to connect. Check BINANCE_API_KEY and BINANCE_API_SECRET.',
       })
     }
 
@@ -129,11 +99,6 @@ export default class TradingController {
       return response.json({ connected: false, broker: 'kraken', message: 'Disconnected from Kraken' })
     }
 
-    if (broker === 'binance') {
-      BinanceService.disconnect()
-      return response.json({ connected: false, broker: 'binance', message: 'Disconnected from Binance' })
-    }
-
     IBKRService.disconnect()
     return response.json({ connected: false, broker: 'ibkr', message: 'Disconnected from IB' })
   }
@@ -155,17 +120,6 @@ export default class TradingController {
       return response.json({ balance, tradeBalance })
     }
 
-    if (broker === 'binance') {
-      if (!BinanceService.isConnected) {
-        return response.serviceUnavailable({ error: 'Not connected to Binance' })
-      }
-      const [account, balance] = await Promise.all([
-        BinanceService.getAccountInfo(),
-        BinanceService.getBalance(),
-      ])
-      return response.json({ account, balance })
-    }
-
     if (!IBKRService.isConnected) {
       return response.serviceUnavailable({ error: 'Not connected to IB' })
     }
@@ -185,14 +139,6 @@ export default class TradingController {
       }
       const positions = await KrakenService.getOpenPositions()
       return response.json(positions)
-    }
-
-    if (broker === 'binance') {
-      if (!BinanceService.isConnected) {
-        return response.serviceUnavailable({ error: 'Not connected to Binance' })
-      }
-      const account = await BinanceService.getAccountInfo()
-      return response.json(account.balances || [])
     }
 
     if (!IBKRService.isConnected) {
@@ -232,8 +178,8 @@ export default class TradingController {
     if (['STP', 'STP_LMT'].includes(orderType) && !stopPrice) {
       return response.badRequest({ error: 'stop_price required for STP/STP_LMT orders' })
     }
-    if (!['ibkr', 'kraken', 'binance'].includes(broker)) {
-      return response.badRequest({ error: 'broker must be ibkr, kraken, or binance' })
+    if (!['ibkr', 'kraken'].includes(broker)) {
+      return response.badRequest({ error: 'broker must be ibkr or kraken' })
     }
 
     // Find or reference the ticker
@@ -282,8 +228,6 @@ export default class TradingController {
     let updated: Trade
     if (trade.broker === 'kraken') {
       updated = await KrakenService.cancelOrderAny(trade)
-    } else if (trade.broker === 'binance') {
-      updated = await BinanceService.cancelOrder(trade)
     } else {
       updated = await IBKRService.cancelOrder(trade)
     }

@@ -4,7 +4,7 @@ import type { BelongsTo } from '@adonisjs/lucid/types/relations'
 import Ticker from './Ticker.js'
 import Analysis from './Analysis.js'
 
-export type Broker = 'ibkr' | 'kraken' | 'binance'
+export type Broker = 'ibkr' | 'kraken'
 export type TradeSide = 'BUY' | 'SELL'
 export type OrderType = 'MKT' | 'LMT' | 'STP' | 'STP_LMT' | 'TRAIL'
 export type TradeStatus =

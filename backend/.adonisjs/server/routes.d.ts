@@ -48,7 +48,7 @@ export type ScannedRoutes = {
     'algo.update_config': { paramsTuple?: []; params?: {} }
     'algo.enable': { paramsTuple?: []; params?: {} }
     'algo.disable': { paramsTuple?: []; params?: {} }
-    'algo.trigger_run': { paramsTuple?: []; params?: {} }
+    'algo.fast_status': { paramsTuple?: []; params?: {} }
     'algo.decisions': { paramsTuple?: []; params?: {} }
     'algo.positions': { paramsTuple?: []; params?: {} }
     'algo.force_close': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
@@ -66,15 +66,6 @@ export type ScannedRoutes = {
     'logs.index': { paramsTuple?: []; params?: {} }
     'logs.stats': { paramsTuple?: []; params?: {} }
     'notifications.stream': { paramsTuple?: []; params?: {} }
-    'fast_trading.start': { paramsTuple?: []; params?: {} }
-    'fast_trading.stop': { paramsTuple?: []; params?: {} }
-    'fast_trading.status': { paramsTuple?: []; params?: {} }
-    'fast_trading.index': { paramsTuple?: []; params?: {} }
-    'fast_trading.show': { paramsTuple: [ParamValue]; params: {'clientOrderId': ParamValue} }
-    'fast_trading.place_order': { paramsTuple?: []; params?: {} }
-    'fast_trading.cancel_order': { paramsTuple: [ParamValue]; params: {'clientOrderId': ParamValue} }
-    'fast_trading.price': { paramsTuple: [ParamValue]; params: {'symbol': ParamValue} }
-    'fast_trading.subscribe': { paramsTuple?: []; params?: {} }
   }
   GET: {
     'dashboard.index': { paramsTuple?: []; params?: {} }
@@ -101,6 +92,7 @@ export type ScannedRoutes = {
     'trading.index': { paramsTuple?: []; params?: {} }
     'trading.show': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'algo.get_config': { paramsTuple?: []; params?: {} }
+    'algo.fast_status': { paramsTuple?: []; params?: {} }
     'algo.decisions': { paramsTuple?: []; params?: {} }
     'algo.positions': { paramsTuple?: []; params?: {} }
     'algo.stats': { paramsTuple?: []; params?: {} }
@@ -113,10 +105,6 @@ export type ScannedRoutes = {
     'logs.index': { paramsTuple?: []; params?: {} }
     'logs.stats': { paramsTuple?: []; params?: {} }
     'notifications.stream': { paramsTuple?: []; params?: {} }
-    'fast_trading.status': { paramsTuple?: []; params?: {} }
-    'fast_trading.index': { paramsTuple?: []; params?: {} }
-    'fast_trading.show': { paramsTuple: [ParamValue]; params: {'clientOrderId': ParamValue} }
-    'fast_trading.price': { paramsTuple: [ParamValue]; params: {'symbol': ParamValue} }
   }
   HEAD: {
     'dashboard.index': { paramsTuple?: []; params?: {} }
@@ -143,6 +131,7 @@ export type ScannedRoutes = {
     'trading.index': { paramsTuple?: []; params?: {} }
     'trading.show': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'algo.get_config': { paramsTuple?: []; params?: {} }
+    'algo.fast_status': { paramsTuple?: []; params?: {} }
     'algo.decisions': { paramsTuple?: []; params?: {} }
     'algo.positions': { paramsTuple?: []; params?: {} }
     'algo.stats': { paramsTuple?: []; params?: {} }
@@ -155,10 +144,6 @@ export type ScannedRoutes = {
     'logs.index': { paramsTuple?: []; params?: {} }
     'logs.stats': { paramsTuple?: []; params?: {} }
     'notifications.stream': { paramsTuple?: []; params?: {} }
-    'fast_trading.status': { paramsTuple?: []; params?: {} }
-    'fast_trading.index': { paramsTuple?: []; params?: {} }
-    'fast_trading.show': { paramsTuple: [ParamValue]; params: {'clientOrderId': ParamValue} }
-    'fast_trading.price': { paramsTuple: [ParamValue]; params: {'symbol': ParamValue} }
   }
   POST: {
     'dashboard.retry_job': { paramsTuple: [ParamValue,ParamValue]; params: {'queue': ParamValue,'id': ParamValue} }
@@ -178,17 +163,11 @@ export type ScannedRoutes = {
     'trading.cancel_order': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'algo.enable': { paramsTuple?: []; params?: {} }
     'algo.disable': { paramsTuple?: []; params?: {} }
-    'algo.trigger_run': { paramsTuple?: []; params?: {} }
     'algo.force_close': { paramsTuple: [ParamValue]; params: {'id': ParamValue} }
     'training.predict': { paramsTuple?: []; params?: {} }
     'training.predict_batch': { paramsTuple?: []; params?: {} }
     'training.start_training': { paramsTuple?: []; params?: {} }
     'training.start_backfill': { paramsTuple?: []; params?: {} }
-    'fast_trading.start': { paramsTuple?: []; params?: {} }
-    'fast_trading.stop': { paramsTuple?: []; params?: {} }
-    'fast_trading.place_order': { paramsTuple?: []; params?: {} }
-    'fast_trading.cancel_order': { paramsTuple: [ParamValue]; params: {'clientOrderId': ParamValue} }
-    'fast_trading.subscribe': { paramsTuple?: []; params?: {} }
   }
   DELETE: {
     'dashboard.remove_failed_job': { paramsTuple: [ParamValue,ParamValue]; params: {'queue': ParamValue,'id': ParamValue} }

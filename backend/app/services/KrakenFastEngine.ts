@@ -1,10 +1,11 @@
 import crypto from 'crypto'
+import querystring from 'querystring'
 import env from '#start/env'
 import logger from '@adonisjs/core/services/logger'
 import db from '@adonisjs/lucid/services/db'
-import BinanceWS, { ExecutionReport } from '#services/BinanceWebSocketService'
+import KrakenWS, { KrakenOrderUpdate } from '#services/KrakenWebSocketService'
 
-const BINANCE_REST_BASE = 'https://api.binance.com'
+const KRAKEN_REST_BASE = 'https://api.kraken.com'
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -43,11 +44,33 @@ interface FastOrderOpts {
   timeInForce?: string
 }
 
+// ─── Kraken signing + pair helpers ───────────────────────────
+
+/**
+ * Generate Kraken API-Sign header.
+ * HMAC-SHA512 of (URI path + SHA256(nonce + POST data)), keyed with base64-decoded secret.
+ */
+function getKrakenSignature(urlPath: string, data: Record<string, any>, secret: string): string {
+  const dataStr = querystring.stringify(data)
+  const encoded = data.nonce + dataStr
+  const sha256Hash = crypto.createHash('sha256').update(encoded).digest()
+  const message = Buffer.concat([Buffer.from(urlPath), sha256Hash])
+  const secretBuffer = Buffer.from(secret, 'base64')
+  return crypto.createHmac('sha512', secretBuffer).update(message).digest('base64')
+}
+
+// Kraken uses XBT instead of BTC; REST pairs have no slash (XBTUSD).
+function toRestPair(symbol: string, currency = 'USD'): string {
+  const base = symbol.toUpperCase() === 'BTC' ? 'XBT' : symbol.toUpperCase()
+  return `${base}${currency.toUpperCase()}`
+}
+
 // ─── Service ─────────────────────────────────────────────────
 
-class FastTradeEngine {
+class KrakenFastEngine {
   private apiKey: string = ''
   private apiSecret: string = ''
+  private currency: string = 'USD'
 
   constructor(private database: {
     connection: () => { dialect: { name: string } }
@@ -62,11 +85,17 @@ class FastTradeEngine {
   private flushTimer: ReturnType<typeof setInterval> | null = null
   private flushIntervalMs = 100
   private tickerIdCache = new Map<string, number>()
+  private lastNonce = 0
 
-  // db.connection() returns a QueryClient — dialect info lives on
-  // .dialect.name (dialectName on the QueryClient is undefined).
   private get isSqlite(): boolean {
     return this.database.connection().dialect.name === 'better-sqlite3'
+  }
+
+  // Kraken requires strictly increasing nonces per API key.
+  private nextNonce(): number {
+    const base = Date.now() * 1000
+    this.lastNonce = Math.max(base, this.lastNonce + 1)
+    return this.lastNonce
   }
 
   private _running = false
@@ -82,41 +111,37 @@ class FastTradeEngine {
 
   public async start(symbols: string[] = ['BTC', 'ETH', 'SOL']): Promise<void> {
     if (this._running) return
-    this.apiKey = env.get('BINANCE_API_KEY', '')
-    this.apiSecret = env.get('BINANCE_API_SECRET', '')
+    this.apiKey = env.get('KRAKEN_API_KEY', '')
+    this.apiSecret = env.get('KRAKEN_API_SECRET', '')
 
     if (!this.apiKey || !this.apiSecret) {
-      logger.warn('[FastTrade] API key/secret not configured')
+      logger.warn('[KrakenFast] API key/secret not configured')
       return
     }
 
     try {
-      // Validate credentials
       await this.validateCredentials()
     } catch {
-      logger.error('[FastTrade] Credential validation failed')
+      logger.error('[KrakenFast] Credential validation failed')
       return
     }
 
     // Connect WebSocket streams
     try {
-      BinanceWS.connectPrices(symbols)
-      await BinanceWS.connectUserData()
+      KrakenWS.connectPrices(symbols)
+      await KrakenWS.connectUserData()
     } catch (err) {
-      logger.error('[FastTrade] WebSocket connection failed: %s', (err as Error).message)
+      logger.error('[KrakenFast] WebSocket connection failed: %s', (err as Error).message)
     }
 
-    // Subscribe to order updates (clean up old subscription first)
     if (this.unsubscribeOrderUpdate) this.unsubscribeOrderUpdate()
-    this.unsubscribeOrderUpdate = BinanceWS.onOrderUpdate((report) => this.handleExecutionReport(report))
+    this.unsubscribeOrderUpdate = KrakenWS.onOrderUpdate((update) => this.handleOrderUpdate(update))
 
-    // Recover active orders from DB
     await this.recoverFromDb()
 
-    // Start flush timer
     this.flushTimer = setInterval(() => this.flushToDb(), this.flushIntervalMs)
     this._running = true
-    logger.info('[FastTrade] Engine started, subscribed to %s', symbols.join(', '))
+    logger.info('[KrakenFast] Engine started, subscribed to %s', symbols.join(', '))
   }
 
   public async stop(): Promise<void> {
@@ -133,8 +158,8 @@ class FastTradeEngine {
       this.unsubscribeOrderUpdate = null
     }
     await this.flushToDb()
-    BinanceWS.disconnect()
-    logger.info('[FastTrade] Engine stopped')
+    KrakenWS.disconnect()
+    logger.info('[KrakenFast] Engine stopped')
   }
 
   // ---------------------------------------------------------------------------
@@ -143,9 +168,9 @@ class FastTradeEngine {
 
   public async placeOrder(opts: FastOrderOpts): Promise<FastOrderState> {
     const clientOrderId = crypto.randomUUID()
-    const symbol = `${opts.symbol.toUpperCase()}USDT`
+    const pair = toRestPair(opts.symbol.toUpperCase(), this.currency)
     const orderType = opts.orderType || 'MARKET'
-    // trades.order_type is an ENUM of IBKR-style codes; map Binance names
+    // trades.order_type is an ENUM of IBKR-style codes; map Kraken names
     // onto it or every INSERT fails with "Data truncated for column
     // 'order_type'".
     const dbOrderType: Record<string, string> = {
@@ -157,7 +182,6 @@ class FastTradeEngine {
     }
     const canonicalOrderType = dbOrderType[orderType] || 'MKT'
 
-    // Resolve ticker ID (cached)
     const tickerId = await this.resolveTickerId(opts.symbol.toUpperCase())
     if (tickerId === null) {
       const state: FastOrderState = {
@@ -201,39 +225,56 @@ class FastTradeEngine {
     this.orders.set(clientOrderId, state)
     this.enqueueFlush(state)
 
-    const params: Record<string, any> = {
-      symbol,
-      side: opts.side,
-      type: orderType,
-      quantity: opts.quantity,
-      newClientOrderId: clientOrderId,
+    const krakenOrderTypeMap: Record<string, string> = {
+      MKT: 'market',
+      LMT: 'limit',
+      STP: 'stop-loss',
+      STP_LMT: 'stop-loss-limit',
+      TRAIL: 'trailing-stop',
     }
 
-    if (['LIMIT', 'STOP_LOSS_LIMIT'].includes(orderType) && opts.price) {
+    const params: Record<string, any> = {
+      pair,
+      type: opts.side.toLowerCase(),
+      ordertype: krakenOrderTypeMap[canonicalOrderType] || 'market',
+      volume: String(opts.quantity),
+      // Long-UUID cl_ord_id lets the WS openOrders stream (which carries
+      // cl_ord_id) map execution reports straight back onto this client order.
+      cl_ord_id: clientOrderId,
+    }
+
+    // Price params
+    if (['LMT', 'STP_LMT'].includes(canonicalOrderType) && opts.price) {
       params.price = String(opts.price)
-      params.timeInForce = opts.timeInForce || 'GTC'
+      params.timeinforce = opts.timeInForce || 'GTC'
     }
-    if (['STOP_LOSS', 'STOP_LOSS_LIMIT'].includes(orderType) && opts.stopPrice) {
-      params.stopPrice = String(opts.stopPrice)
+    if (['STP', 'STP_LMT'].includes(canonicalOrderType) && opts.stopPrice) {
+      params.price = String(opts.stopPrice)
+      if (canonicalOrderType === 'STP_LMT' && opts.price) {
+        params.price2 = String(opts.price)
+      }
     }
-    if (orderType === 'TRAILING_STOP_MARKET' && opts.price) {
-      params.callbackRate = String(opts.price)
+    if (canonicalOrderType === 'TRAIL' && opts.price) {
+      // Kraken trailing-stop: `price` = activation price (numeric), `price2`
+      // = trailing offset (with +/- prefix). Mirrors KrakenService.placeOrder.
+      if (opts.stopPrice) params.price = String(opts.stopPrice)
+      params.price2 = `+${opts.price}`
     }
 
     try {
-      const result = await this.signedRequest('/api/v3/order', params, 'POST')
-      state.externalOrderId = String(result.orderId)
+      const result = await this.privateRequest('/0/private/AddOrder', params)
+      state.externalOrderId = result?.txid?.[0] || null
       // Only set submitted if WS hasn't already advanced status to filled/cancelled
       if (state.status === 'pending') state.status = 'submitted'
       state.dirty = true
-      logger.info('[FastTrade] Order %s: %s %s %s %s (orderId=%s)',
-        clientOrderId.slice(0, 8), opts.side, opts.quantity, opts.symbol, orderType, result.orderId)
+      logger.info('[KrakenFast] Order %s: %s %s %s %s (txid=%s)',
+        clientOrderId.slice(0, 8), opts.side, opts.quantity, opts.symbol, orderType, state.externalOrderId)
     } catch (err) {
       if (state.status === 'pending') {
         state.status = 'error'
         state.errorMessage = (err as Error).message
       }
-      logger.error('[FastTrade] Order %s failed: %s', clientOrderId.slice(0, 8), (err as Error).message)
+      logger.error('[KrakenFast] Order %s failed: %s', clientOrderId.slice(0, 8), (err as Error).message)
     }
 
     return state
@@ -245,18 +286,14 @@ class FastTradeEngine {
     if (['filled', 'cancelled', 'error'].includes(state.status)) return false
 
     try {
-      const symbol = `${state.symbol}USDT`
-      await this.signedRequest('/api/v3/order', {
-        symbol,
-        orderId: Number(state.externalOrderId),
-      }, 'DELETE')
+      await this.privateRequest('/0/private/CancelOrder', { txid: state.externalOrderId })
       state.status = 'cancelled'
       state.cancelledAt = Date.now()
       state.dirty = true
       this.enqueueFlush(state)
       return true
     } catch (err) {
-      logger.error('[FastTrade] Cancel %s failed: %s', clientOrderId.slice(0, 8), (err as Error).message)
+      logger.error('[KrakenFast] Cancel %s failed: %s', clientOrderId.slice(0, 8), (err as Error).message)
       return false
     }
   }
@@ -285,7 +322,7 @@ class FastTradeEngine {
   }
 
   public getPrice(symbol: string): number | null {
-    return BinanceWS.getPrice(symbol)
+    return KrakenWS.getPrice(symbol)
   }
 
   public getActiveOrderCount(): number {
@@ -300,45 +337,89 @@ class FastTradeEngine {
   // WebSocket event handler
   // ---------------------------------------------------------------------------
 
-  private handleExecutionReport(report: ExecutionReport): void {
-    const state = this.orders.get(report.c)
+  private handleOrderUpdate(update: KrakenOrderUpdate): void {
+    const state = update.cl_ord_id ? this.orders.get(update.cl_ord_id) : undefined
     if (!state) return
 
-    const statusMap: Record<string, FastOrderStatus> = {
-      NEW: 'submitted',
-      PARTIALLY_FILLED: 'partially_filled',
-      FILLED: 'filled',
-      CANCELED: 'cancelled',
-      REJECTED: 'error',
-      EXPIRED: 'cancelled',
+    const vol = parseFloat(update.vol || '0')
+    const volExec = parseFloat(update.vol_exec || '0')
+
+    let newStatus: FastOrderStatus | undefined
+    if (update.status === 'closed') {
+      newStatus = 'filled'
+    } else if (update.status === 'canceled' || update.status === 'expired') {
+      newStatus = 'cancelled'
+    } else if (update.status === 'open') {
+      if (vol > 0 && volExec >= vol) newStatus = 'filled'
+      else if (volExec > 0) newStatus = 'partially_filled'
+      else newStatus = 'submitted'
+    } else if (update.status === 'pending') {
+      newStatus = 'submitted'
     }
 
-    const newStatus = statusMap[report.X]
     if (newStatus && state.status !== newStatus) {
       state.status = newStatus
       state.dirty = true
     }
 
-    if (report.z) {
-      const cumQty = parseFloat(report.z)
-      if (cumQty > 0) state.filledQuantity = cumQty
-    }
-    if (report.L) {
-      const execPrice = parseFloat(report.L)
-      if (execPrice > 0) state.fillPrice = execPrice
-    }
-    if (report.n) {
-      state.commission = (state.commission || 0) + parseFloat(report.n)
-      state.commissionAsset = report.N || null
+    if (volExec > 0) state.filledQuantity = volExec
+
+    if (update.avg_price) {
+      const ap = parseFloat(update.avg_price)
+      if (ap > 0) state.fillPrice = ap
+    } else if (update.cost && volExec > 0) {
+      state.fillPrice = parseFloat(update.cost) / volExec
     }
 
-    if (report.X === 'FILLED' && report.T) {
-      state.filledAt = report.T
-    } else if ((report.X === 'CANCELED' || report.X === 'EXPIRED') && report.E) {
-      state.cancelledAt = report.E
+    if (update.fee) {
+      const fee = parseFloat(update.fee)
+      if (fee > 0) {
+        state.commission = fee
+        state.commissionAsset = this.currency
+      }
+    }
+
+    if (update.lastupdated) {
+      const t = Math.round(parseFloat(update.lastupdated) * 1000)
+      if (newStatus === 'filled' && !state.filledAt) state.filledAt = t
+      else if (newStatus === 'cancelled' && !state.cancelledAt) state.cancelledAt = t
+    }
+
+    // Kraken close updates are status-only ({ status: "closed" }) — they drop
+    // vol_exec/avg_price/fee. Backfill the final fill data from REST so a
+    // same-tick market fill isn't left with filledQuantity = 0.
+    if (
+      (update.status === 'closed' || update.status === 'canceled') &&
+      update.vol_exec === undefined &&
+      state.externalOrderId
+    ) {
+      void this.reconcileOne(state)
     }
 
     this.enqueueFlush(state)
+  }
+
+  private async reconcileOne(state: FastOrderState): Promise<void> {
+    if (!state.externalOrderId) return
+    try {
+      const result = await this.privateRequest('/0/private/QueryOrders', { txid: state.externalOrderId })
+      const order = result?.[state.externalOrderId]
+      if (!order) return
+
+      const volExec = parseFloat(order.vol_exec || '0')
+      if (volExec > 0) state.filledQuantity = volExec
+      if (order.avg_price && parseFloat(order.avg_price) > 0) {
+        state.fillPrice = parseFloat(order.avg_price)
+      }
+      if (order.fee && parseFloat(order.fee) > 0) {
+        state.commission = parseFloat(order.fee)
+        state.commissionAsset = this.currency
+      }
+      state.dirty = true
+      this.enqueueFlush(state)
+    } catch (err) {
+      logger.warn('[KrakenFast] Reconcile failed for %s: %s', state.symbol, (err as Error).message)
+    }
   }
 
   private enqueueFlush(state: FastOrderState): void {
@@ -384,12 +465,10 @@ class FastTradeEngine {
 
     const batch = this.flushQueue.splice(0)
 
-    // Timeout guard: a hung DB must not wedge the flush loop forever
-    // (flushing stays true, in-memory queue grows unbounded).
     let failed = false
     const persist = this.persistBatch(batch).catch((err) => {
       failed = true
-      logger.error('[FastTrade] DB flush failed (%d orders): %s', batch.length, (err as Error).message)
+      logger.error('[KrakenFast] DB flush failed (%d orders): %s', batch.length, (err as Error).message)
     })
 
     const outcome = await Promise.race([
@@ -398,11 +477,7 @@ class FastTradeEngine {
     ])
 
     if (outcome === 'timeout') {
-      // Let the in-flight transaction settle (commit or rollback) before
-      // re-queueing, so a concurrent retry can't double-INSERT the same
-      // orders. If it committed, state.tradeId was assigned and the next
-      // flush takes the UPDATE path.
-      logger.warn('[FastTrade] Flush exceeded 10s, waiting for settlement')
+      logger.warn('[KrakenFast] Flush exceeded 10s, waiting for settlement')
       await persist
     }
 
@@ -437,12 +512,9 @@ class FastTradeEngine {
             state.cancelledAt ? new Date(state.cancelledAt).toISOString().slice(0, 19).replace('T', ' ') : null,
             state.tradeId,
           ])
-          // MySQL exposes affectedRows; better-sqlite3 returns { changes }.
           const affected = Number(
             updateResult?.affectedRows ?? updateResult?.changes ?? 0
           )
-          // Row missing (e.g. a previous INSERT was rolled back after the
-          // in-memory tradeId was assigned) — fall back to INSERT.
           if (affected === 0) {
             state.tradeId = null
             await this.insertTradeRow(trx, state)
@@ -484,21 +556,19 @@ class FastTradeEngine {
       state.fillPrice,
       state.commission,
       state.errorMessage,
-      'binance',
+      'kraken',
       'spot',
-      'USDT',
+      this.currency,
       'GTC',
       state.submittedAt ? new Date(state.submittedAt).toISOString().slice(0, 19).replace('T', ' ') : now,
       now,
       now,
     ])
-    // MySQL ResultSetHeader exposes insertId; better-sqlite3 returns
-    // { lastInsertRowid }.
     state.tradeId = Number(result?.insertId ?? result?.lastInsertRowid)
   }
 
   // ---------------------------------------------------------------------------
-  // Recovery: load pending orders from DB & sync with Binance
+  // Recovery: load pending orders from DB & sync with Kraken
   // ---------------------------------------------------------------------------
 
   private async recoverFromDb(): Promise<void> {
@@ -508,7 +578,8 @@ class FastTradeEngine {
                external_order_id, client_order_id, status, filled_quantity, fill_price, commission,
                submitted_at, error_message, ticker_id
         FROM trades
-        WHERE broker = 'binance' AND status IN ('pending', 'submitted', 'partially_filled')
+        WHERE broker = 'kraken' AND client_order_id IS NOT NULL
+          AND status IN ('pending', 'submitted', 'partially_filled')
         ORDER BY created_at DESC
         LIMIT 50
       `)
@@ -546,22 +617,18 @@ class FastTradeEngine {
         recovered.push(state)
       }
 
-      logger.info('[FastTrade] Recovered %d active orders from DB', trades.length)
+      logger.info('[KrakenFast] Recovered %d active orders from DB', trades.length)
 
-      // Sync recovered orders against the exchange so fills/statuses missed
-      // while the engine was down (or orders without a persisted
-      // client_order_id) converge to their true state.
       await this.reconcileWithExchange(recovered)
     } catch (err) {
-      logger.error('[FastTrade] DB recovery failed: %s', (err as Error).message)
+      logger.error('[KrakenFast] DB recovery failed: %s', (err as Error).message)
     }
   }
 
   /**
-   * Query Binance for the current state of recovered orders and apply it.
-   * Needed because execution reports are keyed by the original clientOrderId,
-   * which legacy rows (and any order placed before the client_order_id column
-   * existed) do not have persisted.
+   * Query Kraken for the current state of recovered orders and apply it.
+   * Needed because execution reports are keyed by cl_ord_id, which legacy rows
+   * (and orders placed before the cl_ord_id column existed) do not have.
    */
   private async reconcileWithExchange(states: FastOrderState[]): Promise<void> {
     const pending = states.filter(
@@ -572,39 +639,48 @@ class FastTradeEngine {
     await Promise.allSettled(
       pending.map(async (state) => {
         try {
-          const symbol = `${state.symbol}USDT`
-          const result = await this.signedRequest('/api/v3/order', {
-            symbol,
-            orderId: Number(state.externalOrderId),
-          })
+          const result = await this.privateRequest('/0/private/QueryOrders', { txid: state.externalOrderId! })
+          const order = result?.[state.externalOrderId!]
+          if (!order) return
+
+          const vol = parseFloat(order.vol || '0')
+          const volExec = parseFloat(order.vol_exec || '0')
 
           const statusMap: Record<string, FastOrderStatus> = {
-            NEW: 'submitted',
-            PARTIALLY_FILLED: 'partially_filled',
-            FILLED: 'filled',
-            CANCELED: 'cancelled',
-            REJECTED: 'error',
-            EXPIRED: 'cancelled',
+            open: 'submitted',
+            closed: 'filled',
+            canceled: 'cancelled',
+            expired: 'cancelled',
           }
 
-          const newStatus = statusMap[result.status]
+          let newStatus = statusMap[order.status]
+          if (newStatus === 'submitted' && vol > 0 && volExec > 0 && volExec < vol) {
+            newStatus = 'partially_filled'
+          }
+          if (newStatus === 'submitted' && vol > 0 && volExec >= vol) {
+            newStatus = 'filled'
+          }
+
           if (newStatus && state.status !== newStatus) {
             state.status = newStatus
             state.dirty = true
           }
 
-          const volExec = parseFloat(result.executedQty || '0')
           if (volExec > 0) state.filledQuantity = volExec
-          const quoteQty = parseFloat(result.cummulativeQuoteQty || '0')
-          if (volExec > 0 && quoteQty > 0) state.fillPrice = quoteQty / volExec
+          if (order.avg_price && parseFloat(order.avg_price) > 0) {
+            state.fillPrice = parseFloat(order.avg_price)
+          }
+          if (order.fee && parseFloat(order.fee) > 0) {
+            state.commission = parseFloat(order.fee)
+            state.commissionAsset = this.currency
+          }
 
-          const eventTime = result.updateTime || result.time || Date.now()
-          if (newStatus === 'filled' && !state.filledAt) state.filledAt = eventTime
-          else if (newStatus === 'cancelled' && !state.cancelledAt) state.cancelledAt = eventTime
+          if (newStatus === 'filled' && !state.filledAt) state.filledAt = Date.now()
+          else if (newStatus === 'cancelled' && !state.cancelledAt) state.cancelledAt = Date.now()
 
           this.enqueueFlush(state)
         } catch (err) {
-          logger.warn('[FastTrade] Exchange reconcile failed for %s: %s', state.symbol, (err as Error).message)
+          logger.warn('[KrakenFast] Exchange reconcile failed for %s: %s', state.symbol, (err as Error).message)
         }
       })
     )
@@ -629,36 +705,32 @@ class FastTradeEngine {
   // ---------------------------------------------------------------------------
 
   private async validateCredentials(): Promise<void> {
-    const qs = new URLSearchParams({ timestamp: String(Date.now()) }).toString()
-    const sig = crypto.createHmac('sha256', this.apiSecret).update(qs).digest('hex')
-    const res = await fetch(`${BINANCE_REST_BASE}/api/v3/account?${qs}&signature=${sig}`, {
-      headers: { 'X-MBX-APIKEY': this.apiKey },
-    })
-    const text = await res.text()
-    let json: any
-    try { json = JSON.parse(text) } catch { throw new Error(`Binance HTTP ${res.status}: ${text.slice(0, 200)}`) }
-    if (json.code && json.msg) throw new Error(json.msg)
+    await this.privateRequest('/0/private/Balance', {})
   }
 
-  private async signedRequest(path: string, params: Record<string, any>, method: string = 'GET'): Promise<any> {
-    const allParams = { ...params, timestamp: Date.now() }
-    const qs = new URLSearchParams(allParams as any).toString()
-    const sig = crypto.createHmac('sha256', this.apiSecret).update(qs).digest('hex')
-    const url = `${BINANCE_REST_BASE}${path}?${qs}&signature=${sig}`
+  private async privateRequest(path: string, params: Record<string, any> = {}): Promise<any> {
+    const nonce = this.nextNonce()
+    const body = { nonce, ...params }
+    const signature = getKrakenSignature(path, body, this.apiSecret)
 
-    const res = await fetch(url, {
-      method,
-      headers: { 'X-MBX-APIKEY': this.apiKey },
+    const res = await fetch(`${KRAKEN_REST_BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'API-Key': this.apiKey,
+        'API-Sign': signature,
+      },
+      body: querystring.stringify(body),
     })
 
-    const text = await res.text()
-    let json: any
-    try { json = JSON.parse(text) } catch { throw new Error(`Binance HTTP ${res.status}: ${text.slice(0, 200)}`) }
-    if (json.code && json.msg) throw new Error(json.msg)
-    return json
+    const json: any = await res.json()
+    if (json.error && json.error.length > 0) {
+      throw new Error(json.error.join('; '))
+    }
+    return json.result
   }
 }
 
-export { FastTradeEngine }
+export { KrakenFastEngine }
 
-export default new FastTradeEngine()
+export default new KrakenFastEngine()

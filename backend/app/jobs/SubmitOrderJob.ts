@@ -3,7 +3,6 @@ import logger from '@adonisjs/core/services/logger'
 import Trade from '#models/Trade'
 import IBKRService from '#services/IBKRService'
 import KrakenService from '#services/KrakenService'
-import BinanceService from '#services/BinanceService'
 import QueueService, { QUEUE_NAMES } from './QueueService.js'
 
 export async function processSubmitOrder(job: Job) {
@@ -26,8 +25,6 @@ export async function processSubmitOrder(job: Job) {
 
   if (trade.broker === 'kraken') {
     result = await KrakenService.placeOrderAny(trade)
-  } else if (trade.broker === 'binance') {
-    result = await BinanceService.placeOrder(trade)
   } else {
     result = await IBKRService.placeOrder(trade)
   }

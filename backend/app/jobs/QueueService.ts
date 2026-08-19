@@ -10,7 +10,6 @@ export const QUEUE_NAMES = {
   BACKFILL_NEWS: 'backfill-news',
   SUBMIT_ORDER: 'submit-order',
   MONITOR_ORDER: 'monitor-order',
-  ALGO_TRADING: 'algo-trading',
 } as const
 
 const connection = {
