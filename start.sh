@@ -77,7 +77,7 @@ fi
 # 2. Backend prerequisites
 # ---------------------------------------------------------------------------
 [ -f backend/.env ] || die "backend/.env missing (needed for Redis/Meili credentials)"
-[ -f backend/ace ]  || die "backend/ace missing"
+[ -f backend/ace.js ] || die "backend/ace.js missing"
 
 if [ ! -d node_modules ]; then
   log "installing dependencies (npm install --legacy-peer-deps)"
@@ -109,7 +109,7 @@ if [ "$MODE" = "prod" ]; then
   launch backend  sh -c 'cd backend/build && exec node server.js'
   launch frontend npm --prefix frontend run preview -- --host
 else
-  launch backend  node backend/ace serve --watch
+  launch backend  node backend/ace.js serve --watch
   launch frontend npm --prefix frontend run dev
 fi
 # BullMQ workers run in-process (backend/start/jobs.ts registers all 7).
