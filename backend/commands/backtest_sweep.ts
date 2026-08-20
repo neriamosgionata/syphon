@@ -132,6 +132,8 @@ export default class BacktestSweep extends BaseCommand {
         'fastTrendMode', 'fastTrendSlopePct', 'fastTrendSlopeWindowSeconds',
         'fastRegimeEmaPeriod', 'fastRegimeSlopeWindowSeconds', 'fastRegimeSlopeMinPct',
         'fastVolumeWindowSeconds', 'fastVolumeMinRatio',
+        'fastCorrelatedExposurePct', 'fastRiskPerTradePct', 'fastMaxLossStreak',
+        'fastLossStreakPauseSeconds', 'fastTrailingVolatilityMult', 'fastScaleOutPct',
         'fastCooldownSeconds', 'maxPositions', 'maxExposurePct', 'maxSinglePositionPct',
       ]),
       ...overrides,
@@ -149,6 +151,10 @@ export default class BacktestSweep extends BaseCommand {
       maxExposurePct: cfg.maxExposurePct,
       maxSinglePositionPct: cfg.maxSinglePositionPct,
       cooldownSeconds: cfg.fastCooldownSeconds,
+      correlatedExposurePct: cfg.fastCorrelatedExposurePct,
+      riskPerTradePct: cfg.fastRiskPerTradePct,
+      maxLossStreak: cfg.fastMaxLossStreak,
+      lossStreakPauseSeconds: cfg.fastLossStreakPauseSeconds,
     }
 
     const engine = new BacktestEngine()

@@ -193,6 +193,80 @@ test.group('BacktestEngine', () => {
     assert.closeTo(first.exitPrice!, 102.515, 1e-6)
   })
 
+  test('risk-normalized sizing shrinks positions with wider stops', ({ assert }) => {
+    const samples = series((i) => 100 * Math.pow(1.0001, i), 4 * 3600)
+    const base = engine.run(samples, baseCfg())
+    const risky = engine.run(samples, baseCfg({ riskPerTradePct: 0.05 }))
+    assert.isAbove(base.trades[0].quantity, risky.trades[0].quantity)
+    // SL 0.5% → risk 0.05% → 10% position (vs 20% max single)
+    assert.closeTo(risky.trades[0].quantity, base.trades[0].quantity * 0.5, 1e-6)
+  })
+
+  test('correlated-exposure cap limits position size', ({ assert }) => {
+    const samples = series((i) => 100 * Math.pow(1.0001, i), 4 * 3600)
+    const capped = engine.run(samples, baseCfg({ correlatedExposurePct: 0.05 }))
+    const base = engine.run(samples, baseCfg())
+    assert.isBelow(capped.trades[0].quantity, base.trades[0].quantity)
+  })
+
+  test('loss-streak pause blocks entries until the streak resets', ({ assert }) => {
+    // Each cycle: slow rise (+1.2%, entry fires, TP at 1.5% never reached)
+    // then a slide (-4%, stop out). Consecutive losing closes accumulate;
+    // with maxLossStreak 2 and no time-based pause, entries stop forever
+    // after 2 losses.
+    const samples: BacktestSample[] = []
+    const t0 = T0
+    let cursor = 0
+    let price = 100
+    for (let k = 0; k < 4; k++) {
+      for (let i = 0; i < 120; i++) {
+        price *= 1.0001
+        samples.push({ t: t0 + cursor * 1000, p: price })
+        cursor++
+      }
+      for (let i = 0; i < 400; i++) {
+        price *= 0.9999
+        samples.push({ t: t0 + cursor * 1000, p: price })
+        cursor++
+      }
+      for (let i = 0; i < 200; i++) {
+        samples.push({ t: t0 + cursor * 1000, p: price })
+        cursor++
+      }
+    }
+
+    const result = engine.run(samples, baseCfg({
+      maxLossStreak: 2,
+      lossStreakPauseSeconds: 0,
+      strategy: { ...baseCfg().strategy, exitReversalPct: -50 }, // SL-only exits
+    }))
+    assert.equal(result.metrics.lossCount, 2)
+    assert.equal(result.metrics.totalTrades, 2)
+  })
+
+  test('scale-out locks in a fraction and the remainder rides on', ({ assert }) => {
+    const samples = series((i) => 100 * Math.pow(1.0001, i), 4 * 3600)
+    const result = engine.run(samples, baseCfg({
+      strategy: {
+        ...baseCfg().strategy,
+        takeProfitPct: 10,
+        trailingStopPct: 2.0,
+        trailingActivatePct: 1.5,
+        scaleOutPct: 0.5,
+      },
+    }))
+
+    const partials = result.trades.filter((t) => t.partial)
+    assert.isAbove(partials.length, 0)
+    assert.match(partials[0].exitReason!, /scale-out/)
+    // Scale-out quantity = 50% of the original entry quantity.
+    const remainder = result.trades.find((t) => !t.partial)
+    assert.isDefined(remainder)
+    assert.closeTo(partials[0].quantity, remainder!.quantity, 2e-6)
+    // Partial PnL is included in the total.
+    assert.isAbove(partials[0].pnl, 0)
+  })
+
   test('unsorted input is sorted by time', ({ assert }) => {
     const samples = series((i) => 100 * Math.pow(1.0001, i), 3600)
     samples.reverse()

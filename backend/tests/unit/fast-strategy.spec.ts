@@ -314,6 +314,51 @@ test.group('FastStrategy volume gate', () => {
   })
 })
 
+test.group('FastStrategy exit quality', () => {
+  test('vol-adaptive trailing widens the trail in high volatility', ({ assert }) => {
+    // ±1% zigzag every second → per-second vol ≈ 2% → per-minute ≈ 15.5%
+    const { feed, now } = feedFrom((i) => 100 + (i % 2 === 0 ? 1 : -1), 120)
+    const cfg = baseCfg({
+      trailingStopPct: 0.3,
+      trailingActivatePct: 0.4,
+      trailingVolatilityMult: 2,
+      volatilityWindowSamples: 60,
+      volatilityFloorPct: 0.05,
+    })
+    const pos = buyPosition({ takeProfit: 150, peakPrice: 100 })
+    const signal = strategy.evaluateExit(feed, 'BTC', 100.9, now, pos, cfg)
+    assert.isFalse(signal.shouldExit)
+    assert.isNotNull(signal.trailingStop)
+    // trail = 100.9 × (1 - max(0.3, 2 × 15.49)) — far wider than fixed 0.3%
+    assert.isBelow(signal.trailingStop!, 100.9 * (1 - 0.003) - 1)
+  })
+
+  test('scale-out fires exactly once when the trail arms', ({ assert }) => {
+    const { feed, now } = feedFrom(() => 100, 120)
+    const cfg = baseCfg({ trailingStopPct: 0.3, trailingActivatePct: 0.4, scaleOutPct: 0.5 })
+    let pos = buyPosition({ takeProfit: 150 })
+
+    const first = strategy.evaluateExit(feed, 'BTC', 100.9, now, pos, cfg)
+    assert.isTrue(first.scaleOut)
+
+    // Already scaled out → no second signal.
+    pos = { ...pos, scaledOut: true }
+    const second = strategy.evaluateExit(feed, 'BTC', 101.2, now, pos, cfg)
+    assert.isFalse(second.scaleOut)
+
+    // scaleOutPct 0 never fires.
+    const noSo = strategy.evaluateExit(feed, 'BTC', 100.9, now, buyPosition({ takeProfit: 150 }), baseCfg({ trailingStopPct: 0.3, trailingActivatePct: 0.4 }))
+    assert.isFalse(noSo.scaleOut)
+  })
+
+  test('scale-out never fires before the trail arms', ({ assert }) => {
+    const { feed, now } = feedFrom(() => 100, 120)
+    const cfg = baseCfg({ trailingStopPct: 0.3, trailingActivatePct: 0.4, scaleOutPct: 0.5 })
+    const signal = strategy.evaluateExit(feed, 'BTC', 100.2, now, buyPosition({ takeProfit: 150 }), cfg)
+    assert.isFalse(signal.scaleOut)
+  })
+})
+
 test.group('FastStrategy exit', () => {
   test('fixed stop loss', ({ assert }) => {
     const { feed, now } = feedFrom(() => 100, 120)

@@ -42,6 +42,14 @@ export interface BacktestConfig {
   maxExposurePct: number
   maxSinglePositionPct: number
   cooldownSeconds: number
+  /** Cap on TOTAL exposure across the (correlated) basket. 0 = maxExposurePct. */
+  correlatedExposurePct?: number
+  /** Size so a full SL stop risks this % of equity. 0 = off. */
+  riskPerTradePct?: number
+  /** Pause entries after this many consecutive losing closes. 0 = off. */
+  maxLossStreak?: number
+  /** Pause duration after hitting maxLossStreak. 0 = until the next win. */
+  lossStreakPauseSeconds?: number
 }
 
 export interface BacktestTrade {
@@ -59,6 +67,8 @@ export interface BacktestTrade {
   holdingSeconds: number | null
   /** True when the position was still open at end of test and force-closed. */
   closedAtEnd: boolean
+  /** Scale-out partial close — excluded from win/loss counts, included in PnL. */
+  partial?: boolean
 }
 
 export interface BacktestMetrics {
@@ -98,6 +108,7 @@ interface OpenPosition {
   stopLoss: number
   takeProfit: number
   peakPrice: number
+  scaledOut: boolean
 }
 
 export class BacktestEngine {
@@ -122,6 +133,8 @@ export class BacktestEngine {
     const trades: BacktestTrade[] = []
     const equityCurve: Array<{ t: number; value: number }> = []
     const cooldowns = new Map<string, number>()
+    let lossStreak = 0
+    let streakSinceAt = 0
     let feedIndex = 0
     let prevFeedIndex = 0
 
@@ -133,15 +146,17 @@ export class BacktestEngine {
       price: number,
       time: number,
       reason: string,
-      closedAtEnd: boolean
+      closedAtEnd: boolean,
+      quantity = pos.quantity,
+      partial = false
     ): void => {
       const isBuy = pos.side === 'BUY'
       const gross = isBuy
-        ? pos.quantity * price - pos.quantity * pos.entryPrice
-        : pos.quantity * pos.entryPrice - pos.quantity * price
-      const feePaid = pos.quantity * price * cfg.feePct
+        ? quantity * price - quantity * pos.entryPrice
+        : quantity * pos.entryPrice - quantity * price
+      const feePaid = quantity * price * cfg.feePct
       const pnl = gross - feePaid
-      const costBasis = pos.quantity * pos.entryPrice
+      const costBasis = quantity * pos.entryPrice
       trades.push({
         symbol: pos.symbol,
         side: pos.side,
@@ -149,16 +164,17 @@ export class BacktestEngine {
         entryPrice: pos.entryPrice,
         exitTime: time,
         exitPrice: price,
-        quantity: pos.quantity,
+        quantity,
         pnl,
         pnlPct: costBasis > 0 ? (pnl / costBasis) * 100 : 0,
         feePaid,
         exitReason: reason,
         holdingSeconds: time - pos.entryTime > 0 ? Math.round((time - pos.entryTime) / 1000) : 0,
         closedAtEnd,
+        partial,
       })
-      if (isBuy) cash += pos.quantity * price * (1 - cfg.feePct)
-      else cash -= pos.quantity * price * (1 + cfg.feePct)
+      if (isBuy) cash += quantity * price * (1 - cfg.feePct)
+      else cash -= quantity * price * (1 + cfg.feePct)
     }
 
     // Decision times: every loopIntervalSeconds from the first sample.
@@ -207,7 +223,18 @@ export class BacktestEngine {
             exited = true
           }
         }
-        if (exited) continue
+        if (exited) {
+          const trade = trades[trades.length - 1]
+          if (trade && !trade.partial) {
+            if (trade.pnl > 0) {
+              lossStreak = 0
+            } else {
+              lossStreak++
+              if (cfg.maxLossStreak && lossStreak >= cfg.maxLossStreak) streakSinceAt = t
+            }
+          }
+          continue
+        }
 
         const signal = this.strategy.evaluateExit(this.feed, pos.symbol, price, t, {
           side: pos.side,
@@ -216,6 +243,7 @@ export class BacktestEngine {
           takeProfit: pos.takeProfit,
           peakPrice: pos.peakPrice,
           openedAt: pos.entryTime,
+          scaledOut: pos.scaledOut,
         }, cfg.strategy)
 
         if (signal.peakPrice !== pos.peakPrice) pos.peakPrice = signal.peakPrice
@@ -223,27 +251,71 @@ export class BacktestEngine {
           pos.stopLoss = signal.trailingStop
         }
 
+        // Scale-out: lock in a fraction of the winner when the trail arms.
+        if (signal.scaleOut && !pos.scaledOut) {
+          const fraction = cfg.strategy.scaleOutPct > 0 ? Math.min(1, cfg.strategy.scaleOutPct) : 0
+          if (fraction > 0 && fraction < 1) {
+            const qtyOut = Math.floor(pos.quantity * fraction * 1e6) / 1e6
+            if (qtyOut > 0) {
+              closePosition(pos, price, t, 'scale-out', false, qtyOut, true)
+              pos.quantity -= qtyOut
+            }
+          }
+          pos.scaledOut = true
+        }
+
         if (signal.shouldExit) {
           closePosition(pos, price, t, signal.reason || 'strategy exit', false)
           positions.splice(i, 1)
+          // Loss streak accounting on full closes (the trade was just pushed).
+          const trade = trades[trades.length - 1]
+          if (trade && !trade.partial) {
+            if (trade.pnl > 0) {
+              lossStreak = 0
+            } else {
+              lossStreak++
+              if (cfg.maxLossStreak && lossStreak >= cfg.maxLossStreak) streakSinceAt = t
+            }
+          }
         }
       }
 
-      // Entries.
-      if (positions.length < cfg.maxPositions) {
+      // Entries. One position per symbol — the live loop skips symbols
+      // that already have a position, and the engine must match.
+      if (positions.length < cfg.maxPositions && !positions.some((p) => p.symbol === cfg.symbol)) {
         const equity = equityAt(price)
         let exposure = positions.reduce((s, p) => s + p.quantity * price, 0)
         let exposurePct = equity > 0 ? exposure / equity : 0
 
-        if (exposurePct < cfg.maxExposurePct) {
+        const exposureCap = cfg.correlatedExposurePct && cfg.correlatedExposurePct > 0
+          ? Math.min(cfg.maxExposurePct, cfg.correlatedExposurePct)
+          : cfg.maxExposurePct
+
+        // Loss-streak pause: no entries while the streak persists (unless a
+        // time-based pause has elapsed, then reset and resume).
+        let streakBlocked = false
+        if (cfg.maxLossStreak && cfg.maxLossStreak > 0 && lossStreak >= cfg.maxLossStreak) {
+          if (!cfg.lossStreakPauseSeconds || cfg.lossStreakPauseSeconds <= 0) {
+            streakBlocked = true
+          } else if (t - streakSinceAt < cfg.lossStreakPauseSeconds * 1000) {
+            streakBlocked = true
+          } else {
+            lossStreak = 0
+          }
+        }
+
+        if (exposurePct < exposureCap && !streakBlocked) {
           const lastEntry = cooldowns.get(cfg.symbol) || 0
           if (t - lastEntry >= cfg.cooldownSeconds * 1000) {
             const signal = this.strategy.evaluateEntry(this.feed, cfg.symbol, price, t, cfg.strategy)
             if (signal.shouldEnter && signal.stopLoss !== null && signal.takeProfit !== null) {
-              const sizePct = Math.min(
+              let sizePct = Math.min(
                 cfg.maxSinglePositionPct,
-                cfg.maxExposurePct - exposurePct
+                exposureCap - exposurePct
               )
+              if (cfg.riskPerTradePct && cfg.riskPerTradePct > 0 && signal.stopLossPct && signal.stopLossPct > 0) {
+                sizePct = Math.min(sizePct, cfg.riskPerTradePct / signal.stopLossPct)
+              }
               if (sizePct > 0) {
                 const rawQty = (equity * sizePct) / price
                 const quantity = Math.floor(rawQty * 1e6) / 1e6
@@ -258,6 +330,7 @@ export class BacktestEngine {
                     stopLoss: signal.stopLoss,
                     takeProfit: signal.takeProfit,
                     peakPrice: price,
+                    scaledOut: false,
                   })
                   cooldowns.set(cfg.symbol, t)
                 }
@@ -307,6 +380,9 @@ export class BacktestEngine {
 
     for (const trade of trades) {
       totalPnl += trade.pnl
+      // Partial scale-outs don't count as round trips (win rate / PF would
+      // double-count the same position), but their PnL is real.
+      if (trade.partial) continue
       totalReturnPct += trade.pnlPct
       if (trade.holdingSeconds !== null) totalHold += trade.holdingSeconds
       if (trade.pnl > 0) {

@@ -146,6 +146,25 @@ export default class AlgoConfig extends BaseModel {
   @column()
   declare fastVolumeMinRatio: number
 
+  // Safety rails + exit quality (migration 17)
+  @column()
+  declare fastCorrelatedExposurePct: number
+
+  @column()
+  declare fastRiskPerTradePct: number
+
+  @column()
+  declare fastMaxLossStreak: number
+
+  @column()
+  declare fastLossStreakPauseSeconds: number
+
+  @column()
+  declare fastTrailingVolatilityMult: number
+
+  @column()
+  declare fastScaleOutPct: number
+
   @column({
     prepare: (value: string[]) => JSON.stringify(value),
     consume: (value: string) => (typeof value === 'string' ? JSON.parse(value) : value),
@@ -221,6 +240,12 @@ export default class AlgoConfig extends BaseModel {
       fastRegimeSlopeMinPct: 0.02,
       fastVolumeWindowSeconds: 300,
       fastVolumeMinRatio: 0,
+      fastCorrelatedExposurePct: 0,
+      fastRiskPerTradePct: 0,
+      fastMaxLossStreak: 0,
+      fastLossStreakPauseSeconds: 0,
+      fastTrailingVolatilityMult: 0,
+      fastScaleOutPct: 0,
       lastRunAt: null,
       disabledReason: null,
     })

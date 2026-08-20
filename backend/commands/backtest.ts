@@ -66,6 +66,8 @@ export default class Backtest extends BaseCommand {
         'fastTrendMode', 'fastTrendSlopePct', 'fastTrendSlopeWindowSeconds',
         'fastRegimeEmaPeriod', 'fastRegimeSlopeWindowSeconds', 'fastRegimeSlopeMinPct',
         'fastVolumeWindowSeconds', 'fastVolumeMinRatio',
+        'fastCorrelatedExposurePct', 'fastRiskPerTradePct', 'fastMaxLossStreak',
+        'fastLossStreakPauseSeconds', 'fastTrailingVolatilityMult', 'fastScaleOutPct',
         'fastCooldownSeconds', 'maxPositions', 'maxExposurePct', 'maxSinglePositionPct',
       ]),
       ...overrides,
@@ -96,6 +98,10 @@ export default class Backtest extends BaseCommand {
       maxExposurePct: merged.maxExposurePct,
       maxSinglePositionPct: merged.maxSinglePositionPct,
       cooldownSeconds: merged.fastCooldownSeconds,
+      correlatedExposurePct: merged.fastCorrelatedExposurePct,
+      riskPerTradePct: merged.fastRiskPerTradePct,
+      maxLossStreak: merged.fastMaxLossStreak,
+      lossStreakPauseSeconds: merged.fastLossStreakPauseSeconds,
     })
 
     this.printReport(result)

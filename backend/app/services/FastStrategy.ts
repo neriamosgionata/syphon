@@ -76,6 +76,16 @@ export interface FastStrategyConfig {
    */
   volumeWindowSamples: number
   volumeMinRatio: number
+  /**
+   * Trailing distance scales with volatility: effective trail =
+   * max(trailingStopPct, mult × per-minute vol). 0 = off.
+   */
+  trailingVolatilityMult: number
+  /**
+   * Sell this fraction of the position when the trailing stop first arms
+   * (0-1). 0 = off. The caller executes the partial close.
+   */
+  scaleOutPct: number
 }
 
 /**
@@ -107,6 +117,8 @@ export function fastStrategyFromConfig(cfg: {
   fastRegimeSlopeMinPct?: number | null
   fastVolumeWindowSeconds?: number | null
   fastVolumeMinRatio?: number | null
+  fastTrailingVolatilityMult?: number | null
+  fastScaleOutPct?: number | null
 }): FastStrategyConfig {
   return {
     momentumSeconds: cfg.fastMomentumSeconds,
@@ -132,6 +144,8 @@ export function fastStrategyFromConfig(cfg: {
     regimeSlopeMinPct: cfg.fastRegimeSlopeMinPct ?? 0,
     volumeWindowSamples: cfg.fastVolumeWindowSeconds ?? 0,
     volumeMinRatio: cfg.fastVolumeMinRatio ?? 0,
+    trailingVolatilityMult: cfg.fastTrailingVolatilityMult ?? 0,
+    scaleOutPct: cfg.fastScaleOutPct ?? 0,
   }
 }
 
@@ -145,6 +159,8 @@ export interface EntrySignal {
   /** Entry price levels (computed only when shouldEnter is true). */
   stopLoss: number | null
   takeProfit: number | null
+  /** Effective (vol-scaled) SL distance in % — for risk-normalized sizing. */
+  stopLossPct: number | null
 }
 
 export interface ExitPositionState {
@@ -156,6 +172,8 @@ export interface ExitPositionState {
   peakPrice: number | null
   /** Epoch ms the position was opened. */
   openedAt: number
+  /** Whether a scale-out partial exit already happened. */
+  scaledOut: boolean
 }
 
 export interface ExitSignal {
@@ -165,6 +183,8 @@ export interface ExitSignal {
   trailingStop: number | null
   /** Updated peak to persist. */
   peakPrice: number
+  /** True once when the trailing stop first arms and scale-out is enabled. */
+  scaleOut: boolean
 }
 
 export class FastStrategy {
@@ -189,7 +209,7 @@ export class FastStrategy {
           shouldEnter: false,
           reason: `volume ${last.toFixed(0)} < median ${median.toFixed(0)} × ${cfg.volumeMinRatio}`,
           momentumPct: null, rsi: null, ema: null, volatilityPct: null,
-          stopLoss: null, takeProfit: null,
+          stopLoss: null, takeProfit: null, stopLossPct: null,
         }
       }
     }
@@ -269,6 +289,7 @@ export class FastStrategy {
       volatilityPct,
       stopLoss: levels.stopLoss,
       takeProfit: levels.takeProfit,
+      stopLossPct: levels.stopLossPct,
     }
   }
 
@@ -284,7 +305,7 @@ export class FastStrategy {
         shouldEnter: false,
         reason: 'trend mode requires fastEmaPeriod > 0',
         momentumPct: null, rsi: null, ema: null, volatilityPct: null,
-        stopLoss: null, takeProfit: null,
+        stopLoss: null, takeProfit: null, stopLossPct: null,
       }
     }
 
@@ -298,7 +319,7 @@ export class FastStrategy {
           shouldEnter: false,
           reason: `regime: EMA-${cfg.regimeEmaPeriod} slope ${regimeSlope.toFixed(3)}% < ${cfg.regimeSlopeMinPct}% over ${cfg.regimeSlopeWindowSeconds}s (not trending)`,
           momentumPct: null, rsi: null, ema: null, volatilityPct: null,
-          stopLoss: null, takeProfit: null,
+          stopLoss: null, takeProfit: null, stopLossPct: null,
         }
       }
     }
@@ -309,7 +330,7 @@ export class FastStrategy {
         shouldEnter: false,
         reason: `price ${price.toFixed(2)} <= EMA-${cfg.emaPeriod} ${ema.toFixed(2)} (no uptrend)`,
         momentumPct: null, rsi: null, ema, volatilityPct: null,
-        stopLoss: null, takeProfit: null,
+        stopLoss: null, takeProfit: null, stopLossPct: null,
       }
     }
 
@@ -322,7 +343,7 @@ export class FastStrategy {
           shouldEnter: false,
           reason: `EMA-${cfg.emaPeriod} slope ${slope.toFixed(3)}% < ${cfg.trendSlopePct}% over ${cfg.trendSlopeWindowSeconds}s`,
           momentumPct: null, rsi: null, ema, volatilityPct: null,
-          stopLoss: null, takeProfit: null,
+          stopLoss: null, takeProfit: null, stopLossPct: null,
         }
       }
     }
@@ -339,6 +360,7 @@ export class FastStrategy {
       volatilityPct: null,
       stopLoss: levels.stopLoss,
       takeProfit: levels.takeProfit,
+      stopLossPct: levels.stopLossPct,
     }
   }
 
@@ -405,51 +427,66 @@ export class FastStrategy {
         : Math.min(pos.peakPrice, price)
 
     // Trailing stop: once profit clears the activation threshold, ratchet
-    // the stop to stay `trailingStopPct` behind the peak.
+    // the stop to stay `trailingStopPct` behind the peak. The distance can
+    // scale with volatility (wider trail in high vol = don't get shaken out).
     let trailingStop: number | null = null
+    let scaleOut = false
     if (cfg.trailingStopPct > 0 && cfg.trailingActivatePct > 0) {
       if (gainPct >= cfg.trailingActivatePct) {
+        let trailPct = cfg.trailingStopPct
+        if (cfg.trailingVolatilityMult > 0 && cfg.volatilityWindowSamples > 0) {
+          const volPct = feed.volatilityPct(symbol, cfg.volatilityWindowSamples, now)
+          if (volPct !== null) {
+            const minuteVol = Math.max(volPct * Math.sqrt(60), cfg.volatilityFloorPct)
+            trailPct = Math.max(trailPct, cfg.trailingVolatilityMult * minuteVol)
+          }
+        }
         trailingStop = isBuy
-          ? peak * (1 - cfg.trailingStopPct / 100)
-          : peak * (1 + cfg.trailingStopPct / 100)
+          ? peak * (1 - trailPct / 100)
+          : peak * (1 + trailPct / 100)
         // Never loosen a tightened stop.
         if (isBuy) trailingStop = Math.max(trailingStop, pos.stopLoss)
         else trailingStop = Math.min(trailingStop, pos.stopLoss)
+
+        // Scale-out fires exactly once, when the trail first arms.
+        if (cfg.scaleOutPct > 0 && !pos.scaledOut) {
+          scaleOut = true
+        }
       }
     }
 
     // Priority order: SL/TP → trailing → max hold → reversal.
     if (isBuy && price <= pos.stopLoss) {
-      return { shouldExit: true, reason: `stop-loss: ${price.toFixed(2)} <= ${pos.stopLoss.toFixed(2)}`, trailingStop, peakPrice: peak }
+      return { shouldExit: true, reason: `stop-loss: ${price.toFixed(2)} <= ${pos.stopLoss.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false }
     }
     if (!isBuy && price >= pos.stopLoss) {
-      return { shouldExit: true, reason: `stop-loss: ${price.toFixed(2)} >= ${pos.stopLoss.toFixed(2)}`, trailingStop, peakPrice: peak }
+      return { shouldExit: true, reason: `stop-loss: ${price.toFixed(2)} >= ${pos.stopLoss.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false }
     }
     // takeProfit <= 0 = no take profit (trend mode rides the trailing stop).
     if (pos.takeProfit > 0 && isBuy && price >= pos.takeProfit) {
-      return { shouldExit: true, reason: `take-profit: ${price.toFixed(2)} >= ${pos.takeProfit.toFixed(2)}`, trailingStop, peakPrice: peak }
+      return { shouldExit: true, reason: `take-profit: ${price.toFixed(2)} >= ${pos.takeProfit.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false }
     }
     if (pos.takeProfit > 0 && !isBuy && price <= pos.takeProfit) {
-      return { shouldExit: true, reason: `take-profit: ${price.toFixed(2)} <= ${pos.takeProfit.toFixed(2)}`, trailingStop, peakPrice: peak }
+      return { shouldExit: true, reason: `take-profit: ${price.toFixed(2)} <= ${pos.takeProfit.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false }
     }
     if (trailingStop !== null && isBuy && price <= trailingStop) {
-      return { shouldExit: true, reason: `trailing stop: ${price.toFixed(2)} <= ${trailingStop.toFixed(2)}`, trailingStop, peakPrice: peak }
+      return { shouldExit: true, reason: `trailing stop: ${price.toFixed(2)} <= ${trailingStop.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false }
     }
     if (trailingStop !== null && !isBuy && price >= trailingStop) {
-      return { shouldExit: true, reason: `trailing stop: ${price.toFixed(2)} >= ${trailingStop.toFixed(2)}`, trailingStop, peakPrice: peak }
+      return { shouldExit: true, reason: `trailing stop: ${price.toFixed(2)} >= ${trailingStop.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false }
     }
 
     if (cfg.maxHoldSeconds > 0 && now - pos.openedAt > cfg.maxHoldSeconds * 1000) {
       const held = Math.round((now - pos.openedAt) / 1000)
-      return { shouldExit: true, reason: `max hold: ${held}s >= ${cfg.maxHoldSeconds}s`, trailingStop, peakPrice: peak }
+      return { shouldExit: true, reason: `max hold: ${held}s >= ${cfg.maxHoldSeconds}s`, trailingStop, peakPrice: peak, scaleOut: false }
     }
 
     const mom = feed.momentumPct(symbol, cfg.momentumSeconds, now)
     if (mom !== null && mom <= cfg.exitReversalPct) {
-      return { shouldExit: true, reason: `momentum reversal: ${mom.toFixed(3)}% <= ${cfg.exitReversalPct}%`, trailingStop, peakPrice: peak }
+      return { shouldExit: true, reason: `momentum reversal: ${mom.toFixed(3)}% <= ${cfg.exitReversalPct}%`, trailingStop, peakPrice: peak, scaleOut: false }
     }
 
-    return { shouldExit: false, reason: null, trailingStop, peakPrice: peak }
+    return { shouldExit: false, reason: null, trailingStop, peakPrice: peak, scaleOut }
   }
 }
 

@@ -67,6 +67,12 @@ export default class AlgoPosition extends BaseModel {
   declare realizedPnl: number | null
 
   @column()
+  declare scaledOut: boolean
+
+  @column()
+  declare scaledOutPnl: number | null
+
+  @column()
   declare status: AlgoPositionStatus
 
   @column()

@@ -59,6 +59,8 @@ export class FastAlgoService {
   private configCache: { data: AlgoConfig | null; at: number } = { data: null, at: 0 }
   private portfolioCache: { value: number; at: number } = { value: 0, at: 0 }
   private symbolCooldowns = new Map<string, number>()
+  private lossStreak = 0
+  private streakSinceAt = 0
   private runId = uuidv4()
 
   constructor(opts: { engine?: any; ws?: any; feed?: MomentumFeed; strategy?: FastStrategy } = {}) {
@@ -104,7 +106,7 @@ export class FastAlgoService {
     let maxDrawdown = 0
 
     for (const pos of closed) {
-      const pnl = Number(pos.realizedPnl) || 0
+      const pnl = (Number(pos.realizedPnl) || 0) + (Number(pos.scaledOutPnl) || 0)
       totalPnl += pnl
 
       if (pnl > 0) {
@@ -117,7 +119,7 @@ export class FastAlgoService {
         if (pnl < largestLoss) largestLoss = pnl
       }
 
-      const returnPct = pos.entryPrice > 0
+      const returnPct = pos.entryPrice > 0 && pos.quantity > 0
         ? (pnl / (pos.entryPrice * pos.quantity)) * 100
         : 0
       totalReturnPct += returnPct
@@ -223,6 +225,13 @@ export class FastAlgoService {
         regimeSlopeMinPct: cfg.fastRegimeSlopeMinPct,
         volumeWindowSeconds: cfg.fastVolumeWindowSeconds,
         volumeMinRatio: cfg.fastVolumeMinRatio,
+        correlatedExposurePct: cfg.fastCorrelatedExposurePct,
+        riskPerTradePct: cfg.fastRiskPerTradePct,
+        maxLossStreak: cfg.fastMaxLossStreak,
+        lossStreakPauseSeconds: cfg.fastLossStreakPauseSeconds,
+        trailingVolatilityMult: cfg.fastTrailingVolatilityMult,
+        scaleOutPct: cfg.fastScaleOutPct,
+        lossStreak: this.lossStreak,
       } : null,
       cooldowns: [...this.symbolCooldowns.entries()]
         .filter(([, at]) => Date.now() - at < (cfg?.fastCooldownSeconds ?? 180) * 1000)
@@ -275,7 +284,7 @@ export class FastAlgoService {
       }
 
       // Reconcile fills against algo positions
-      await this.reconcile()
+      await this.reconcile(cfg)
 
       // Entries
       await this.checkEntries(cfg, positionedSymbols)
@@ -377,8 +386,65 @@ export class FastAlgoService {
     pos.currentPrice = price
     await pos.save()
 
+    // Scale-out: lock in a fraction of the winner when the trail arms.
+    if (signal.scaleOut && !pos.scaledOut) {
+      await this.scaleOutPosition(pos, price, cfg)
+    }
+
     if (!signal.shouldExit) return
     await this.exitPosition(pos, signal.reason || 'strategy exit', cfg)
+  }
+
+  private async scaleOutPosition(pos: AlgoPosition, price: number, cfg: AlgoConfig): Promise<void> {
+    const fraction = Math.min(1, Math.max(0, cfg.fastScaleOutPct))
+    const qtyOut = Math.floor(pos.quantity * fraction * 1e6) / 1e6
+    pos.scaledOut = true
+
+    if (fraction <= 0 || fraction >= 1 || qtyOut <= 0) {
+      await pos.save()
+      return
+    }
+
+    if (cfg.dryRun) {
+      await this.logDecision(pos.symbol, pos.tickerId, 'hold', 'scale-out (dry run)', {
+        side: 'SELL',
+        quantity: qtyOut,
+        algoPositionId: pos.id,
+        context: { price, exitMode: 'fast', scaleOutPct: fraction, dryRun: true },
+      })
+    } else {
+      const state = await this.engine.placeOrder({
+        symbol: pos.symbol,
+        side: 'SELL',
+        quantity: qtyOut,
+        orderType: 'MARKET',
+      })
+      const tradeId = await this.waitForTradeId(state)
+      if (!tradeId) {
+        logger.error('[FastAlgo] Scale-out for %s has no trade row, cancelling order %s',
+          pos.symbol, state.clientOrderId)
+        if (state.externalOrderId) await this.engine.cancelOrder(state.clientOrderId)
+        await pos.save()
+        return
+      }
+      await this.logDecision(pos.symbol, pos.tickerId, 'hold', 'scale-out', {
+        side: 'SELL',
+        quantity: qtyOut,
+        tradeId,
+        algoPositionId: pos.id,
+        context: { price, exitMode: 'fast', scaleOutPct: fraction },
+      })
+    }
+
+    // Approximate the partial PnL at the decision price (fill-level PnL
+    // would need the WS fill data); the remainder rides the trail.
+    const direction = pos.side === 'BUY' ? 1 : -1
+    const partialPnl = (price - pos.entryPrice) * qtyOut * direction
+    pos.quantity -= qtyOut
+    pos.scaledOutPnl = (pos.scaledOutPnl || 0) + partialPnl
+    logger.info('[FastAlgo] Scale-out %s: sold %s of %s at %s (est. +$%.2f)',
+      pos.symbol, qtyOut, pos.quantity, price, partialPnl)
+    await pos.save()
   }
 
   private async exitPosition(pos: AlgoPosition, reason: string, cfg: AlgoConfig): Promise<void> {
@@ -446,15 +512,37 @@ export class FastAlgoService {
     }
     let exposurePct = portfolioValue > 0 ? exposure / portfolioValue : 0
 
+    // Correlated-basket cap: the watchlist moves together, so cap total
+    // exposure across ALL symbols, not just per position.
+    const exposureCap = cfg.fastCorrelatedExposurePct > 0
+      ? Math.min(cfg.maxExposurePct, cfg.fastCorrelatedExposurePct)
+      : cfg.maxExposurePct
+
+    // Loss-streak pause: no entries while the streak persists.
+    let streakBlocked = false
+    if (cfg.fastMaxLossStreak > 0 && this.lossStreak >= cfg.fastMaxLossStreak) {
+      if (cfg.fastLossStreakPauseSeconds <= 0) {
+        streakBlocked = true
+      } else if (Date.now() - this.streakSinceAt < cfg.fastLossStreakPauseSeconds * 1000) {
+        streakBlocked = true
+      } else {
+        this.lossStreak = 0
+      }
+    }
+
     const activeCount = positionedSymbols.size
     const slots = cfg.maxPositions - activeCount
     if (slots <= 0) return
+    if (streakBlocked) {
+      logger.info('[FastAlgo] Entries paused: %d consecutive losses', this.lossStreak)
+      return
+    }
 
     const now = Date.now()
     let used = 0
 
     for (const symbol of cfg.fastWatchlist) {
-      if (used >= slots || exposurePct >= cfg.maxExposurePct) break
+      if (used >= slots || exposurePct >= exposureCap) break
       if (positionedSymbols.has(symbol)) continue
 
       const cooldownUntil = this.symbolCooldowns.get(symbol) || 0
@@ -468,7 +556,10 @@ export class FastAlgoService {
       )
       if (!signal.shouldEnter) continue
 
-      const sizePct = Math.min(cfg.maxSinglePositionPct, cfg.maxExposurePct - exposurePct)
+      let sizePct = Math.min(cfg.maxSinglePositionPct, exposureCap - exposurePct)
+      if (cfg.fastRiskPerTradePct > 0 && signal.stopLossPct && signal.stopLossPct > 0) {
+        sizePct = Math.min(sizePct, cfg.fastRiskPerTradePct / signal.stopLossPct)
+      }
       if (sizePct <= 0) break
 
       const rawQty = (portfolioValue * sizePct) / price
@@ -530,6 +621,7 @@ export class FastAlgoService {
         entryTradeId: tradeId,
         status: 'pending_entry',
         forceClose: false,
+        scaledOut: false,
         openedAt: DateTime.now(),
       })
       logger.info('[FastAlgo] Entry BUY %s qty=%s trade=%d position=%d', symbol, quantity, tradeId, algoPos.id)
@@ -552,7 +644,7 @@ export class FastAlgoService {
 
   // ── Position reconciliation ─────────────────────────────────
 
-  private async reconcile(): Promise<void> {
+  private async reconcile(cfg: AlgoConfig): Promise<void> {
     const [pendingPositions, openPositions, closingPositions] = await Promise.all([
       AlgoPosition.query().where('status', 'pending_entry').preload('entryTrade'),
       AlgoPosition.query().where('status', 'open').preload('entryTrade'),
@@ -603,6 +695,16 @@ export class FastAlgoService {
         pos.closedAt = DateTime.now()
         await pos.save()
         logger.info('[FastAlgo] Position closed: %s P&L $%.2f', pos.symbol, pnl)
+
+        // Loss-streak accounting for the entry pause.
+        if (pnl > 0) {
+          this.lossStreak = 0
+        } else {
+          this.lossStreak++
+          if (cfg.fastMaxLossStreak > 0 && this.lossStreak >= cfg.fastMaxLossStreak) {
+            this.streakSinceAt = Date.now()
+          }
+        }
       } else if (TERMINAL_TRADE_STATUSES.includes(trade.status)) {
         pos.status = 'open'
         pos.exitTradeId = null
