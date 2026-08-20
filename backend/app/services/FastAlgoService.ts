@@ -218,6 +218,11 @@ export class FastAlgoService {
         trendMode: !!cfg.fastTrendMode,
         trendSlopePct: cfg.fastTrendSlopePct,
         trendSlopeWindowSeconds: cfg.fastTrendSlopeWindowSeconds,
+        regimeEmaPeriod: cfg.fastRegimeEmaPeriod,
+        regimeSlopeWindowSeconds: cfg.fastRegimeSlopeWindowSeconds,
+        regimeSlopeMinPct: cfg.fastRegimeSlopeMinPct,
+        volumeWindowSeconds: cfg.fastVolumeWindowSeconds,
+        volumeMinRatio: cfg.fastVolumeMinRatio,
       } : null,
       cooldowns: [...this.symbolCooldowns.entries()]
         .filter(([, at]) => Date.now() - at < (cfg?.fastCooldownSeconds ?? 180) * 1000)

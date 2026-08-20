@@ -22,6 +22,11 @@ import { FastStrategy, FastStrategyConfig } from '#services/FastStrategy'
 export interface BacktestSample {
   t: number
   p: number
+  /** Optional 1s-bar high/low — enables intrabar stop/target fills. */
+  h?: number
+  l?: number
+  /** Optional 1s-bar volume — feeds the volume confirmation gate. */
+  v?: number
 }
 
 export interface BacktestConfig {
@@ -118,6 +123,7 @@ export class BacktestEngine {
     const equityCurve: Array<{ t: number; value: number }> = []
     const cooldowns = new Map<string, number>()
     let feedIndex = 0
+    let prevFeedIndex = 0
 
     const equityAt = (price: number): number =>
       cash + positions.reduce((s, p) => s + p.quantity * price, 0)
@@ -159,16 +165,50 @@ export class BacktestEngine {
     const intervalMs = Math.max(1, Math.round(cfg.loopIntervalSeconds * 1000))
     for (let t = startTime; t <= endTime; t += intervalMs) {
       // Advance the feed with every sample at or behind the decision time.
+      prevFeedIndex = feedIndex
       while (feedIndex < series.length && series[feedIndex].t <= t) {
-        this.feed.push(cfg.symbol, series[feedIndex].p, series[feedIndex].t)
+        const s = series[feedIndex]
+        this.feed.push(cfg.symbol, s.p, s.t, s.v)
         feedIndex++
       }
       const price = this.feed.lastPrice(cfg.symbol)
       if (price === null) continue
 
+      // Intrabar extremes since the last decision — stops/targets can fill
+      // mid-bar, not only at the decision close.
+      let minLow = Infinity
+      let maxHigh = -Infinity
+      for (let i = prevFeedIndex; i < feedIndex; i++) {
+        const s = series[i]
+        const low = s.l !== undefined ? s.l : s.p
+        const high = s.h !== undefined ? s.h : s.p
+        if (low < minLow) minLow = low
+        if (high > maxHigh) maxHigh = high
+      }
+
       // Exits first (risk reduction before risk addition — same as live).
       for (let i = positions.length - 1; i >= 0; i--) {
         const pos = positions[i]
+        const isBuy = pos.side === 'BUY'
+        let exited = false
+
+        // Intrabar SL/TP fills at the level price (SL wins if both hit).
+        const slHit = isBuy ? minLow <= pos.stopLoss : maxHigh >= pos.stopLoss
+        if (slHit) {
+          closePosition(pos, pos.stopLoss, t, `stop-loss (intrabar): ${pos.stopLoss.toFixed(2)}`, false)
+          positions.splice(i, 1)
+          exited = true
+        }
+        if (!exited && pos.takeProfit > 0) {
+          const tpHit = isBuy ? maxHigh >= pos.takeProfit : minLow <= pos.takeProfit
+          if (tpHit) {
+            closePosition(pos, pos.takeProfit, t, `take-profit (intrabar): ${pos.takeProfit.toFixed(2)}`, false)
+            positions.splice(i, 1)
+            exited = true
+          }
+        }
+        if (exited) continue
+
         const signal = this.strategy.evaluateExit(this.feed, pos.symbol, price, t, {
           side: pos.side,
           entryPrice: pos.entryPrice,

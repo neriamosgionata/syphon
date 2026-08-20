@@ -151,6 +151,48 @@ test.group('BacktestEngine', () => {
     assert.throws(() => engine.run(series(() => 100, 1), baseCfg()), /at least 2 samples/)
   })
 
+  test('intrabar stop-loss fills at the stop level, not the close', ({ assert }) => {
+    // Entry at ~t+60s (momentum gate), then a bar whose LOW pierces the SL
+    // while its close stays above it → exit must fill at the SL price.
+    const samples: BacktestSample[] = []
+    const t0 = T0
+    for (let i = 0; i <= 60; i++) {
+      samples.push({ t: t0 + i * 1000, p: 100 + i * (1 / 60), h: 100 + i * (1 / 60), l: 100 + i * (1 / 60) })
+    }
+    // Entry price ≈ 101 → SL = 101 × 0.995 = 100.495. Bar 61 dips below it
+    // (low 100.30) but closes above (100.55).
+    samples.push({ t: t0 + 61_000, p: 100.55, h: 100.60, l: 100.30 })
+    for (let i = 62; i <= 120; i++) {
+      samples.push({ t: t0 + i * 1000, p: 100.6 + (i - 61) * 0.01, h: 100.6 + (i - 61) * 0.01, l: 100.6 + (i - 61) * 0.01 })
+    }
+
+    const result = engine.run(samples, baseCfg())
+    assert.isAbove(result.metrics.totalTrades, 0)
+    const first = result.trades[0]
+    assert.match(first.exitReason!, /stop-loss \(intrabar\)/)
+    assert.closeTo(first.exitPrice!, 100.495, 1e-6)
+  })
+
+  test('intrabar take-profit fills at the target level', ({ assert }) => {
+    const samples: BacktestSample[] = []
+    const t0 = T0
+    for (let i = 0; i <= 60; i++) {
+      samples.push({ t: t0 + i * 1000, p: 100 + i * (1 / 60), h: 100 + i * (1 / 60), l: 100 + i * (1 / 60) })
+    }
+    // TP = 101 × 1.015 = 102.515. Bar 61 spikes above it (high 102.6) but
+    // closes below (102.4).
+    samples.push({ t: t0 + 61_000, p: 102.4, h: 102.60, l: 102.30 })
+    for (let i = 62; i <= 120; i++) {
+      samples.push({ t: t0 + i * 1000, p: 102.4 - (i - 61) * 0.02, h: 102.4 - (i - 61) * 0.02, l: 102.4 - (i - 61) * 0.02 })
+    }
+
+    const result = engine.run(samples, baseCfg())
+    assert.isAbove(result.metrics.totalTrades, 0)
+    const first = result.trades[0]
+    assert.match(first.exitReason!, /take-profit \(intrabar\)/)
+    assert.closeTo(first.exitPrice!, 102.515, 1e-6)
+  })
+
   test('unsorted input is sorted by time', ({ assert }) => {
     const samples = series((i) => 100 * Math.pow(1.0001, i), 3600)
     samples.reverse()

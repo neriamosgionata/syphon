@@ -14,6 +14,67 @@ interface SweepRow {
   patch: Partial<BacktestConfig>
 }
 
+/**
+ * One-at-a-time grid around a baseline config + coherent presets. Shared by
+ * backtest:sweep and backtest:walkforward.
+ */
+export function buildSweepList(base: FastStrategyConfig): SweepRow[] {
+  const clone = (): FastStrategyConfig => ({ ...base })
+  const rows: SweepRow[] = []
+  rows.push({ label: 'baseline (live config)', strategy: clone(), patch: {} })
+
+  const sweep = (label: string, mutate: (c: FastStrategyConfig) => void, patch: Partial<BacktestConfig> = {}) => {
+    const c = clone()
+    mutate(c)
+    rows.push({ label, strategy: c, patch })
+  }
+
+  // One-at-a-time around the baseline.
+  sweep('momentum window 30s', (c) => { c.momentumSeconds = 30 })
+  sweep('momentum window 120s', (c) => { c.momentumSeconds = 120 })
+  sweep('threshold 0.10%', (c) => { c.momentumThresholdPct = 0.10 })
+  sweep('threshold 0.40%', (c) => { c.momentumThresholdPct = 0.40 })
+  sweep('RSI band 30/70', (c) => { c.rsiLow = 30; c.rsiHigh = 70 })
+  sweep('SL 0.30%', (c) => { c.stopLossPct = 0.3 })
+  sweep('SL 0.80%', (c) => { c.stopLossPct = 0.8 })
+  sweep('TP 0.60%', (c) => { c.takeProfitPct = 0.6 })
+  sweep('TP 1.50%', (c) => { c.takeProfitPct = 1.5 })
+  sweep('TP 2.00%', (c) => { c.takeProfitPct = 2.0 })
+  sweep('trailing off', (c) => { c.trailingStopPct = 0; c.trailingActivatePct = 0 })
+  sweep('trailing 0.2/0.3', (c) => { c.trailingStopPct = 0.2; c.trailingActivatePct = 0.3 })
+  sweep('trailing 0.5/0.8', (c) => { c.trailingStopPct = 0.5; c.trailingActivatePct = 0.8 })
+  sweep('max-hold off', (c) => { c.maxHoldSeconds = 0 })
+  sweep('max-hold 900s', (c) => { c.maxHoldSeconds = 900 })
+  sweep('EMA off', (c) => { c.emaPeriod = 0 })
+  sweep('EMA-10', (c) => { c.emaPeriod = 10 })
+  sweep('EMA-40', (c) => { c.emaPeriod = 40 })
+  sweep('vol mult 4.0', (c) => { c.volatilityMult = 4 })
+  sweep('vol scaling off', (c) => { c.volatilityWindowSamples = 0 })
+  sweep('cooldown 60s', (c) => { void c }, { cooldownSeconds: 60 })
+  sweep('cooldown 300s', (c) => { void c }, { cooldownSeconds: 300 })
+  sweep('trend mode on', (c) => { c.trendMode = true; c.emaPeriod = 900; c.trendSlopePct = 0.1; c.trendSlopeWindowSeconds = 1800; c.takeProfitPct = 0; c.trailingStopPct = 2.0; c.trailingActivatePct = 1.5; c.maxHoldSeconds = 0 }, { cooldownSeconds: 1800 })
+  sweep('trend + regime gate', (c) => { c.trendMode = true; c.emaPeriod = 900; c.trendSlopePct = 0.1; c.trendSlopeWindowSeconds = 1800; c.takeProfitPct = 0; c.trailingStopPct = 2.0; c.trailingActivatePct = 1.5; c.regimeEmaPeriod = 3600; c.regimeSlopeWindowSeconds = 3600; c.regimeSlopeMinPct = 0.3 }, { cooldownSeconds: 1800 })
+
+  // Presets: coherent multi-param profiles.
+  rows.push({
+    label: 'PRESET scalp',
+    strategy: { ...base, momentumSeconds: 30, momentumThresholdPct: 0.2, stopLossPct: 0.3, takeProfitPct: 0.6, trailingStopPct: 0.2, trailingActivatePct: 0.3, maxHoldSeconds: 600, emaPeriod: 10 },
+    patch: { cooldownSeconds: 60 },
+  })
+  rows.push({
+    label: 'PRESET trend',
+    strategy: { ...base, momentumSeconds: 120, momentumThresholdPct: 0.4, stopLossPct: 0.8, takeProfitPct: 2.0, trailingStopPct: 0.4, trailingActivatePct: 0.6, maxHoldSeconds: 2700, emaPeriod: 20 },
+    patch: {},
+  })
+  rows.push({
+    label: 'PRESET swing',
+    strategy: { ...base, momentumSeconds: 120, momentumThresholdPct: 0.3, stopLossPct: 1.2, takeProfitPct: 3.0, trailingStopPct: 0.5, trailingActivatePct: 0.8, maxHoldSeconds: 0, emaPeriod: 40 },
+    patch: { cooldownSeconds: 300 },
+  })
+
+  return rows
+}
+
 interface RankedRow {
   label: string
   trades: number
@@ -69,6 +130,8 @@ export default class BacktestSweep extends BaseCommand {
         'fastEmaPeriod', 'fastVolatilityWindowSeconds', 'fastVolatilityMult',
         'fastVolatilityFloorPct', 'fastVolatilityCeilingPct',
         'fastTrendMode', 'fastTrendSlopePct', 'fastTrendSlopeWindowSeconds',
+        'fastRegimeEmaPeriod', 'fastRegimeSlopeWindowSeconds', 'fastRegimeSlopeMinPct',
+        'fastVolumeWindowSeconds', 'fastVolumeMinRatio',
         'fastCooldownSeconds', 'maxPositions', 'maxExposurePct', 'maxSinglePositionPct',
       ]),
       ...overrides,
@@ -92,7 +155,7 @@ export default class BacktestSweep extends BaseCommand {
     const baseline = engine.run(samples, baseConfig)
 
     const rows: RankedRow[] = []
-    for (const row of this.buildSweepList(base)) {
+    for (const row of buildSweepList(base)) {
       const result = engine.run(samples, { ...baseConfig, strategy: row.strategy, ...row.patch })
       if (result.metrics.totalTrades < minTrades) continue
       rows.push({
@@ -117,63 +180,8 @@ export default class BacktestSweep extends BaseCommand {
     this.printReport(symbol, hours, samples.length, baseline, rows, top)
   }
 
-  private buildSweepList(base: FastStrategyConfig): SweepRow[] {
-    const clone = (): FastStrategyConfig => ({ ...base })
-    const rows: SweepRow[] = []
-    rows.push({ label: 'baseline (live config)', strategy: clone(), patch: {} })
-
-    const sweep = (label: string, mutate: (c: FastStrategyConfig) => void, patch: Partial<BacktestConfig> = {}) => {
-      const c = clone()
-      mutate(c)
-      rows.push({ label, strategy: c, patch })
-    }
-
-    // One-at-a-time around the baseline.
-    sweep('momentum window 30s', (c) => { c.momentumSeconds = 30 })
-    sweep('momentum window 120s', (c) => { c.momentumSeconds = 120 })
-    sweep('threshold 0.10%', (c) => { c.momentumThresholdPct = 0.10 })
-    sweep('threshold 0.40%', (c) => { c.momentumThresholdPct = 0.40 })
-    sweep('RSI band 30/70', (c) => { c.rsiLow = 30; c.rsiHigh = 70 })
-    sweep('SL 0.30%', (c) => { c.stopLossPct = 0.3 })
-    sweep('SL 0.80%', (c) => { c.stopLossPct = 0.8 })
-    sweep('TP 0.60%', (c) => { c.takeProfitPct = 0.6 })
-    sweep('TP 1.50%', (c) => { c.takeProfitPct = 1.5 })
-    sweep('TP 2.00%', (c) => { c.takeProfitPct = 2.0 })
-    sweep('trailing off', (c) => { c.trailingStopPct = 0; c.trailingActivatePct = 0 })
-    sweep('trailing 0.2/0.3', (c) => { c.trailingStopPct = 0.2; c.trailingActivatePct = 0.3 })
-    sweep('trailing 0.5/0.8', (c) => { c.trailingStopPct = 0.5; c.trailingActivatePct = 0.8 })
-    sweep('max-hold off', (c) => { c.maxHoldSeconds = 0 })
-    sweep('max-hold 900s', (c) => { c.maxHoldSeconds = 900 })
-    sweep('EMA off', (c) => { c.emaPeriod = 0 })
-    sweep('EMA-10', (c) => { c.emaPeriod = 10 })
-    sweep('EMA-40', (c) => { c.emaPeriod = 40 })
-    sweep('vol mult 4.0', (c) => { c.volatilityMult = 4 })
-    sweep('vol scaling off', (c) => { c.volatilityWindowSamples = 0 })
-    sweep('cooldown 60s', (c) => { void c }, { cooldownSeconds: 60 })
-    sweep('cooldown 300s', (c) => { void c }, { cooldownSeconds: 300 })
-
-    // Presets: coherent multi-param profiles.
-    rows.push({
-      label: 'PRESET scalp',
-      strategy: { ...base, momentumSeconds: 30, momentumThresholdPct: 0.2, stopLossPct: 0.3, takeProfitPct: 0.6, trailingStopPct: 0.2, trailingActivatePct: 0.3, maxHoldSeconds: 600, emaPeriod: 10 },
-      patch: { cooldownSeconds: 60 },
-    })
-    rows.push({
-      label: 'PRESET trend',
-      strategy: { ...base, momentumSeconds: 120, momentumThresholdPct: 0.4, stopLossPct: 0.8, takeProfitPct: 2.0, trailingStopPct: 0.4, trailingActivatePct: 0.6, maxHoldSeconds: 2700, emaPeriod: 20 },
-      patch: {},
-    })
-    rows.push({
-      label: 'PRESET swing',
-      strategy: { ...base, momentumSeconds: 120, momentumThresholdPct: 0.3, stopLossPct: 1.2, takeProfitPct: 3.0, trailingStopPct: 0.5, trailingActivatePct: 0.8, maxHoldSeconds: 0, emaPeriod: 40 },
-      patch: { cooldownSeconds: 300 },
-    })
-
-    return rows
-  }
-
   private async loadSamples(symbol: string, hours: number, fresh: boolean): Promise<BacktestSample[]> {
-    const cacheFile = path.join(CACHE_DIR, `${symbol}_1s_${hours}h.json`)
+    const cacheFile = path.join(CACHE_DIR, `${symbol}_1s_${hours}h_v2.json`)
     if (!fresh && fs.existsSync(cacheFile)) {
       try {
         const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf8')) as BacktestSample[]

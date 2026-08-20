@@ -64,6 +64,8 @@ export default class Backtest extends BaseCommand {
         'fastEmaPeriod', 'fastVolatilityWindowSeconds', 'fastVolatilityMult',
         'fastVolatilityFloorPct', 'fastVolatilityCeilingPct',
         'fastTrendMode', 'fastTrendSlopePct', 'fastTrendSlopeWindowSeconds',
+        'fastRegimeEmaPeriod', 'fastRegimeSlopeWindowSeconds', 'fastRegimeSlopeMinPct',
+        'fastVolumeWindowSeconds', 'fastVolumeMinRatio',
         'fastCooldownSeconds', 'maxPositions', 'maxExposurePct', 'maxSinglePositionPct',
       ]),
       ...overrides,
@@ -108,7 +110,7 @@ export default class Backtest extends BaseCommand {
     endHoursAgo: number
   ): Promise<BacktestSample[]> {
     const windowTag = endHoursAgo > 0 ? `_ago${endHoursAgo}` : ''
-    const cacheFile = path.join(CACHE_DIR, `${symbol}_1s_${hours}h${windowTag}.json`)
+    const cacheFile = path.join(CACHE_DIR, `${symbol}_1s_${hours}h${windowTag}_v2.json`)
     if (!fresh && fs.existsSync(cacheFile)) {
       try {
         const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf8')) as BacktestSample[]

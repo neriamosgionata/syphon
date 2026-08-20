@@ -194,4 +194,16 @@ test.group('MomentumFeed', (group) => {
     assert.isNull(feed.emaSlopePct('BTC', 300, 1800, t0 + 2000000))
     assert.isNull(feed.emaSlopePct('BTC', 0, 1800, t0 + 2000000))
   })
+
+  test('volume is stored per sample and median over the window', ({ assert }) => {
+    const t0 = 1000000
+    for (let i = 0; i < 120; i++) feed.push('BTC', 100, t0 + i * 1000, 10)
+    for (let i = 0; i < 120; i++) feed.push('BTC', 100, t0 + (120 + i) * 1000, 30)
+    assert.equal(feed.lastVolume('BTC'), 30)
+    assert.equal(feed.volumeMedian('BTC', 240, t0 + 240000), 30) // 120×10 then 120×30 → index 120
+    // samples without volume → null
+    feed.push('BTC', 100, t0 + 241000)
+    assert.isNull(feed.lastVolume('BTC'))
+    assert.isNull(feed.volumeMedian('BTC', 0, t0 + 241000))
+  })
 })

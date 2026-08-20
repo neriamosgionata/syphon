@@ -130,6 +130,22 @@ export default class AlgoConfig extends BaseModel {
   @column()
   declare fastTrendSlopeWindowSeconds: number
 
+  // Regime + volume gates (migration 16)
+  @column()
+  declare fastRegimeEmaPeriod: number
+
+  @column()
+  declare fastRegimeSlopeWindowSeconds: number
+
+  @column()
+  declare fastRegimeSlopeMinPct: number
+
+  @column()
+  declare fastVolumeWindowSeconds: number
+
+  @column()
+  declare fastVolumeMinRatio: number
+
   @column({
     prepare: (value: string[]) => JSON.stringify(value),
     consume: (value: string) => (typeof value === 'string' ? JSON.parse(value) : value),
@@ -200,6 +216,11 @@ export default class AlgoConfig extends BaseModel {
       fastTrendMode: false,
       fastTrendSlopePct: 0.05,
       fastTrendSlopeWindowSeconds: 1800,
+      fastRegimeEmaPeriod: 0,
+      fastRegimeSlopeWindowSeconds: 3600,
+      fastRegimeSlopeMinPct: 0.02,
+      fastVolumeWindowSeconds: 300,
+      fastVolumeMinRatio: 0,
       lastRunAt: null,
       disabledReason: null,
     })

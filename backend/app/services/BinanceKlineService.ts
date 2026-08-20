@@ -61,16 +61,27 @@ export async function fetchBinanceKlines1s(
       `&startTime=${cursor}&endTime=${endTime}&limit=${MAX_KLINES_PER_REQUEST}`
 
     let json: any[]
+    let rateLimitRetries = 0
     try {
-      const res = await fetch(url)
-      if (!res.ok) {
-        const body = await res.text()
+      let res: Response
+      // 429/418: back off and retry (bounded — Binance can throttle for a
+      // while; looping forever on a persistent 429 would hang the command).
+      while (true) {
+        res = await fetch(url)
         if (res.status === 429 || res.status === 418) {
-          // Rate-limited: back off and retry once.
-          logger.warn('[Binance] Rate limited, backing off 1s')
-          await new Promise((r) => setTimeout(r, 1000))
+          rateLimitRetries++
+          if (rateLimitRetries > 5) {
+            throw new Error(`Binance rate limit persisted after ${rateLimitRetries} retries (HTTP ${res.status})`)
+          }
+          const waitMs = 1000 * Math.pow(2, rateLimitRetries)
+          logger.warn('[Binance] Rate limited (HTTP %d), backing off %dms', res.status, waitMs)
+          await new Promise((r) => setTimeout(r, waitMs))
           continue
         }
+        break
+      }
+      if (!res.ok) {
+        const body = await res.text()
         throw new Error(`Binance klines HTTP ${res.status}: ${body.slice(0, 200)}`)
       }
       json = await res.json()
@@ -83,9 +94,18 @@ export async function fetchBinanceKlines1s(
     for (const raw of json) {
       const k = parseBinanceKline(raw)
       const close = Number(k.close)
+      const high = Number(k.high)
+      const low = Number(k.low)
+      const volume = Number(k.volume)
       if (Number.isFinite(close) && close > 0 && !seen.has(k.openTime)) {
         seen.add(k.openTime)
-        samples.push({ t: k.openTime, p: close })
+        samples.push({
+          t: k.openTime,
+          p: close,
+          h: Number.isFinite(high) ? high : close,
+          l: Number.isFinite(low) ? low : close,
+          v: Number.isFinite(volume) && volume > 0 ? volume : undefined,
+        })
       }
     }
 

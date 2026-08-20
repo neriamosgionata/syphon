@@ -59,6 +59,23 @@ export interface FastStrategyConfig {
   trendSlopePct: number
   /** Slope measurement window in seconds. */
   trendSlopeWindowSeconds: number
+  /**
+   * Regime gate (trend mode only): stand aside unless a SLOWER EMA slope
+   * shows the market is actually trending. 0 = off. Fixes the flat-market
+   * bleed where the fast slope gate fires on chop wiggles.
+   */
+  regimeEmaPeriod: number
+  /** Slope window for the regime EMA. */
+  regimeSlopeWindowSeconds: number
+  /** Min regime EMA slope % to count the market as trending. */
+  regimeSlopeMinPct: number
+  /**
+   * Volume confirmation: entry bar volume must be >= rolling-median ×
+   * ratio. 0 = off. NOTE: live Kraken WS feed carries no per-tick volume,
+   * so the gate is skipped live (lenient) — backtest-only filter.
+   */
+  volumeWindowSamples: number
+  volumeMinRatio: number
 }
 
 /**
@@ -85,6 +102,11 @@ export function fastStrategyFromConfig(cfg: {
   fastTrendMode?: boolean | number | null
   fastTrendSlopePct?: number | null
   fastTrendSlopeWindowSeconds?: number | null
+  fastRegimeEmaPeriod?: number | null
+  fastRegimeSlopeWindowSeconds?: number | null
+  fastRegimeSlopeMinPct?: number | null
+  fastVolumeWindowSeconds?: number | null
+  fastVolumeMinRatio?: number | null
 }): FastStrategyConfig {
   return {
     momentumSeconds: cfg.fastMomentumSeconds,
@@ -105,6 +127,11 @@ export function fastStrategyFromConfig(cfg: {
     trendMode: cfg.fastTrendMode === true || cfg.fastTrendMode === 1 || cfg.fastTrendMode === '1',
     trendSlopePct: cfg.fastTrendSlopePct ?? 0,
     trendSlopeWindowSeconds: cfg.fastTrendSlopeWindowSeconds ?? 0,
+    regimeEmaPeriod: cfg.fastRegimeEmaPeriod ?? 0,
+    regimeSlopeWindowSeconds: cfg.fastRegimeSlopeWindowSeconds ?? 0,
+    regimeSlopeMinPct: cfg.fastRegimeSlopeMinPct ?? 0,
+    volumeWindowSamples: cfg.fastVolumeWindowSeconds ?? 0,
+    volumeMinRatio: cfg.fastVolumeMinRatio ?? 0,
   }
 }
 
@@ -152,6 +179,21 @@ export class FastStrategy {
     now: number,
     cfg: FastStrategyConfig
   ): EntrySignal {
+    // Volume confirmation — skipped live (no per-tick volume) and while the
+    // median window is warming up.
+    if (cfg.volumeMinRatio > 0 && cfg.volumeWindowSamples > 0) {
+      const last = feed.lastVolume(symbol)
+      const median = feed.volumeMedian(symbol, cfg.volumeWindowSamples, now)
+      if (last !== null && median !== null && median > 0 && last < median * cfg.volumeMinRatio) {
+        return {
+          shouldEnter: false,
+          reason: `volume ${last.toFixed(0)} < median ${median.toFixed(0)} × ${cfg.volumeMinRatio}`,
+          momentumPct: null, rsi: null, ema: null, volatilityPct: null,
+          stopLoss: null, takeProfit: null,
+        }
+      }
+    }
+
     // Trend-rider path: replaces the momentum+RSI gate. Only enters when
     // the trend is ESTABLISHED (price above EMA + EMA rising), never on
     // burst momentum — that's what makes it ride smooth rallies instead of
@@ -243,6 +285,21 @@ export class FastStrategy {
         reason: 'trend mode requires fastEmaPeriod > 0',
         momentumPct: null, rsi: null, ema: null, volatilityPct: null,
         stopLoss: null, takeProfit: null,
+      }
+    }
+
+    // Regime gate: the market must be trending on a SLOWER horizon, or we
+    // stand aside entirely (flat markets = chop churn). Lenient while the
+    // regime window warms up.
+    if (cfg.regimeEmaPeriod > 0 && cfg.regimeSlopeWindowSeconds > 0) {
+      const regimeSlope = feed.emaSlopePct(symbol, cfg.regimeEmaPeriod, cfg.regimeSlopeWindowSeconds, now)
+      if (regimeSlope !== null && regimeSlope < cfg.regimeSlopeMinPct) {
+        return {
+          shouldEnter: false,
+          reason: `regime: EMA-${cfg.regimeEmaPeriod} slope ${regimeSlope.toFixed(3)}% < ${cfg.regimeSlopeMinPct}% over ${cfg.regimeSlopeWindowSeconds}s (not trending)`,
+          momentumPct: null, rsi: null, ema: null, volatilityPct: null,
+          stopLoss: null, takeProfit: null,
+        }
       }
     }
 

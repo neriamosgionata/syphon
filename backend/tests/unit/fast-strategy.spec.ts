@@ -224,6 +224,96 @@ test.group('FastStrategy trend mode', () => {
   })
 })
 
+test.group('FastStrategy regime gate', () => {
+  function regimeCfg(overrides: Partial<FastStrategyConfig> = {}): FastStrategyConfig {
+    return baseCfg({
+      trendMode: true,
+      emaPeriod: 900,
+      trendSlopePct: 0.1,
+      trendSlopeWindowSeconds: 1800,
+      takeProfitPct: 0,
+      regimeEmaPeriod: 3600,
+      regimeSlopeWindowSeconds: 3600,
+      regimeSlopeMinPct: 0.02,
+      ...overrides,
+    })
+  }
+
+  test('stands aside in a flat market (no trend on the slow EMA)', ({ assert }) => {
+    const { feed, now } = feedFrom(() => 100, 10800)
+    const signal = strategy.evaluateEntry(feed, 'BTC', 100, now, regimeCfg())
+    assert.isFalse(signal.shouldEnter)
+    assert.match(signal.reason!, /regime/)
+  })
+
+  test('enters when the slow EMA slope confirms a trend', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => 100 * Math.pow(1.00001, i), 10800)
+    const signal = strategy.evaluateEntry(feed, 'BTC', feed.lastPrice('BTC')!, now, regimeCfg())
+    assert.isTrue(signal.shouldEnter)
+  })
+
+  test('regime gate is lenient while the slow EMA is warming up', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => 100 * Math.pow(1.00001, i), 4200)
+    const signal = strategy.evaluateEntry(feed, 'BTC', feed.lastPrice('BTC')!, now, regimeCfg())
+    assert.isTrue(signal.shouldEnter)
+  })
+
+  test('regime gate disabled (period 0) never blocks', ({ assert }) => {
+    const { feed, now } = feedFrom(() => 100, 10800)
+    const signal = strategy.evaluateEntry(feed, 'BTC', 100, now, regimeCfg({ regimeEmaPeriod: 0 }))
+    // flat market: falls through to the price-vs-EMA check instead
+    assert.isFalse(signal.shouldEnter)
+    assert.notMatch(signal.reason!, /regime/)
+  })
+})
+
+test.group('FastStrategy volume gate', () => {
+  function volCfg(overrides: Partial<FastStrategyConfig> = {}): FastStrategyConfig {
+    return baseCfg({
+      volumeWindowSamples: 300,
+      volumeMinRatio: 1.0,
+      ...overrides,
+    })
+  }
+
+  test('blocks entry when the bar volume is below the rolling median', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 300; i++) feed.push('BTC', 100 + i * 0.02, t0 + i * 1000, 100)
+    feed.push('BTC', 106, t0 + 300_000, 40) // low-volume momentum bar
+    const signal = strategy.evaluateEntry(feed, 'BTC', 106, t0 + 300_000, volCfg())
+    assert.isFalse(signal.shouldEnter)
+    assert.match(signal.reason!, /volume/)
+  })
+
+  test('passes when the bar volume clears the median', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 300; i++) feed.push('BTC', 100 + i * 0.02, t0 + i * 1000, 100)
+    feed.push('BTC', 106, t0 + 300_000, 200)
+    const signal = strategy.evaluateEntry(feed, 'BTC', 106, t0 + 300_000, volCfg())
+    assert.isTrue(signal.shouldEnter)
+  })
+
+  test('lenient when the feed carries no volume (live mode)', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 300; i++) feed.push('BTC', 100 + i * 0.02, t0 + i * 1000)
+    feed.push('BTC', 106, t0 + 300_000)
+    const signal = strategy.evaluateEntry(feed, 'BTC', 106, t0 + 300_000, volCfg())
+    assert.isTrue(signal.shouldEnter)
+  })
+
+  test('disabled (ratio 0) never blocks', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 300; i++) feed.push('BTC', 100 + i * 0.02, t0 + i * 1000, 100)
+    feed.push('BTC', 106, t0 + 300_000, 10)
+    const signal = strategy.evaluateEntry(feed, 'BTC', 106, t0 + 300_000, volCfg({ volumeMinRatio: 0 }))
+    assert.isTrue(signal.shouldEnter)
+  })
+})
+
 test.group('FastStrategy exit', () => {
   test('fixed stop loss', ({ assert }) => {
     const { feed, now } = feedFrom(() => 100, 120)

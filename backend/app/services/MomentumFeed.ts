@@ -6,6 +6,8 @@
 export interface MomentumSample {
   t: number
   p: number
+  /** Optional per-sample volume (Binance 1s klines). Null/absent live. */
+  v?: number
 }
 
 export interface MomentumScore {
@@ -72,14 +74,14 @@ export class MomentumFeed {
   private series = new Map<string, MomentumSample[]>()
   private maxSamples = 14400 // 4 hours at 1s sampling (trend mode needs long windows)
 
-  public push(symbol: string, price: number, t: number = Date.now()): void {
+  public push(symbol: string, price: number, t: number = Date.now(), volume?: number): void {
     if (!Number.isFinite(price) || price <= 0) return
     let arr = this.series.get(symbol)
     if (!arr) {
       arr = []
       this.series.set(symbol, arr)
     }
-    arr.push({ t, p: price })
+    arr.push({ t, p: price, v: volume })
     if (arr.length > this.maxSamples) arr.splice(0, arr.length - this.maxSamples)
   }
 
@@ -98,6 +100,27 @@ export class MomentumFeed {
   public lastPrice(symbol: string): number | null {
     const arr = this.series.get(symbol)
     return arr && arr.length > 0 ? arr[arr.length - 1].p : null
+  }
+
+  /** Volume of the latest sample, or null when the sample has none. */
+  public lastVolume(symbol: string): number | null {
+    const arr = this.series.get(symbol)
+    const last = arr && arr.length > 0 ? arr[arr.length - 1] : null
+    return last && last.v !== undefined ? last.v : null
+  }
+
+  /** Median volume over the last `windowSamples`, or null when data is thin. */
+  public volumeMedian(symbol: string, windowSamples: number, now: number = Date.now()): number | null {
+    if (windowSamples <= 0) return null
+    const arr = this.series.get(symbol)
+    if (!arr || arr.length < windowSamples) return null
+    const vols: number[] = []
+    for (let i = arr.length - windowSamples; i < arr.length; i++) {
+      if (arr[i].v !== undefined) vols.push(arr[i].v!)
+    }
+    if (vols.length === 0) return null
+    vols.sort((a, b) => a - b)
+    return vols[Math.floor(vols.length / 2)]
   }
 
   /**
