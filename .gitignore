@@ -45,3 +45,6 @@ vite.config.ts.timestamp-*
 # SQLite database
 backend/syphon.sqlite3
 backend/syphon.sqlite3-*
+
+# Backtest data cache (fetched from Binance)
+backend/backtests/cache/

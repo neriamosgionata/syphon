@@ -1,0 +1,311 @@
+// ─── Deterministic event-driven backtester ────────────────────
+//
+// Replays historical price samples through the SAME feed + strategy
+// (MomentumFeed + FastStrategy) the live loop uses, at the same decision
+// cadence (loopIntervalSeconds). Live/backtest parity is the point:
+// whatever passes here is what the live loop will do.
+//
+// Model:
+// - samples are (epochMs, price) pairs, typically Binance 1s kline closes
+// - decisions fire every `loopIntervalSeconds` of backtest time at the
+//   price of the last sample at/behind that time (live checks the WS price
+//   at tick time — same approximation)
+// - market orders fill at the decision price; a taker fee applies per side
+// - cash accounting: buys deduct qty*price*(1+fee), sells add qty*price*(1-fee)
+// - positions still open at the end are force-closed at the last price
+//
+// Pure: no DB, no network, no env. Unit-testable in isolation.
+
+import { MomentumFeed } from '#services/MomentumFeed'
+import { FastStrategy, FastStrategyConfig } from '#services/FastStrategy'
+
+export interface BacktestSample {
+  t: number
+  p: number
+}
+
+export interface BacktestConfig {
+  symbol: string
+  strategy: FastStrategyConfig
+  /** Decision cadence in seconds — set to the live fast_interval_seconds. */
+  loopIntervalSeconds: number
+  /** Starting portfolio value in USD. */
+  portfolioUsd: number
+  /** Taker fee per side, e.g. 0.0026 = 0.26%. */
+  feePct: number
+  maxPositions: number
+  maxExposurePct: number
+  maxSinglePositionPct: number
+  cooldownSeconds: number
+}
+
+export interface BacktestTrade {
+  symbol: string
+  side: 'BUY' | 'SELL'
+  entryTime: number
+  entryPrice: number
+  exitTime: number | null
+  exitPrice: number | null
+  quantity: number
+  pnl: number
+  pnlPct: number
+  feePaid: number
+  exitReason: string | null
+  holdingSeconds: number | null
+  /** True when the position was still open at end of test and force-closed. */
+  closedAtEnd: boolean
+}
+
+export interface BacktestMetrics {
+  totalTrades: number
+  winCount: number
+  lossCount: number
+  winRate: number
+  totalPnl: number
+  avgPnlPct: number
+  largestWin: number
+  largestLoss: number
+  profitFactor: number
+  avgHoldingSeconds: number | null
+  maxDrawdownPct: number
+}
+
+export interface BacktestResult {
+  symbol: string
+  samples: number
+  startTime: number
+  endTime: number
+  startUsd: number
+  endUsd: number
+  strategyReturnPct: number
+  buyHoldReturnPct: number
+  metrics: BacktestMetrics
+  trades: BacktestTrade[]
+  equityCurve: Array<{ t: number; value: number }>
+}
+
+interface OpenPosition {
+  symbol: string
+  side: 'BUY' | 'SELL'
+  quantity: number
+  entryPrice: number
+  entryTime: number
+  stopLoss: number
+  takeProfit: number
+  peakPrice: number
+}
+
+export class BacktestEngine {
+  private feed = new MomentumFeed()
+  private strategy = new FastStrategy()
+
+  public run(samples: BacktestSample[], cfg: BacktestConfig): BacktestResult {
+    if (samples.length < 2) {
+      throw new Error('BacktestEngine: need at least 2 samples')
+    }
+    // The feed is a class field so run() must be re-entrant: previous runs
+    // (and any strategy warm-up) must not leak into this one.
+    this.feed.clearAll()
+    const series = [...samples].sort((a, b) => a.t - b.t)
+    const startTime = series[0].t
+    const endTime = series[series.length - 1].t
+    const firstPrice = series[0].p
+    const lastPrice = series[series.length - 1].p
+
+    let cash = cfg.portfolioUsd
+    const positions: OpenPosition[] = []
+    const trades: BacktestTrade[] = []
+    const equityCurve: Array<{ t: number; value: number }> = []
+    const cooldowns = new Map<string, number>()
+    let feedIndex = 0
+
+    const equityAt = (price: number): number =>
+      cash + positions.reduce((s, p) => s + p.quantity * price, 0)
+
+    const closePosition = (
+      pos: OpenPosition,
+      price: number,
+      time: number,
+      reason: string,
+      closedAtEnd: boolean
+    ): void => {
+      const isBuy = pos.side === 'BUY'
+      const gross = isBuy
+        ? pos.quantity * price - pos.quantity * pos.entryPrice
+        : pos.quantity * pos.entryPrice - pos.quantity * price
+      const feePaid = pos.quantity * price * cfg.feePct
+      const pnl = gross - feePaid
+      const costBasis = pos.quantity * pos.entryPrice
+      trades.push({
+        symbol: pos.symbol,
+        side: pos.side,
+        entryTime: pos.entryTime,
+        entryPrice: pos.entryPrice,
+        exitTime: time,
+        exitPrice: price,
+        quantity: pos.quantity,
+        pnl,
+        pnlPct: costBasis > 0 ? (pnl / costBasis) * 100 : 0,
+        feePaid,
+        exitReason: reason,
+        holdingSeconds: time - pos.entryTime > 0 ? Math.round((time - pos.entryTime) / 1000) : 0,
+        closedAtEnd,
+      })
+      if (isBuy) cash += pos.quantity * price * (1 - cfg.feePct)
+      else cash -= pos.quantity * price * (1 + cfg.feePct)
+    }
+
+    // Decision times: every loopIntervalSeconds from the first sample.
+    const intervalMs = Math.max(1, Math.round(cfg.loopIntervalSeconds * 1000))
+    for (let t = startTime; t <= endTime; t += intervalMs) {
+      // Advance the feed with every sample at or behind the decision time.
+      while (feedIndex < series.length && series[feedIndex].t <= t) {
+        this.feed.push(cfg.symbol, series[feedIndex].p, series[feedIndex].t)
+        feedIndex++
+      }
+      const price = this.feed.lastPrice(cfg.symbol)
+      if (price === null) continue
+
+      // Exits first (risk reduction before risk addition — same as live).
+      for (let i = positions.length - 1; i >= 0; i--) {
+        const pos = positions[i]
+        const signal = this.strategy.evaluateExit(this.feed, pos.symbol, price, t, {
+          side: pos.side,
+          entryPrice: pos.entryPrice,
+          stopLoss: pos.stopLoss,
+          takeProfit: pos.takeProfit,
+          peakPrice: pos.peakPrice,
+          openedAt: pos.entryTime,
+        }, cfg.strategy)
+
+        if (signal.peakPrice !== pos.peakPrice) pos.peakPrice = signal.peakPrice
+        if (signal.trailingStop !== null && signal.trailingStop !== pos.stopLoss) {
+          pos.stopLoss = signal.trailingStop
+        }
+
+        if (signal.shouldExit) {
+          closePosition(pos, price, t, signal.reason || 'strategy exit', false)
+          positions.splice(i, 1)
+        }
+      }
+
+      // Entries.
+      if (positions.length < cfg.maxPositions) {
+        const equity = equityAt(price)
+        let exposure = positions.reduce((s, p) => s + p.quantity * price, 0)
+        let exposurePct = equity > 0 ? exposure / equity : 0
+
+        if (exposurePct < cfg.maxExposurePct) {
+          const lastEntry = cooldowns.get(cfg.symbol) || 0
+          if (t - lastEntry >= cfg.cooldownSeconds * 1000) {
+            const signal = this.strategy.evaluateEntry(this.feed, cfg.symbol, price, t, cfg.strategy)
+            if (signal.shouldEnter && signal.stopLoss !== null && signal.takeProfit !== null) {
+              const sizePct = Math.min(
+                cfg.maxSinglePositionPct,
+                cfg.maxExposurePct - exposurePct
+              )
+              if (sizePct > 0) {
+                const rawQty = (equity * sizePct) / price
+                const quantity = Math.floor(rawQty * 1e6) / 1e6
+                if (quantity > 0) {
+                  cash -= quantity * price * (1 + cfg.feePct)
+                  positions.push({
+                    symbol: cfg.symbol,
+                    side: 'BUY',
+                    quantity,
+                    entryPrice: price,
+                    entryTime: t,
+                    stopLoss: signal.stopLoss,
+                    takeProfit: signal.takeProfit,
+                    peakPrice: price,
+                  })
+                  cooldowns.set(cfg.symbol, t)
+                }
+              }
+            }
+          }
+        }
+      }
+
+      equityCurve.push({ t, value: equityAt(price) })
+    }
+
+    // Force-close anything still open at the end.
+    for (const pos of positions) {
+      closePosition(pos, lastPrice, endTime, 'end_of_test', true)
+    }
+
+    const endUsd = cash
+    return {
+      symbol: cfg.symbol,
+      samples: series.length,
+      startTime,
+      endTime,
+      startUsd: cfg.portfolioUsd,
+      endUsd,
+      strategyReturnPct: cfg.portfolioUsd > 0 ? ((endUsd - cfg.portfolioUsd) / cfg.portfolioUsd) * 100 : 0,
+      buyHoldReturnPct: firstPrice > 0 ? ((lastPrice - firstPrice) / firstPrice) * 100 : 0,
+      metrics: this.computeMetrics(trades, equityCurve),
+      trades,
+      equityCurve,
+    }
+  }
+
+  private computeMetrics(
+    trades: BacktestTrade[],
+    equityCurve: Array<{ t: number; value: number }>
+  ): BacktestMetrics {
+    let winCount = 0
+    let lossCount = 0
+    let totalPnl = 0
+    let grossWins = 0
+    let grossLosses = 0
+    let totalReturnPct = 0
+    let totalHold = 0
+    let largestWin = 0
+    let largestLoss = 0
+
+    for (const trade of trades) {
+      totalPnl += trade.pnl
+      totalReturnPct += trade.pnlPct
+      if (trade.holdingSeconds !== null) totalHold += trade.holdingSeconds
+      if (trade.pnl > 0) {
+        winCount++
+        grossWins += trade.pnl
+        if (trade.pnl > largestWin) largestWin = trade.pnl
+      } else {
+        lossCount++
+        grossLosses += Math.abs(trade.pnl)
+        if (trade.pnl < largestLoss) largestLoss = trade.pnl
+      }
+    }
+
+    // Max drawdown from the equity curve (percent).
+    let peak = -Infinity
+    let maxDrawdown = 0
+    for (const point of equityCurve) {
+      if (point.value > peak) peak = point.value
+      if (peak > 0) {
+        const dd = ((peak - point.value) / peak) * 100
+        if (dd > maxDrawdown) maxDrawdown = dd
+      }
+    }
+
+    const total = trades.length
+    return {
+      totalTrades: total,
+      winCount,
+      lossCount,
+      winRate: total > 0 ? winCount / total : 0,
+      totalPnl,
+      avgPnlPct: total > 0 ? totalReturnPct / total : 0,
+      largestWin,
+      largestLoss,
+      profitFactor: grossLosses > 0 ? grossWins / grossLosses : grossWins > 0 ? Infinity : 0,
+      avgHoldingSeconds: total > 0 ? totalHold / total : null,
+      maxDrawdownPct: maxDrawdown,
+    }
+  }
+}
+
+export default new BacktestEngine()

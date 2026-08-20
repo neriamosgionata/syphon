@@ -121,4 +121,51 @@ test.group('MomentumFeed', (group) => {
     feed.clear('BTC')
     assert.isNull(feed.lastPrice('BTC'))
   })
+
+  test('ema follows a rising series below the price', ({ assert }) => {
+    const t0 = 1000000
+    for (let i = 0; i < 40; i++) feed.push('BTC', 100 + i, t0 + i * 1000)
+    const ema = feed.ema('BTC', 20, t0 + 40000)
+    assert.isNotNull(ema)
+    assert.isBelow(ema!, feed.lastPrice('BTC')!)
+    assert.isAbove(ema!, 100) // lagging the rally, not detached
+  })
+
+  test('ema is flat on a flat series', ({ assert }) => {
+    const t0 = 1000000
+    for (let i = 0; i < 40; i++) feed.push('BTC', 100, t0 + i * 1000)
+    assert.closeTo(feed.ema('BTC', 20, t0 + 40000)!, 100, 1e-9)
+  })
+
+  test('ema needs period samples', ({ assert }) => {
+    const t0 = 1000000
+    for (let i = 0; i < 10; i++) feed.push('BTC', 100 + i, t0 + i * 1000)
+    assert.isNull(feed.ema('BTC', 20, t0 + 10000))
+  })
+
+  test('ema disabled for non-positive periods', ({ assert }) => {
+    feed.push('BTC', 100, 1000000)
+    assert.isNull(feed.ema('BTC', 0, 1000000))
+  })
+
+  test('volatilityPct is ~0 on a flat series', ({ assert }) => {
+    const t0 = 1000000
+    for (let i = 0; i < 120; i++) feed.push('BTC', 100, t0 + i * 1000)
+    assert.closeTo(feed.volatilityPct('BTC', 60, t0 + 120000)!, 0, 1e-9)
+  })
+
+  test('volatilityPct measures per-sample swing', ({ assert }) => {
+    const t0 = 1000000
+    // ±1% zigzag every second → alternating ±2% returns → stddev ≈ 2%
+    for (let i = 0; i < 120; i++) feed.push('BTC', 100 + (i % 2 === 0 ? 1 : -1), t0 + i * 1000)
+    const vol = feed.volatilityPct('BTC', 60, t0 + 120000)
+    assert.isNotNull(vol)
+    assert.closeTo(vol!, 2.0, 0.05)
+  })
+
+  test('volatilityPct needs window + 1 samples', ({ assert }) => {
+    for (let i = 0; i < 10; i++) feed.push('BTC', 100, 1000000 + i * 1000)
+    assert.isNull(feed.volatilityPct('BTC', 60, 1000000 + 10000))
+    assert.isNull(feed.volatilityPct('BTC', 0, 1000000 + 10000))
+  })
 })

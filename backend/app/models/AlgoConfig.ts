@@ -95,6 +95,31 @@ export default class AlgoConfig extends BaseModel {
   @column()
   declare fastCooldownSeconds: number
 
+  // Fast strategy controls (migration 14)
+  @column()
+  declare fastTrailingStopPct: number
+
+  @column()
+  declare fastTrailingActivatePct: number
+
+  @column()
+  declare fastMaxHoldSeconds: number
+
+  @column()
+  declare fastEmaPeriod: number
+
+  @column()
+  declare fastVolatilityWindowSeconds: number
+
+  @column()
+  declare fastVolatilityMult: number
+
+  @column()
+  declare fastVolatilityFloorPct: number
+
+  @column()
+  declare fastVolatilityCeilingPct: number
+
   @column({
     prepare: (value: string[]) => JSON.stringify(value),
     consume: (value: string) => (typeof value === 'string' ? JSON.parse(value) : value),
@@ -154,6 +179,14 @@ export default class AlgoConfig extends BaseModel {
       fastTakeProfitPct: 1.0,
       fastExitReversalPct: -0.3,
       fastCooldownSeconds: 180,
+      fastTrailingStopPct: 0.3,
+      fastTrailingActivatePct: 0.4,
+      fastMaxHoldSeconds: 1800,
+      fastEmaPeriod: 20,
+      fastVolatilityWindowSeconds: 60,
+      fastVolatilityMult: 2.0,
+      fastVolatilityFloorPct: 0.05,
+      fastVolatilityCeilingPct: 0,
       lastRunAt: null,
       disabledReason: null,
     })

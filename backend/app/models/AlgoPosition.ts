@@ -37,6 +37,9 @@ export default class AlgoPosition extends BaseModel {
   declare takeProfit: number
 
   @column()
+  declare peakPrice: number | null
+
+  @column()
   declare entryScore: number
 
   @column()

@@ -22,6 +22,9 @@ export default class AlgoController {
       'fastEnabled', 'fastIntervalSeconds', 'fastWatchlist', 'fastMomentumSeconds',
       'fastMomentumThresholdPct', 'fastRsiLow', 'fastRsiHigh', 'fastStopLossPct',
       'fastTakeProfitPct', 'fastExitReversalPct', 'fastCooldownSeconds',
+      'fastTrailingStopPct', 'fastTrailingActivatePct', 'fastMaxHoldSeconds',
+      'fastEmaPeriod', 'fastVolatilityWindowSeconds', 'fastVolatilityMult',
+      'fastVolatilityFloorPct', 'fastVolatilityCeilingPct',
     ]
 
     const numericRanges: Record<string, [number, number]> = {
@@ -44,6 +47,14 @@ export default class AlgoController {
       fastTakeProfitPct: [0.1, 10],
       fastExitReversalPct: [-10, 0],
       fastCooldownSeconds: [10, 3600],
+      fastTrailingStopPct: [0, 5],
+      fastTrailingActivatePct: [0, 10],
+      fastMaxHoldSeconds: [0, 86400],
+      fastEmaPeriod: [0, 200],
+      fastVolatilityWindowSeconds: [0, 600],
+      fastVolatilityMult: [0, 20],
+      fastVolatilityFloorPct: [0, 5],
+      fastVolatilityCeilingPct: [0, 10],
     }
 
     const stringEnums: Record<string, string[]> = {

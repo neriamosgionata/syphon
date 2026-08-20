@@ -8,6 +8,7 @@ import KrakenFastEngine from '#services/KrakenFastEngine'
 import KrakenService from '#services/KrakenService'
 import KrakenWS from '#services/KrakenWebSocketService'
 import { MomentumFeed } from '#services/MomentumFeed'
+import { FastStrategy, FastStrategyConfig, fastStrategyFromConfig } from '#services/FastStrategy'
 import MeilisearchService from '#services/MeilisearchService'
 import NotificationService from '#services/NotificationService'
 
@@ -45,6 +46,7 @@ export class FastAlgoService {
   private engine: any
   private ws: any
   private feed: MomentumFeed
+  private strategy: FastStrategy
 
   private loopTimer: ReturnType<typeof setInterval> | null = null
   private samplerTimer: ReturnType<typeof setInterval> | null = null
@@ -59,10 +61,11 @@ export class FastAlgoService {
   private symbolCooldowns = new Map<string, number>()
   private runId = uuidv4()
 
-  constructor(opts: { engine?: any; ws?: any; feed?: MomentumFeed } = {}) {
+  constructor(opts: { engine?: any; ws?: any; feed?: MomentumFeed; strategy?: FastStrategy } = {}) {
     this.engine = opts.engine ?? KrakenFastEngine
     this.ws = opts.ws ?? KrakenWS
     this.feed = opts.feed ?? new MomentumFeed()
+    this.strategy = opts.strategy ?? new FastStrategy()
   }
 
   public get running(): boolean {
@@ -203,6 +206,16 @@ export class FastAlgoService {
       subscribed,
       prices,
       momentum,
+      strategy: cfg ? {
+        trailingStopPct: cfg.fastTrailingStopPct,
+        trailingActivatePct: cfg.fastTrailingActivatePct,
+        maxHoldSeconds: cfg.fastMaxHoldSeconds,
+        emaPeriod: cfg.fastEmaPeriod,
+        volatilityWindowSeconds: cfg.fastVolatilityWindowSeconds,
+        volatilityMult: cfg.fastVolatilityMult,
+        volatilityFloorPct: cfg.fastVolatilityFloorPct,
+        volatilityCeilingPct: cfg.fastVolatilityCeilingPct,
+      } : null,
       cooldowns: [...this.symbolCooldowns.entries()]
         .filter(([, at]) => Date.now() - at < (cfg?.fastCooldownSeconds ?? 180) * 1000)
         .map(([symbol]) => symbol),
@@ -310,36 +323,54 @@ export class FastAlgoService {
     }
   }
 
+  /**
+   * Map the persisted AlgoConfig onto the pure strategy config. A value of
+   * 0/null disables the corresponding control (trailing, max-hold, EMA,
+   * volatility scaling) — same semantics as the strategy core.
+   */
+  private toStrategyConfig(cfg: AlgoConfig): FastStrategyConfig {
+    return fastStrategyFromConfig(cfg)
+  }
+
   // ── Exits ───────────────────────────────────────────────────
 
   private async checkExit(pos: AlgoPosition, cfg: AlgoConfig): Promise<void> {
     const price = this.ws.getPrice(pos.symbol)
     if (price === null) return // no live price this tick
 
+    if (pos.forceClose) {
+      await this.exitPosition(pos, 'manual force close requested', cfg)
+      return
+    }
+
+    const signal = this.strategy.evaluateExit(
+      this.feed,
+      pos.symbol,
+      price,
+      Date.now(),
+      {
+        side: pos.side,
+        entryPrice: pos.entryPrice,
+        stopLoss: pos.stopLoss,
+        takeProfit: pos.takeProfit,
+        peakPrice: pos.peakPrice,
+        openedAt: pos.openedAt.toMillis(),
+      },
+      this.toStrategyConfig(cfg)
+    )
+
+    // Persist trailing state even while holding.
+    if (signal.peakPrice !== pos.peakPrice) pos.peakPrice = signal.peakPrice
+    if (signal.trailingStop !== null && signal.trailingStop !== pos.stopLoss) {
+      pos.stopLoss = signal.trailingStop
+      logger.info('[FastAlgo] Trailing stop tightened for %s -> %s',
+        pos.symbol, pos.stopLoss.toFixed(2))
+    }
     pos.currentPrice = price
     await pos.save()
 
-    const isBuy = pos.side === 'BUY'
-    let reason: string | null = null
-
-    if (pos.forceClose) {
-      reason = 'manual force close requested'
-    }
-    if (!reason && isBuy && price <= pos.stopLoss) {
-      reason = `fast stop-loss: ${price.toFixed(2)} <= ${pos.stopLoss.toFixed(2)}`
-    }
-    if (!reason && isBuy && price >= pos.takeProfit) {
-      reason = `fast take-profit: ${price.toFixed(2)} >= ${pos.takeProfit.toFixed(2)}`
-    }
-    if (!reason) {
-      const mom = this.feed.momentumPct(pos.symbol, cfg.fastMomentumSeconds)
-      if (mom !== null && mom <= cfg.fastExitReversalPct) {
-        reason = `momentum reversal: ${mom.toFixed(3)}% <= ${cfg.fastExitReversalPct}%`
-      }
-    }
-    if (!reason) return
-
-    await this.exitPosition(pos, reason, cfg)
+    if (!signal.shouldExit) return
+    await this.exitPosition(pos, signal.reason || 'strategy exit', cfg)
   }
 
   private async exitPosition(pos: AlgoPosition, reason: string, cfg: AlgoConfig): Promise<void> {
@@ -424,13 +455,10 @@ export class FastAlgoService {
       const price = this.ws.getPrice(symbol)
       if (price === null) continue
 
-      const score = this.feed.score(symbol, {
-        windowSeconds: cfg.fastMomentumSeconds,
-        thresholdPct: cfg.fastMomentumThresholdPct,
-        rsiLow: cfg.fastRsiLow,
-        rsiHigh: cfg.fastRsiHigh,
-      })
-      if (!score.pass) continue
+      const signal = this.strategy.evaluateEntry(
+        this.feed, symbol, price, now, this.toStrategyConfig(cfg)
+      )
+      if (!signal.shouldEnter) continue
 
       const sizePct = Math.min(cfg.maxSinglePositionPct, cfg.maxExposurePct - exposurePct)
       if (sizePct <= 0) break
@@ -439,9 +467,9 @@ export class FastAlgoService {
       const quantity = Math.floor(rawQty * 1e6) / 1e6
       if (quantity <= 0) continue
 
-      const stopLoss = price * (1 - cfg.fastStopLossPct / 100)
-      const takeProfit = price * (1 + cfg.fastTakeProfitPct / 100)
-      const reason = `momentum entry: ${score.reason}`
+      const stopLoss = signal.stopLoss ?? price * (1 - cfg.fastStopLossPct / 100)
+      const takeProfit = signal.takeProfit ?? price * (1 + cfg.fastTakeProfitPct / 100)
+      const reason = `momentum entry: ${signal.reason}`
       this.symbolCooldowns.set(symbol, now)
       used++
       exposurePct += sizePct
@@ -450,13 +478,13 @@ export class FastAlgoService {
         await this.logDecision(symbol, 0, 'enter', reason, {
           side: 'BUY',
           quantity,
-          compositeScore: score.momentumPct ?? null,
+          compositeScore: signal.momentumPct ?? null,
           conviction: 0.5,
           regime: 'momentum',
           positionSizePct: sizePct,
           stopLoss,
           takeProfit,
-          context: { price, rsi: score.rsi, exitMode: 'fast', dryRun: true },
+          context: { price, rsi: signal.rsi, ema: signal.ema, volatilityPct: signal.volatilityPct, exitMode: 'fast', dryRun: true },
         })
         continue
       }
@@ -484,9 +512,10 @@ export class FastAlgoService {
         quantity,
         entryPrice: price,
         currentPrice: price,
+        peakPrice: price,
         stopLoss,
         takeProfit,
-        entryScore: score.momentumPct ?? 0,
+        entryScore: signal.momentumPct ?? 0,
         entryConviction: 0.5,
         entryRegime: 'momentum',
         entryReason: reason,
@@ -500,7 +529,7 @@ export class FastAlgoService {
       await this.logDecision(symbol, state.tickerId, 'enter', reason, {
         side: 'BUY',
         quantity,
-        compositeScore: score.momentumPct ?? null,
+        compositeScore: signal.momentumPct ?? null,
         conviction: 0.5,
         regime: 'momentum',
         positionSizePct: sizePct,
@@ -508,7 +537,7 @@ export class FastAlgoService {
         takeProfit,
         tradeId,
         algoPositionId: algoPos.id,
-        context: { price, rsi: score.rsi, exitMode: 'fast' },
+        context: { price, rsi: signal.rsi, ema: signal.ema, volatilityPct: signal.volatilityPct, exitMode: 'fast' },
       })
     }
   }

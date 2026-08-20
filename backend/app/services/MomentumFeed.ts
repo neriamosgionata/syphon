@@ -130,6 +130,45 @@ export class MomentumFeed {
   }
 
   /**
+   * Exponential moving average over the raw sample prices, seeded with the
+   * SMA of the first `period` samples. Assumes roughly constant sampling
+   * cadence (1s in the live loop) — period is a sample count.
+   */
+  public ema(symbol: string, period: number, now: number = Date.now()): number | null {
+    if (period <= 0) return null
+    const arr = this.series.get(symbol)
+    if (!arr || arr.length < period) return null
+    const k = 2 / (period + 1)
+    let value = 0
+    for (let i = 0; i < period; i++) value += arr[i].p
+    value /= period
+    for (let i = period; i < arr.length; i++) {
+      value = arr[i].p * k + value * (1 - k)
+    }
+    return value
+  }
+
+  /**
+   * Rolling volatility proxy: stddev of per-sample returns over the last
+   * `windowSamples` samples, in percent. With 1s samples this is per-second
+   * volatility; scale by sqrt(seconds) to annualize to longer periods.
+   */
+  public volatilityPct(symbol: string, windowSamples: number, now: number = Date.now()): number | null {
+    if (windowSamples <= 0) return null
+    const arr = this.series.get(symbol)
+    if (!arr || arr.length < windowSamples + 1) return null
+    const returns: number[] = []
+    for (let i = arr.length - windowSamples; i < arr.length; i++) {
+      const prev = arr[i - 1].p
+      if (prev > 0) returns.push((arr[i].p - prev) / prev)
+    }
+    if (returns.length === 0) return null
+    const m = returns.reduce((s, v) => s + v, 0) / returns.length
+    const variance = returns.reduce((s, v) => s + (v - m) ** 2, 0) / returns.length
+    return Math.sqrt(variance) * 100
+  }
+
+  /**
    * Combined entry gate for the intraminute loop.
    * Passes when momentum over the window clears the threshold and RSI is
    * between the configured bounds. Missing RSI data is lenient (momentum

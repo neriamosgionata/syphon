@@ -336,7 +336,11 @@ test.group('KrakenFastEngine', (group) => {
     assert.equal(engine.getAllOrders().length, 0)
   })
 
-  test('start() without API keys does not start the engine', async ({ assert }) => {
+  test('start() fails cleanly when Kraken is unreachable', async ({ assert }) => {
+    // With KRAKEN_API_KEY/SECRET set (as in dev .env), credential
+    // validation hits the real REST API — stub it unreachable so the
+    // engine must abort before opening WS connections or timers.
+    stubFetchError()
     await engine.start(['BTC'])
     assert.isFalse(engine.running)
   })
