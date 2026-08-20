@@ -1,40 +1,30 @@
 # ALGO WIP — handoff (2026-08-21)
 
-Where the algo work stands. Last session stopped mid-flight on: maker-execution + volatility-targeting calibration and full-depth validation.
+Where the algo work stands. Maker-execution + volatility-targeting shipped (migration 18, committed). Month-long validation DONE: the edge is regime-lucky, not validated. Toolchain moved to Bun (see AGENTS.md "Bun runtime" section).
 
-**Toolchain: use node v24** (`nvm use 24`). v26 breaks `@poppinss/ts-exec`'s loader (`module.register()` removed → every ace command fails with "Invalid command exported ... Invalid URL"). No fix planned — v24 is the target runtime.
+## Toolchain
+- **Runtime: Bun 1.4.0-canary** (`bun ace.js ...`, `bun run test`). Works end-to-end after the fixes documented in AGENTS.md: inlined tsconfig (no `extends`), `packages/better-sqlite3` shim (bun:sqlite under Bun, node:sqlite under Node), `bunfig-preload.ts` (jsonschema resolveUrl + execa refCounted patches).
+- **Node v24 still works** (265/265) — same shim uses node:sqlite there. Node ≥ 22.5 required (node:sqlite).
+- v26 remains broken (ts-exec loader / module.register) — do NOT use.
 
-## Shipped & committed on master (all green at 265 unit tests on node v24)
-- FastStrategy pure core; trend mode; regime gate; intrabar fills; sweep + walk-forward commands; risk rails (migration 17: correlated cap, risk-per-trade, loss-streak); live/backtest parity fix (1 position/symbol).
-- Honest single-position results across 6×72h windows (current live config, taker fees): only the most recent trending window is positive (+0.17%, PF 2.11); 5/6 windows ≈ 0 or negative. 7×72h walk-forward: ALL verdicts FAIL. The edge is regime-lucky, not validated.
+## Shipped & committed on master (265 unit tests green on BOTH bun and node v24)
+- FastStrategy pure core; trend mode; regime gate; intrabar fills; sweep + walk-forward commands; risk rails (migration 17); live/backtest parity fix; maker execution + vol targeting + TCA (migration 18, applied to dev DB).
 
-## In-flight (UNCOMMITTED — all in working tree)
-**A. Maker execution + TCA + volatility targeting (migration 18, applied to dev DB):**
-- `algo_configs`: `fast_maker_execution`, `fast_limit_fill_seconds` (15), `fast_limit_offset_pct` (0.05), `fast_maker_fee_pct` (0.0008), `fast_vol_target_pct`, `fast_vol_target_window_seconds` (3600), `fast_vol_target_max_mult` (2). `algo_positions.decision_price` (TCA).
-- `FastStrategy.volatilityMultiplier(perSampleVolPct, targetAnnPct, maxMult)` — **target is in % annualized, e.g. 50 = 50%** (config range [0,200]).
-- `BacktestEngine`: limit-fill entries (scan fill window, fill at limit, maker fee, SL/TP scaled to fill price), vol-target sizing (mult applied inside the maxSingle cap).
-- `FastAlgoService`: live LIMIT entries (place → waitForFill → cancel → retry once at fresh price → skip on miss; exits stay MARKET), vol-target multiplier, `decisionPrice` persisted, waitForFill helper.
-- **Calibration on ETH 72h (taker baseline +0.08%):** maker only +0.50%, maker+volTarget50 +0.92%. BTC 72h: 0.17→0.44. Flat 72h: −0.19→−0.13. BTC 36h: −0.03→+0.22. **NOT yet written to `algo_configs`** — apply:
-  ```sql
-  UPDATE algo_configs SET fast_maker_execution=1, fast_limit_fill_seconds=15,
-    fast_limit_offset_pct=0.05, fast_maker_fee_pct=0.0008, fast_vol_target_pct=50,
-    fast_vol_target_window_seconds=3600, fast_vol_target_max_mult=2 WHERE id=1;
-  ```
+## Calibration applied to `algo_configs` (id=1) 2026-08-21
+```sql
+UPDATE algo_configs SET fast_maker_execution=1, fast_limit_fill_seconds=15,
+  fast_limit_offset_pct=0.05, fast_maker_fee_pct=0.0008, fast_vol_target_pct=50,
+  fast_vol_target_window_seconds=3600, fast_vol_target_max_mult=2 WHERE id=1;
+```
 
-**B. Full-depth validation (data discovery):**
-- Binance 1s history ≥ 33 days (probed: 72h windows ending 10/20/30 days ago all fetched fine).
-- 7×72h walk-forward (21 days): 0/6 verdicts PASS — recorded in `/tmp/opencode/wf7b.log`.
-- Month-long sweep (`backtest:sweep --hours=504`) **not completed** — aborted twice. Fetcher is now resumable (checkpoint writes every 25 pages via `onProgress`); the 504h cache may exist partially at `backend/backtests/cache/BTC_1s_504h_v2.json` — rerun will resume.
-- Commands: hours cap raised 72→504, walk-forward windows cap 6→12, `BinanceKlineService.MAX_PAGES` 600→2000.
+## Month-long validation (2026-08-21, BTC 504h = 21 days, 1,814,400 samples, cache `backtests/cache/BTC_1s_504h_v2.json`)
+- `backtest:sweep --symbol=BTC --hours=504 --min-trades=10` → **baseline (live config) NEGATIVE: 30 trades, WR 23.3%, PF 0.79, net −0.68%, maxDD 1.13%**. Buy&hold +12.06%.
+- Only one positive row: momentum window 30s → PF 1.72, +0.71% (17 trades) — thin.
+- Verdict: **the strategy loses money over a full month**. It only wins in the recent trending window. Not deployable as-is; needs a regime model that stays OUT of chop, or it is not worth running.
+- Maker execution + vol targeting improve the trending window but do NOT rescue the month picture.
 
-## Next steps (on node v24)
-1. Verify: `node ace list` → 0 errors; `TEST_SUITE=unit node ace test` → 265 green.
-2. Finish `backtest:sweep --symbol=BTC --hours=504 --min-trades=10` (~5-8 min fetch, resumes from partial cache).
-3. Apply the calibration SQL above.
-4. Update AGENTS.md (maker/voltarget + month validation verdict).
-5. Commit: migration 18 files, strategy/engine/service/commands changes, ALGO_WIP.md.
-
-## Key evidence (for the next session)
-- Maker fee delta worth ~+1.2%/3d on ETH (0.26% taker → 0.08% maker on identical trades).
-- Month truth: strategy loses 5/6 windows; only recent uptrend positive. Vol targeting + maker execution don't rescue the general picture — they improve the trending window only.
-- `fast_vol_target_pct` units: percent annualized (50 = 50% ann); per-second vol × √31,536,000.
+## Next steps
+1. Decide: abandon the fast algo as primary strategy, or invest in regime classification (the −0.68% month is essentially all flat-market bleed: 5/6 windows ≈ 0, one window −1%).
+2. Re-run 504h sweep with `--config '{"fastMomentumWindowSeconds":30}'` to sanity-check the single positive row.
+3. If kept: tighten `fast_regime_*` gates (0 = off currently) and re-validate on the 504h window.
+4. Commits: everything except `packages/better-sqlite3`, `bunfig.toml`, `bunfig-preload.ts`, `bun.lock` is on master.

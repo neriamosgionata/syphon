@@ -1,0 +1,10 @@
+{
+  "name": "better-sqlite3",
+  "version": "13.0.3",
+  "description": "API-compatible better-sqlite3 shim backed by node:sqlite (works on Node >= 22.5 and Bun)",
+  "type": "commonjs",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "private": true,
+  "license": "MIT"
+}
