@@ -168,4 +168,30 @@ test.group('MomentumFeed', (group) => {
     assert.isNull(feed.volatilityPct('BTC', 60, 1000000 + 10000))
     assert.isNull(feed.volatilityPct('BTC', 0, 1000000 + 10000))
   })
+
+  test('emaSlopePct is positive on a rising series', ({ assert }) => {
+    const t0 = 1000000
+    for (let i = 0; i < 4000; i++) feed.push('BTC', 100 + i * 0.01, t0 + i * 1000)
+    const slope = feed.emaSlopePct('BTC', 300, 1800, t0 + 4000000)
+    assert.isNotNull(slope)
+    assert.isAbove(slope!, 0)
+  })
+
+  test('emaSlopePct is ~0 on a flat series and negative on a falling one', ({ assert }) => {
+    const t0 = 1000000
+    for (let i = 0; i < 4000; i++) feed.push('BTC', 100, t0 + i * 1000)
+    assert.closeTo(feed.emaSlopePct('BTC', 300, 1800, t0 + 4000000)!, 0, 1e-9)
+
+    feed.clear('BTC')
+    for (let i = 0; i < 4000; i++) feed.push('BTC', 100 - i * 0.01, t0 + i * 1000)
+    assert.isBelow(feed.emaSlopePct('BTC', 300, 1800, t0 + 4000000)!, 0)
+  })
+
+  test('emaSlopePct is null while the slope window has not filled', ({ assert }) => {
+    const t0 = 1000000
+    for (let i = 0; i < 2000; i++) feed.push('BTC', 100 + i * 0.01, t0 + i * 1000)
+    // boundary falls before the EMA can seed (300 samples) → null
+    assert.isNull(feed.emaSlopePct('BTC', 300, 1800, t0 + 2000000))
+    assert.isNull(feed.emaSlopePct('BTC', 0, 1800, t0 + 2000000))
+  })
 })

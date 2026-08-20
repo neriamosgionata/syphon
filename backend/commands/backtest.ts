@@ -2,6 +2,7 @@ import { BaseCommand, flags } from '@adonisjs/core/ace'
 import fs from 'node:fs'
 import path from 'node:path'
 import AlgoConfig from '#models/AlgoConfig'
+import { MomentumFeed } from '#services/MomentumFeed'
 import { fastStrategyFromConfig } from '#services/FastStrategy'
 import { BacktestEngine, BacktestResult, BacktestSample } from '#services/BacktestEngine'
 import { fetchBinanceKlines1s } from '#services/BinanceKlineService'
@@ -19,6 +20,9 @@ export default class Backtest extends BaseCommand {
   @flags.number({ description: 'Hours of 1s data to fetch (default 6, max 72)' })
   declare hours: number
 
+  @flags.number({ description: 'Fetch a window ending N hours ago (walk-forward; default 0 = now)' })
+  declare endHoursAgo: number
+
   @flags.number({ description: 'Decision loop interval in seconds (default: live fast_interval_seconds)' })
   declare interval: number
 
@@ -28,8 +32,14 @@ export default class Backtest extends BaseCommand {
   @flags.number({ description: 'Taker fee per side as fraction (default 0.0026)' })
   declare fee: number
 
+  @flags.string({ description: 'JSON overrides for the strategy config, e.g. {"fastStopLossPct":0.8,"fastEmaPeriod":0}' })
+  declare config: string
+
   @flags.boolean({ description: 'Skip the cache and refetch from Binance' })
   declare fresh: boolean
+
+  @flags.boolean({ description: 'Print momentum/RSI percentiles over the window and exit' })
+  declare debug: boolean
 
   async run() {
     const symbol = (this.symbol || 'BTC').toUpperCase()
@@ -38,27 +48,52 @@ export default class Backtest extends BaseCommand {
     const fee = this.fee ?? 0.0026
 
     const cfg = await AlgoConfig.getConfig()
+    const overrides: Record<string, any> = this.config ? JSON.parse(this.config) : {}
+    // Lucid stores model fields in $attributes — `{ ...cfg }` would lose
+    // them all. Pick the fields the engine needs explicitly.
+    const pick = (keys: string[]) => {
+      const out: Record<string, any> = {}
+      for (const k of keys) out[k] = (cfg as any)[k]
+      return out
+    }
+    const merged = {
+      ...pick([
+        'fastMomentumSeconds', 'fastMomentumThresholdPct', 'fastRsiLow', 'fastRsiHigh',
+        'fastStopLossPct', 'fastTakeProfitPct', 'fastExitReversalPct',
+        'fastTrailingStopPct', 'fastTrailingActivatePct', 'fastMaxHoldSeconds',
+        'fastEmaPeriod', 'fastVolatilityWindowSeconds', 'fastVolatilityMult',
+        'fastVolatilityFloorPct', 'fastVolatilityCeilingPct',
+        'fastTrendMode', 'fastTrendSlopePct', 'fastTrendSlopeWindowSeconds',
+        'fastCooldownSeconds', 'maxPositions', 'maxExposurePct', 'maxSinglePositionPct',
+      ]),
+      ...overrides,
+    }
     const interval = this.interval || cfg.fastIntervalSeconds || 10
 
-    const endTime = Date.now()
+    const endTime = Date.now() - (this.endHoursAgo || 0) * 3600_000
     const startTime = endTime - hours * 3600_000
-    const samples = await this.loadSamples(symbol, startTime, endTime, hours, !!this.fresh)
+    const samples = await this.loadSamples(symbol, startTime, endTime, hours, !!this.fresh, this.endHoursAgo || 0)
 
     if (samples.length < 2) {
       this.logger.error(`No data fetched for ${symbol}`)
       return
     }
 
+    if (this.debug) {
+      this.printSignalDebug(samples, [60, 300, 600, 1800])
+      return
+    }
+
     const result = new BacktestEngine().run(samples, {
       symbol,
-      strategy: fastStrategyFromConfig(cfg),
+      strategy: fastStrategyFromConfig(merged),
       loopIntervalSeconds: interval,
       portfolioUsd: portfolio,
       feePct: fee,
-      maxPositions: cfg.maxPositions,
-      maxExposurePct: cfg.maxExposurePct,
-      maxSinglePositionPct: cfg.maxSinglePositionPct,
-      cooldownSeconds: cfg.fastCooldownSeconds,
+      maxPositions: merged.maxPositions,
+      maxExposurePct: merged.maxExposurePct,
+      maxSinglePositionPct: merged.maxSinglePositionPct,
+      cooldownSeconds: merged.fastCooldownSeconds,
     })
 
     this.printReport(result)
@@ -69,10 +104,11 @@ export default class Backtest extends BaseCommand {
     startTime: number,
     endTime: number,
     hours: number,
-    fresh: boolean
+    fresh: boolean,
+    endHoursAgo: number
   ): Promise<BacktestSample[]> {
-    const cacheFile = path.join(CACHE_DIR, `${symbol}_1s_${hours}h.json`)
-
+    const windowTag = endHoursAgo > 0 ? `_ago${endHoursAgo}` : ''
+    const cacheFile = path.join(CACHE_DIR, `${symbol}_1s_${hours}h${windowTag}.json`)
     if (!fresh && fs.existsSync(cacheFile)) {
       try {
         const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf8')) as BacktestSample[]
@@ -94,6 +130,43 @@ export default class Backtest extends BaseCommand {
       this.logger.warn(`Failed to cache samples: ${(err as Error).message}`)
     }
     return samples
+  }
+
+  private printSignalDebug(samples: BacktestSample[], windows: number[]): void {
+    const feed = new MomentumFeed()
+    const startTime = samples[0].t
+    const endTime = samples[samples.length - 1].t
+    const step = 300_000 // sample every 5 minutes
+    const percentiles = [0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95]
+
+    const collect = (windowSeconds: number): { pcts: Record<number, number>; count: number } => {
+      const vals: number[] = []
+      feed.clearAll()
+      for (const s of samples) {
+        feed.push(this.symbol, s.p, s.t)
+        if (s.t - startTime >= windowSeconds * 1000 && (s.t - startTime) % step < 1000) {
+          const m = feed.momentumPct(this.symbol, windowSeconds, s.t)
+          if (m !== null) vals.push(m)
+        }
+      }
+      vals.sort((a, b) => a - b)
+      const pcts: Record<number, number> = {}
+      for (const p of percentiles) {
+        const idx = Math.min(vals.length - 1, Math.floor(p * vals.length))
+        pcts[p] = vals.length > 0 ? vals[idx] : NaN
+      }
+      return { pcts, count: vals.length }
+    }
+
+    this.logger.info(`--- Signal debug: ${this.symbol} ${((endTime - startTime) / 3600_000).toFixed(1)}h, ${samples.length} samples ---`)
+    this.logger.info(`Buy&hold: ${(((samples[samples.length - 1].p - samples[0].p) / samples[0].p) * 100).toFixed(2)}%`)
+    for (const w of windows) {
+      const { pcts, count } = collect(w)
+      const line = Object.entries(pcts)
+        .map(([p, v]) => `p${(Number(p) * 100).toFixed(0)}=${v.toFixed(3)}%`)
+        .join('  ')
+      this.logger.info(`momentum ${w}s (n=${count}): ${line}`)
+    }
   }
 
   private printReport(result: BacktestResult): void {

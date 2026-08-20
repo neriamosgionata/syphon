@@ -25,6 +25,7 @@ export default class AlgoController {
       'fastTrailingStopPct', 'fastTrailingActivatePct', 'fastMaxHoldSeconds',
       'fastEmaPeriod', 'fastVolatilityWindowSeconds', 'fastVolatilityMult',
       'fastVolatilityFloorPct', 'fastVolatilityCeilingPct',
+      'fastTrendMode', 'fastTrendSlopePct', 'fastTrendSlopeWindowSeconds',
     ]
 
     const numericRanges: Record<string, [number, number]> = {
@@ -55,6 +56,8 @@ export default class AlgoController {
       fastVolatilityMult: [0, 20],
       fastVolatilityFloorPct: [0, 5],
       fastVolatilityCeilingPct: [0, 10],
+      fastTrendSlopePct: [0, 5],
+      fastTrendSlopeWindowSeconds: [60, 7200],
     }
 
     const stringEnums: Record<string, string[]> = {
@@ -74,6 +77,8 @@ export default class AlgoController {
       if (field === 'dryRun') {
         value = value === true || value === 'true' || value === 1 || value === '1'
       } else if (field === 'fastEnabled') {
+        value = value === true || value === 'true' || value === 1 || value === '1'
+      } else if (field === 'fastTrendMode') {
         value = value === true || value === 'true' || value === 1 || value === '1'
       } else if (numericRanges[field]) {
         const num = Number(value)

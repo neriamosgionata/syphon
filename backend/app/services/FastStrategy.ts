@@ -47,6 +47,18 @@ export interface FastStrategyConfig {
   volatilityFloorPct: number
   /** Skip entries when per-minute volatility exceeds this. 0 = no ceiling. */
   volatilityCeilingPct: number
+  /**
+   * Trend-rider mode: entry = price above EMA + EMA slope >= trendSlopePct
+   * over trendSlopeWindowSeconds. Replaces the momentum+RSI gate entirely
+   * (steady trends pin RSI at 100 — rejecting them is why burst mode sleeps
+   * through rallies). `takeProfitPct` 0 = no take profit; ride the trailing
+   * stop instead.
+   */
+  trendMode: boolean
+  /** Min EMA slope % over trendSlopeWindowSeconds to enter. */
+  trendSlopePct: number
+  /** Slope measurement window in seconds. */
+  trendSlopeWindowSeconds: number
 }
 
 /**
@@ -70,6 +82,9 @@ export function fastStrategyFromConfig(cfg: {
   fastVolatilityMult?: number | null
   fastVolatilityFloorPct?: number | null
   fastVolatilityCeilingPct?: number | null
+  fastTrendMode?: boolean | number | null
+  fastTrendSlopePct?: number | null
+  fastTrendSlopeWindowSeconds?: number | null
 }): FastStrategyConfig {
   return {
     momentumSeconds: cfg.fastMomentumSeconds,
@@ -87,6 +102,9 @@ export function fastStrategyFromConfig(cfg: {
     volatilityMult: cfg.fastVolatilityMult ?? 0,
     volatilityFloorPct: cfg.fastVolatilityFloorPct ?? 0.05,
     volatilityCeilingPct: cfg.fastVolatilityCeilingPct ?? 0,
+    trendMode: cfg.fastTrendMode === true || cfg.fastTrendMode === 1 || cfg.fastTrendMode === '1',
+    trendSlopePct: cfg.fastTrendSlopePct ?? 0,
+    trendSlopeWindowSeconds: cfg.fastTrendSlopeWindowSeconds ?? 0,
   }
 }
 
@@ -134,6 +152,14 @@ export class FastStrategy {
     now: number,
     cfg: FastStrategyConfig
   ): EntrySignal {
+    // Trend-rider path: replaces the momentum+RSI gate. Only enters when
+    // the trend is ESTABLISHED (price above EMA + EMA rising), never on
+    // burst momentum — that's what makes it ride smooth rallies instead of
+    // chasing their peaks.
+    if (cfg.trendMode) {
+      return this.evaluateTrendEntry(feed, symbol, price, now, cfg)
+    }
+
     const score: MomentumScore = feed.score(symbol, {
       windowSeconds: cfg.momentumSeconds,
       thresholdPct: cfg.momentumThresholdPct,
@@ -204,6 +230,61 @@ export class FastStrategy {
     }
   }
 
+  private evaluateTrendEntry(
+    feed: MomentumFeed,
+    symbol: string,
+    price: number,
+    now: number,
+    cfg: FastStrategyConfig
+  ): EntrySignal {
+    if (cfg.emaPeriod <= 0) {
+      return {
+        shouldEnter: false,
+        reason: 'trend mode requires fastEmaPeriod > 0',
+        momentumPct: null, rsi: null, ema: null, volatilityPct: null,
+        stopLoss: null, takeProfit: null,
+      }
+    }
+
+    const ema = feed.ema(symbol, cfg.emaPeriod, now)
+    if (ema !== null && price <= ema) {
+      return {
+        shouldEnter: false,
+        reason: `price ${price.toFixed(2)} <= EMA-${cfg.emaPeriod} ${ema.toFixed(2)} (no uptrend)`,
+        momentumPct: null, rsi: null, ema, volatilityPct: null,
+        stopLoss: null, takeProfit: null,
+      }
+    }
+
+    // EMA slope gate — lenient while the slope window is still warming.
+    let slope: number | null = null
+    if (cfg.trendSlopeWindowSeconds > 0) {
+      slope = feed.emaSlopePct(symbol, cfg.emaPeriod, cfg.trendSlopeWindowSeconds, now)
+      if (slope !== null && slope < cfg.trendSlopePct) {
+        return {
+          shouldEnter: false,
+          reason: `EMA-${cfg.emaPeriod} slope ${slope.toFixed(3)}% < ${cfg.trendSlopePct}% over ${cfg.trendSlopeWindowSeconds}s`,
+          momentumPct: null, rsi: null, ema, volatilityPct: null,
+          stopLoss: null, takeProfit: null,
+        }
+      }
+    }
+
+    const levels = this.entryLevels(feed, symbol, price, now, cfg, null)
+    return {
+      shouldEnter: true,
+      reason: slope === null
+        ? `trend: price ${price.toFixed(2)} > EMA-${cfg.emaPeriod} (slope warming)`
+        : `trend: price ${price.toFixed(2)} > EMA-${cfg.emaPeriod}, slope ${slope.toFixed(3)}%`,
+      momentumPct: null,
+      rsi: null,
+      ema,
+      volatilityPct: null,
+      stopLoss: levels.stopLoss,
+      takeProfit: levels.takeProfit,
+    }
+  }
+
   /**
    * Entry stop/take-profit levels. Percentages are scaled up by volatility:
    * measured per-minute vol above the floor widens SL (and TP, preserving
@@ -230,14 +311,14 @@ export class FastStrategy {
         if (scaled > cfg.stopLossPct) {
           const factor = scaled / cfg.stopLossPct
           stopLossPct = scaled
-          takeProfitPct = cfg.takeProfitPct * factor
+          takeProfitPct = cfg.takeProfitPct > 0 ? cfg.takeProfitPct * factor : 0
         }
       }
     }
 
     return {
       stopLoss: price * (1 - stopLossPct / 100),
-      takeProfit: price * (1 + takeProfitPct / 100),
+      takeProfit: takeProfitPct > 0 ? price * (1 + takeProfitPct / 100) : 0,
       stopLossPct,
       takeProfitPct,
     }
@@ -287,10 +368,11 @@ export class FastStrategy {
     if (!isBuy && price >= pos.stopLoss) {
       return { shouldExit: true, reason: `stop-loss: ${price.toFixed(2)} >= ${pos.stopLoss.toFixed(2)}`, trailingStop, peakPrice: peak }
     }
-    if (isBuy && price >= pos.takeProfit) {
+    // takeProfit <= 0 = no take profit (trend mode rides the trailing stop).
+    if (pos.takeProfit > 0 && isBuy && price >= pos.takeProfit) {
       return { shouldExit: true, reason: `take-profit: ${price.toFixed(2)} >= ${pos.takeProfit.toFixed(2)}`, trailingStop, peakPrice: peak }
     }
-    if (!isBuy && price <= pos.takeProfit) {
+    if (pos.takeProfit > 0 && !isBuy && price <= pos.takeProfit) {
       return { shouldExit: true, reason: `take-profit: ${price.toFixed(2)} <= ${pos.takeProfit.toFixed(2)}`, trailingStop, peakPrice: peak }
     }
     if (trailingStop !== null && isBuy && price <= trailingStop) {

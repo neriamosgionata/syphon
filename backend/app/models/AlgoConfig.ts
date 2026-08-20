@@ -120,6 +120,16 @@ export default class AlgoConfig extends BaseModel {
   @column()
   declare fastVolatilityCeilingPct: number
 
+  // Trend-rider mode (migration 15)
+  @column()
+  declare fastTrendMode: boolean
+
+  @column()
+  declare fastTrendSlopePct: number
+
+  @column()
+  declare fastTrendSlopeWindowSeconds: number
+
   @column({
     prepare: (value: string[]) => JSON.stringify(value),
     consume: (value: string) => (typeof value === 'string' ? JSON.parse(value) : value),
@@ -187,6 +197,9 @@ export default class AlgoConfig extends BaseModel {
       fastVolatilityMult: 2.0,
       fastVolatilityFloorPct: 0.05,
       fastVolatilityCeilingPct: 0,
+      fastTrendMode: false,
+      fastTrendSlopePct: 0.05,
+      fastTrendSlopeWindowSeconds: 1800,
       lastRunAt: null,
       disabledReason: null,
     })

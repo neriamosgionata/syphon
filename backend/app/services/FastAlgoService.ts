@@ -215,6 +215,9 @@ export class FastAlgoService {
         volatilityMult: cfg.fastVolatilityMult,
         volatilityFloorPct: cfg.fastVolatilityFloorPct,
         volatilityCeilingPct: cfg.fastVolatilityCeilingPct,
+        trendMode: !!cfg.fastTrendMode,
+        trendSlopePct: cfg.fastTrendSlopePct,
+        trendSlopeWindowSeconds: cfg.fastTrendSlopeWindowSeconds,
       } : null,
       cooldowns: [...this.symbolCooldowns.entries()]
         .filter(([, at]) => Date.now() - at < (cfg?.fastCooldownSeconds ?? 180) * 1000)

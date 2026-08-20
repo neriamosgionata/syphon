@@ -70,7 +70,7 @@ export function binCloses(samples: MomentumSample[], binSeconds: number, now: nu
 
 export class MomentumFeed {
   private series = new Map<string, MomentumSample[]>()
-  private maxSamples = 2400 // 40 minutes at 1s sampling
+  private maxSamples = 14400 // 4 hours at 1s sampling (trend mode needs long windows)
 
   public push(symbol: string, price: number, t: number = Date.now()): void {
     if (!Number.isFinite(price) || price <= 0) return
@@ -166,6 +166,35 @@ export class MomentumFeed {
     const m = returns.reduce((s, v) => s + v, 0) / returns.length
     const variance = returns.reduce((s, v) => s + (v - m) ** 2, 0) / returns.length
     return Math.sqrt(variance) * 100
+  }
+
+  /**
+   * Percent change of the EMA over `windowSeconds` — the trend-direction
+   * filter for trend mode. EMA computed over the raw samples (same
+   * semantics as `ema()`); the "past" value is the EMA at the last sample
+   * at/behind the boundary. Null while the window hasn't filled.
+   */
+  public emaSlopePct(
+    symbol: string,
+    period: number,
+    windowSeconds: number,
+    now: number = Date.now()
+  ): number | null {
+    if (period <= 0 || windowSeconds <= 0) return null
+    const arr = this.series.get(symbol)
+    if (!arr || arr.length < period + 1) return null
+    const k = 2 / (period + 1)
+    let value = 0
+    for (let i = 0; i < period; i++) value += arr[i].p
+    value /= period
+    const boundary = now - windowSeconds * 1000
+    let past: number | null = null
+    for (let i = period; i < arr.length; i++) {
+      value = arr[i].p * k + value * (1 - k)
+      if (arr[i].t <= boundary) past = value
+    }
+    if (past === null || past <= 0) return null
+    return ((value - past) / past) * 100
   }
 
   /**

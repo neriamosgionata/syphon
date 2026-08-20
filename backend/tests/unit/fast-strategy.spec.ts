@@ -153,6 +153,77 @@ test.group('FastStrategy entry levels', () => {
   })
 })
 
+test.group('FastStrategy trend mode', () => {
+  function trendCfg(overrides: Partial<FastStrategyConfig> = {}): FastStrategyConfig {
+    return baseCfg({
+      trendMode: true,
+      emaPeriod: 300,
+      trendSlopePct: 0.05,
+      trendSlopeWindowSeconds: 1800,
+      takeProfitPct: 0, // ride the trailing stop, no fixed TP
+      ...overrides,
+    })
+  }
+
+  test('enters a steady rally the momentum gate would sleep through', ({ assert }) => {
+    // +0.001%/s ≈ +3.6%/h: 60s momentum = +0.06% < 0.15% threshold (burst
+    // gate blocks) and RSI pins at 100 — but trend mode must still enter.
+    const { feed, now } = feedFrom((i) => 100 * Math.pow(1.00001, i), 3600)
+    const price = feed.lastPrice('BTC')!
+    const momSignal = strategy.evaluateEntry(feed, 'BTC', price, now, baseCfg())
+    assert.isFalse(momSignal.shouldEnter)
+
+    const signal = strategy.evaluateEntry(feed, 'BTC', price, now, trendCfg())
+    assert.isTrue(signal.shouldEnter)
+    assert.match(signal.reason!, /trend:/)
+    assert.isAbove(signal.ema!, 100)
+  })
+
+  test('blocks when price is below the EMA (declining market)', ({ assert }) => {
+    // Linear decline: EMA lags above the price.
+    const { feed, now } = feedFrom((i) => 100 - 0.0005 * i, 3600)
+    const signal = strategy.evaluateEntry(feed, 'BTC', feed.lastPrice('BTC')!, now, trendCfg())
+    assert.isFalse(signal.shouldEnter)
+    assert.match(signal.reason!, /EMA|slope/)
+  })
+
+  test('blocks when the EMA slope is below the threshold', ({ assert }) => {
+    const { feed, now } = feedFrom(() => 100, 3600)
+    const signal = strategy.evaluateEntry(feed, 'BTC', 100, now, trendCfg())
+    assert.isFalse(signal.shouldEnter)
+    assert.match(signal.reason!, /EMA|slope/)
+  })
+
+  test('slope gate is lenient while the slope window is warming', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => 100 * Math.pow(1.00001, i), 2000)
+    const signal = strategy.evaluateEntry(feed, 'BTC', feed.lastPrice('BTC')!, now, trendCfg())
+    assert.isTrue(signal.shouldEnter)
+    assert.match(signal.reason!, /slope warming/)
+  })
+
+  test('trend mode requires an EMA period', ({ assert }) => {
+    const { feed, now } = feedFrom(() => 100, 500)
+    const signal = strategy.evaluateEntry(feed, 'BTC', 100, now, trendCfg({ emaPeriod: 0 }))
+    assert.isFalse(signal.shouldEnter)
+    assert.match(signal.reason!, /fastEmaPeriod/)
+  })
+
+  test('takeProfitPct 0 produces no take-profit level and never TP-exits', ({ assert }) => {
+    const { feed, now } = feedFrom(() => 100, 120)
+    const cfg = trendCfg()
+    const signal = strategy.evaluateEntry(feed, 'BTC', 100, now, cfg)
+    if (signal.shouldEnter) {
+      assert.equal(signal.takeProfit, 0)
+    }
+    const exit = strategy.evaluateExit(
+      feed, 'BTC', 101.2, now,
+      buyPosition({ entryPrice: 100, stopLoss: 95, takeProfit: 0 }),
+      baseCfg()
+    )
+    assert.isFalse(exit.shouldExit)
+  })
+})
+
 test.group('FastStrategy exit', () => {
   test('fixed stop loss', ({ assert }) => {
     const { feed, now } = feedFrom(() => 100, 120)
