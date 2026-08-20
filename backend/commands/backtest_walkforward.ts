@@ -44,8 +44,8 @@ export default class BacktestWalkforward extends BaseCommand {
 
   async run() {
     const symbol = (this.symbol || 'BTC').toUpperCase()
-    const hours = Math.min(Math.max(this.hours || 72, 6), 72)
-    const windowCount = Math.min(Math.max(this.windows || 3, 2), 6)
+    const hours = Math.min(Math.max(this.hours || 72, 6), 504)
+    const windowCount = Math.min(Math.max(this.windows || 3, 2), 12)
     const minTrades = this.minTrades || 10
     const minPf = this.minPf || 1.2
 
@@ -68,6 +68,9 @@ export default class BacktestWalkforward extends BaseCommand {
         'fastVolumeWindowSeconds', 'fastVolumeMinRatio',
         'fastCorrelatedExposurePct', 'fastRiskPerTradePct', 'fastMaxLossStreak',
         'fastLossStreakPauseSeconds', 'fastTrailingVolatilityMult', 'fastScaleOutPct',
+        'fastMakerExecution', 'fastLimitFillSeconds', 'fastLimitOffsetPct',
+        'fastMakerFeePct', 'fastVolTargetPct', 'fastVolTargetWindowSeconds',
+        'fastVolTargetMaxMult',
         'fastCooldownSeconds', 'maxPositions', 'maxExposurePct', 'maxSinglePositionPct',
         'fastIntervalSeconds',
       ]),
@@ -100,6 +103,12 @@ export default class BacktestWalkforward extends BaseCommand {
       riskPerTradePct: merged.fastRiskPerTradePct,
       maxLossStreak: merged.fastMaxLossStreak,
       lossStreakPauseSeconds: merged.fastLossStreakPauseSeconds,
+      limitFillSeconds: merged.fastMakerExecution ? merged.fastLimitFillSeconds : 0,
+      limitOffsetPct: merged.fastLimitOffsetPct,
+      makerFeePct: merged.fastMakerFeePct,
+      volTargetPct: merged.fastVolTargetPct,
+      volTargetWindowSeconds: merged.fastVolTargetWindowSeconds,
+      volTargetMaxMult: merged.fastVolTargetMaxMult,
     })
 
     this.logger.info('')
@@ -194,15 +203,36 @@ export default class BacktestWalkforward extends BaseCommand {
         this.logger.warn(`Cache unreadable, refetching: ${(err as Error).message}`)
       }
     }
-    this.logger.info(`Fetching ${hours}h of 1s klines for ${symbol} (window ${index})…`)
-    const samples = await fetchBinanceKlines1s(symbol, startTime, endTime)
+
+    let pre: BacktestSample[] = []
     try {
-      fs.mkdirSync(CACHE_DIR, { recursive: true })
-      fs.writeFileSync(cacheFile, JSON.stringify(samples))
-      this.logger.info(`Cached ${samples.length} samples to ${cacheFile}`)
+      if (fs.existsSync(cacheFile)) {
+        pre = JSON.parse(fs.readFileSync(cacheFile, 'utf8')) as BacktestSample[]
+        this.logger.info(`Resuming from ${pre.length} partial samples`)
+      }
+    } catch { /* ignore unreadable partial */ }
+    const cursorStart = pre.length > 0 ? pre[pre.length - 1].t + 1 : startTime
+    this.logger.info(`Fetching ${hours}h of 1s klines for ${symbol} (window ${index})…`)
+    fs.mkdirSync(CACHE_DIR, { recursive: true })
+    const samples = await fetchBinanceKlines1s(symbol, cursorStart, endTime, {
+      onProgress: (partial) => {
+        try {
+          const merged = [...pre, ...partial]
+            .sort((a, b) => a.t - b.t)
+            .filter((s, i, arr) => i === 0 || arr[i - 1].t !== s.t)
+          fs.writeFileSync(cacheFile, JSON.stringify(merged))
+        } catch { /* checkpoint write is best-effort */ }
+      },
+    })
+    const merged = [...pre, ...samples]
+      .sort((a, b) => a.t - b.t)
+      .filter((s, i, arr) => i === 0 || arr[i - 1].t !== s.t)
+    try {
+      fs.writeFileSync(cacheFile, JSON.stringify(merged))
+      this.logger.info(`Cached ${merged.length} samples to ${cacheFile}`)
     } catch (err) {
       this.logger.warn(`Failed to cache samples: ${(err as Error).message}`)
     }
-    return samples
+    return merged
   }
 }

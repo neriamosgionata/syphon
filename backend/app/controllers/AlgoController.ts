@@ -30,6 +30,9 @@ export default class AlgoController {
       'fastVolumeWindowSeconds', 'fastVolumeMinRatio',
       'fastCorrelatedExposurePct', 'fastRiskPerTradePct', 'fastMaxLossStreak',
       'fastLossStreakPauseSeconds', 'fastTrailingVolatilityMult', 'fastScaleOutPct',
+      'fastMakerExecution', 'fastLimitFillSeconds', 'fastLimitOffsetPct',
+      'fastMakerFeePct', 'fastVolTargetPct', 'fastVolTargetWindowSeconds',
+      'fastVolTargetMaxMult',
     ]
 
     const numericRanges: Record<string, [number, number]> = {
@@ -73,6 +76,12 @@ export default class AlgoController {
       fastLossStreakPauseSeconds: [0, 86400],
       fastTrailingVolatilityMult: [0, 20],
       fastScaleOutPct: [0, 1],
+      fastLimitFillSeconds: [1, 300],
+      fastLimitOffsetPct: [0, 1],
+      fastMakerFeePct: [0, 0.01],
+      fastVolTargetPct: [0, 200],
+      fastVolTargetWindowSeconds: [60, 14400],
+      fastVolTargetMaxMult: [0.1, 5],
     }
 
     const stringEnums: Record<string, string[]> = {
@@ -94,6 +103,8 @@ export default class AlgoController {
       } else if (field === 'fastEnabled') {
         value = value === true || value === 'true' || value === 1 || value === '1'
       } else if (field === 'fastTrendMode') {
+        value = value === true || value === 'true' || value === 1 || value === '1'
+      } else if (field === 'fastMakerExecution') {
         value = value === true || value === 'true' || value === 1 || value === '1'
       } else if (numericRanges[field]) {
         const num = Number(value)

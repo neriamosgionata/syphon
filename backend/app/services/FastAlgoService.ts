@@ -8,7 +8,7 @@ import KrakenFastEngine from '#services/KrakenFastEngine'
 import KrakenService from '#services/KrakenService'
 import KrakenWS from '#services/KrakenWebSocketService'
 import { MomentumFeed } from '#services/MomentumFeed'
-import { FastStrategy, FastStrategyConfig, fastStrategyFromConfig } from '#services/FastStrategy'
+import { FastStrategy, FastStrategyConfig, fastStrategyFromConfig, volatilityMultiplier } from '#services/FastStrategy'
 import MeilisearchService from '#services/MeilisearchService'
 import NotificationService from '#services/NotificationService'
 
@@ -231,6 +231,12 @@ export class FastAlgoService {
         lossStreakPauseSeconds: cfg.fastLossStreakPauseSeconds,
         trailingVolatilityMult: cfg.fastTrailingVolatilityMult,
         scaleOutPct: cfg.fastScaleOutPct,
+        makerExecution: !!cfg.fastMakerExecution,
+        limitFillSeconds: cfg.fastLimitFillSeconds,
+        limitOffsetPct: cfg.fastLimitOffsetPct,
+        volTargetPct: cfg.fastVolTargetPct,
+        volTargetWindowSeconds: cfg.fastVolTargetWindowSeconds,
+        volTargetMaxMult: cfg.fastVolTargetMaxMult,
         lossStreak: this.lossStreak,
       } : null,
       cooldowns: [...this.symbolCooldowns.entries()]
@@ -560,6 +566,14 @@ export class FastAlgoService {
       if (cfg.fastRiskPerTradePct > 0 && signal.stopLossPct && signal.stopLossPct > 0) {
         sizePct = Math.min(sizePct, cfg.fastRiskPerTradePct / signal.stopLossPct)
       }
+      // Volatility targeting (Moreira-Muir): scale exposure so the
+      // portfolio's realized vol matches the target.
+      if (cfg.fastVolTargetPct > 0 && cfg.fastVolTargetWindowSeconds > 0) {
+        const volPct = this.feed.volatilityPct(symbol, cfg.fastVolTargetWindowSeconds, now)
+        const mult = volatilityMultiplier(volPct, cfg.fastVolTargetPct, cfg.fastVolTargetMaxMult || 2)
+        // Scale but never exceed the per-position cap.
+        sizePct = Math.min(sizePct * mult, cfg.maxSinglePositionPct)
+      }
       if (sizePct <= 0) break
 
       const rawQty = (portfolioValue * sizePct) / price
@@ -583,37 +597,79 @@ export class FastAlgoService {
           positionSizePct: sizePct,
           stopLoss,
           takeProfit,
-          context: { price, rsi: signal.rsi, ema: signal.ema, volatilityPct: signal.volatilityPct, exitMode: 'fast', dryRun: true },
+          context: { price, rsi: signal.rsi, ema: signal.ema, volatilityPct: signal.volatilityPct, exitMode: 'fast', dryRun: true, makerExecution: !!cfg.fastMakerExecution },
         })
         continue
       }
 
-      const state = await this.engine.placeOrder({
-        symbol,
-        side: 'BUY',
-        quantity,
-        orderType: 'MARKET',
-      })
+      // Maker execution: post a limit, wait for the fill window, cancel and
+      // retry once at a fresh price. Miss = no position (acceptable for
+      // entries; exits stay MARKET for reliability).
+      let fillPrice = price
+      let entryState: any = null
+      if (cfg.fastMakerExecution) {
+        let limitPrice = price * (1 + (cfg.fastLimitOffsetPct || 0) / 100)
+        let filled = false
+        for (let attempt = 0; attempt <= 1; attempt++) {
+          entryState = await this.engine.placeOrder({
+            symbol,
+            side: 'BUY',
+            quantity,
+            orderType: 'LIMIT',
+            price: limitPrice,
+            timeInForce: 'GTC',
+          })
+          const fill = await this.waitForFill(entryState, cfg.fastLimitFillSeconds * 1000)
+          if (fill !== null) {
+            filled = true
+            fillPrice = fill
+            break
+          }
+          await this.engine.cancelOrder(entryState.clientOrderId)
+          const fresh = this.ws.getPrice(symbol)
+          if (fresh === null) break
+          limitPrice = fresh * (1 + (cfg.fastLimitOffsetPct || 0) / 100)
+        }
+        if (!filled) {
+          await this.logDecision(symbol, 0, 'skip', 'limit entry unfilled', {
+            side: 'BUY',
+            quantity,
+            positionSizePct: sizePct,
+            context: { price, limitPrice, exitMode: 'fast', makerExecution: true },
+          })
+          continue
+        }
+      } else {
+        entryState = await this.engine.placeOrder({
+          symbol,
+          side: 'BUY',
+          quantity,
+          orderType: 'MARKET',
+        })
+      }
 
-      const tradeId = await this.waitForTradeId(state)
+      const tradeId = await this.waitForTradeId(entryState)
       if (!tradeId) {
         logger.error('[FastAlgo] Entry for %s has no trade row, cancelling order %s',
-          symbol, state.clientOrderId)
-        if (state.externalOrderId) await this.engine.cancelOrder(state.clientOrderId)
+          symbol, entryState.clientOrderId)
+        if (entryState.externalOrderId) await this.engine.cancelOrder(entryState.clientOrderId)
         continue
       }
-      if (!state.tickerId) continue
+      if (!entryState.tickerId) continue
 
+      // SL/TP scale with the actual fill price (limit != decision price).
+      const fillRatio = fillPrice / price
       const algoPos = await AlgoPosition.create({
-        tickerId: state.tickerId,
+        tickerId: entryState.tickerId,
         symbol,
         side: 'BUY',
         quantity,
-        entryPrice: price,
-        currentPrice: price,
-        peakPrice: price,
-        stopLoss,
-        takeProfit,
+        entryPrice: fillPrice,
+        currentPrice: fillPrice,
+        peakPrice: fillPrice,
+        decisionPrice: price,
+        stopLoss: stopLoss * fillRatio,
+        takeProfit: takeProfit * fillRatio,
         entryScore: signal.momentumPct ?? 0,
         entryConviction: 0.5,
         entryRegime: 'momentum',
@@ -624,20 +680,22 @@ export class FastAlgoService {
         scaledOut: false,
         openedAt: DateTime.now(),
       })
-      logger.info('[FastAlgo] Entry BUY %s qty=%s trade=%d position=%d', symbol, quantity, tradeId, algoPos.id)
+      logger.info('[FastAlgo] Entry BUY %s qty=%s trade=%d position=%d%s',
+        symbol, quantity, tradeId, algoPos.id,
+        fillPrice !== price ? ` fill=${fillPrice} decision=${price}` : '')
 
-      await this.logDecision(symbol, state.tickerId, 'enter', reason, {
+      await this.logDecision(symbol, entryState.tickerId, 'enter', reason, {
         side: 'BUY',
         quantity,
         compositeScore: signal.momentumPct ?? null,
         conviction: 0.5,
         regime: 'momentum',
         positionSizePct: sizePct,
-        stopLoss,
-        takeProfit,
+        stopLoss: stopLoss * fillRatio,
+        takeProfit: takeProfit * fillRatio,
         tradeId,
         algoPositionId: algoPos.id,
-        context: { price, rsi: signal.rsi, ema: signal.ema, volatilityPct: signal.volatilityPct, exitMode: 'fast' },
+        context: { price, fillPrice, rsi: signal.rsi, ema: signal.ema, volatilityPct: signal.volatilityPct, exitMode: 'fast' },
       })
     }
   }
@@ -726,6 +784,22 @@ export class FastAlgoService {
       if (state.status === 'error') return null
     }
     return state.tradeId ?? null
+  }
+
+  /**
+   * Wait for a limit fill: returns the fill price once the engine reports
+   * filled/partially_filled, or null on timeout/error.
+   */
+  private async waitForFill(state: any, timeoutMs = 15000): Promise<number | null> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (['filled', 'partially_filled'].includes(state.status)) {
+        return state.fillPrice ?? null
+      }
+      if (state.status === 'cancelled' || state.status === 'error') return null
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    return null
   }
 
   private async getPortfolioValue(cfg: AlgoConfig): Promise<number> {

@@ -17,7 +17,7 @@
 // Pure: no DB, no network, no env. Unit-testable in isolation.
 
 import { MomentumFeed } from '#services/MomentumFeed'
-import { FastStrategy, FastStrategyConfig } from '#services/FastStrategy'
+import { FastStrategy, FastStrategyConfig, volatilityMultiplier } from '#services/FastStrategy'
 
 export interface BacktestSample {
   t: number
@@ -50,6 +50,18 @@ export interface BacktestConfig {
   maxLossStreak?: number
   /** Pause duration after hitting maxLossStreak. 0 = until the next win. */
   lossStreakPauseSeconds?: number
+  /** Maker execution: enter via limit, fill if touched within this window (s). 0 = MARKET. */
+  limitFillSeconds?: number
+  /** Buy limit placed this % above the decision price. */
+  limitOffsetPct?: number
+  /** Fee for limit fills (maker). Falls back to feePct. */
+  makerFeePct?: number
+  /** Volatility targeting: exposure scaled so realized vol matches target. 0 = off. */
+  volTargetPct?: number
+  /** Realized-vol window in 1s samples. */
+  volTargetWindowSeconds?: number
+  /** Max exposure multiplier from vol targeting. */
+  volTargetMaxMult?: number
 }
 
 export interface BacktestTrade {
@@ -316,23 +328,62 @@ export class BacktestEngine {
               if (cfg.riskPerTradePct && cfg.riskPerTradePct > 0 && signal.stopLossPct && signal.stopLossPct > 0) {
                 sizePct = Math.min(sizePct, cfg.riskPerTradePct / signal.stopLossPct)
               }
+              // Volatility targeting: scale exposure to a target vol level.
+              if (cfg.volTargetPct && cfg.volTargetPct > 0 && cfg.volTargetWindowSeconds && cfg.volTargetWindowSeconds > 0) {
+                const volPct = this.feed.volatilityPct(cfg.symbol, cfg.volTargetWindowSeconds, t)
+                const mult = volatilityMultiplier(volPct, cfg.volTargetPct, cfg.volTargetMaxMult || 2)
+                // Scale but never exceed the per-position cap.
+                sizePct = Math.min(sizePct * mult, cfg.maxSinglePositionPct)
+              }
               if (sizePct > 0) {
                 const rawQty = (equity * sizePct) / price
                 const quantity = Math.floor(rawQty * 1e6) / 1e6
                 if (quantity > 0) {
-                  cash -= quantity * price * (1 + cfg.feePct)
-                  positions.push({
-                    symbol: cfg.symbol,
-                    side: 'BUY',
-                    quantity,
-                    entryPrice: price,
-                    entryTime: t,
-                    stopLoss: signal.stopLoss,
-                    takeProfit: signal.takeProfit,
-                    peakPrice: price,
-                    scaledOut: false,
-                  })
-                  cooldowns.set(cfg.symbol, t)
+                  const makerMode = cfg.limitFillSeconds && cfg.limitFillSeconds > 0
+                  const entryFee = makerMode ? (cfg.makerFeePct ?? cfg.feePct) : cfg.feePct
+                  const limit = price * (1 + (cfg.limitOffsetPct ?? 0) / 100)
+
+                  if (makerMode) {
+                    // Maker entry: fill only if the market trades through the
+                    // limit within the fill window (realistic limit model).
+                    const fillEnd = t + cfg.limitFillSeconds * 1000
+                    let fillIdx = -1
+                    for (let j = feedIndex; j < series.length; j++) {
+                      if (series[j].t > fillEnd) break
+                      const low = series[j].l !== undefined ? series[j].l : series[j].p
+                      if (low <= limit) { fillIdx = j; break }
+                    }
+                    cooldowns.set(cfg.symbol, t)
+                    if (fillIdx === -1) continue // unfilled — miss, no position
+                    // SL/TP scale with the actual fill price (limit != decision).
+                    const fillRatio = limit / price
+                    cash -= quantity * limit * (1 + entryFee)
+                    positions.push({
+                      symbol: cfg.symbol,
+                      side: 'BUY',
+                      quantity,
+                      entryPrice: limit,
+                      entryTime: series[fillIdx].t,
+                      stopLoss: signal.stopLoss * fillRatio,
+                      takeProfit: signal.takeProfit > 0 ? signal.takeProfit * fillRatio : 0,
+                      peakPrice: limit,
+                      scaledOut: false,
+                    })
+                  } else {
+                    cash -= quantity * price * (1 + entryFee)
+                    positions.push({
+                      symbol: cfg.symbol,
+                      side: 'BUY',
+                      quantity,
+                      entryPrice: price,
+                      entryTime: t,
+                      stopLoss: signal.stopLoss,
+                      takeProfit: signal.takeProfit,
+                      peakPrice: price,
+                      scaledOut: false,
+                    })
+                    cooldowns.set(cfg.symbol, t)
+                  }
                 }
               }
             }

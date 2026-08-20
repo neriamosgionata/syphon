@@ -43,7 +43,7 @@ export default class Backtest extends BaseCommand {
 
   async run() {
     const symbol = (this.symbol || 'BTC').toUpperCase()
-    const hours = Math.min(Math.max(this.hours || 6, 1), 72)
+    const hours = Math.min(Math.max(this.hours || 6, 1), 504)
     const portfolio = this.portfolio || 10000
     const fee = this.fee ?? 0.0026
 
@@ -68,6 +68,9 @@ export default class Backtest extends BaseCommand {
         'fastVolumeWindowSeconds', 'fastVolumeMinRatio',
         'fastCorrelatedExposurePct', 'fastRiskPerTradePct', 'fastMaxLossStreak',
         'fastLossStreakPauseSeconds', 'fastTrailingVolatilityMult', 'fastScaleOutPct',
+        'fastMakerExecution', 'fastLimitFillSeconds', 'fastLimitOffsetPct',
+        'fastMakerFeePct', 'fastVolTargetPct', 'fastVolTargetWindowSeconds',
+        'fastVolTargetMaxMult',
         'fastCooldownSeconds', 'maxPositions', 'maxExposurePct', 'maxSinglePositionPct',
       ]),
       ...overrides,
@@ -102,6 +105,12 @@ export default class Backtest extends BaseCommand {
       riskPerTradePct: merged.fastRiskPerTradePct,
       maxLossStreak: merged.fastMaxLossStreak,
       lossStreakPauseSeconds: merged.fastLossStreakPauseSeconds,
+      limitFillSeconds: merged.fastMakerExecution ? merged.fastLimitFillSeconds : 0,
+      limitOffsetPct: merged.fastLimitOffsetPct,
+      makerFeePct: merged.fastMakerFeePct,
+      volTargetPct: merged.fastVolTargetPct,
+      volTargetWindowSeconds: merged.fastVolTargetWindowSeconds,
+      volTargetMaxMult: merged.fastVolTargetMaxMult,
     })
 
     this.printReport(result)
@@ -127,17 +136,39 @@ export default class Backtest extends BaseCommand {
       }
     }
 
-    this.logger.info(`Fetching ${hours}h of 1s klines for ${symbol} from Binance…`)
-    const samples = await fetchBinanceKlines1s(symbol, startTime, endTime)
-
+    // Resume from a partial cache (progressive checkpoints) if one exists.
+    let pre: BacktestSample[] = []
     try {
-      fs.mkdirSync(CACHE_DIR, { recursive: true })
-      fs.writeFileSync(cacheFile, JSON.stringify(samples))
-      this.logger.info(`Cached ${samples.length} samples to ${cacheFile}`)
+      if (fs.existsSync(cacheFile)) {
+        pre = JSON.parse(fs.readFileSync(cacheFile, 'utf8')) as BacktestSample[]
+        this.logger.info(`Resuming from ${pre.length} partial samples`)
+      }
+    } catch { /* ignore unreadable partial */ }
+    const cursorStart = pre.length > 0 ? pre[pre.length - 1].t + 1 : startTime
+
+    this.logger.info(`Fetching ${hours}h of 1s klines for ${symbol} from Binance…`)
+    fs.mkdirSync(CACHE_DIR, { recursive: true })
+    const samples = await fetchBinanceKlines1s(symbol, cursorStart, endTime, {
+      onProgress: (partial) => {
+        try {
+          const merged = [...pre, ...partial]
+            .sort((a, b) => a.t - b.t)
+            .filter((s, i, arr) => i === 0 || arr[i - 1].t !== s.t)
+          fs.writeFileSync(cacheFile, JSON.stringify(merged))
+        } catch { /* checkpoint write is best-effort */ }
+      },
+    })
+
+    const merged = [...pre, ...samples]
+      .sort((a, b) => a.t - b.t)
+      .filter((s, i, arr) => i === 0 || arr[i - 1].t !== s.t)
+    try {
+      fs.writeFileSync(cacheFile, JSON.stringify(merged))
+      this.logger.info(`Cached ${merged.length} samples to ${cacheFile}`)
     } catch (err) {
       this.logger.warn(`Failed to cache samples: ${(err as Error).message}`)
     }
-    return samples
+    return merged
   }
 
   private printSignalDebug(samples: BacktestSample[], windows: number[]): void {

@@ -267,6 +267,59 @@ test.group('BacktestEngine', () => {
     assert.isAbove(partials[0].pnl, 0)
   })
 
+  test('maker limit entries fill at the limit price when touched', ({ assert }) => {
+    // Rise to the entry decision, then a pullback bar whose low dips below
+    // the limit (decision price + 0.05%) → fill at the limit price.
+    const samples: BacktestSample[] = []
+    const t0 = T0
+    for (let i = 0; i <= 60; i++) {
+      samples.push({ t: t0 + i * 1000, p: 100 + i * (1 / 60), h: 100 + i * (1 / 60), l: 100 + i * (1 / 60) })
+    }
+    const decisionPrice = 100 + 60 * (1 / 60) // 101
+    const limit = decisionPrice * 1.0005 // offset 0.05%
+    samples.push({ t: t0 + 61_000, p: 100.55, h: 100.60, l: 100.50 }) // low < limit → fill
+    for (let i = 62; i <= 300; i++) {
+      samples.push({ t: t0 + i * 1000, p: 100.6 + (i - 61) * 0.01, h: 100.6 + (i - 61) * 0.01, l: 100.6 + (i - 61) * 0.01 })
+    }
+
+    const result = engine.run(samples, baseCfg({ limitFillSeconds: 10, limitOffsetPct: 0.05, makerFeePct: 0.0008 }))
+    assert.isAbove(result.metrics.totalTrades, 0)
+    assert.closeTo(result.trades[0].entryPrice, limit, 1e-6)
+  })
+
+  test('maker limit entries are skipped when the limit is never touched', ({ assert }) => {
+    // Monotonic rise with the limit at the decision price (offset 0): the
+    // next bar always closes above → never fills → no trades.
+    const samples = series((i) => 100 * Math.pow(1.0001, i), 3600)
+    const result = engine.run(samples, baseCfg({ limitFillSeconds: 10, limitOffsetPct: 0, makerFeePct: 0.0008 }))
+    assert.equal(result.metrics.totalTrades, 0)
+  })
+
+  test('volatility targeting shrinks positions in high-vol regimes', ({ assert }) => {
+    // Same drift after a 700s warmup (so the 600s vol window is filled at
+    // the first entry), different per-second wiggle: the high-vol series
+    // must size down against the vol target.
+    const warm = 700
+    const withWarmup = (fn: (i: number) => number) =>
+      Array.from({ length: 3600 }, (_, i) => ({
+        t: T0 + i * 1000,
+        p: i < warm ? 100 : fn(i - warm),
+      }))
+    const smooth = withWarmup((i) => 100 * Math.pow(1.0001, i))
+    const wild = withWarmup((i) => 100 * Math.pow(1.0001, i) + (i % 2 === 0 ? 0.5 : -0.5))
+
+    const base = engine.run(smooth, baseCfg())
+    const targetCfg = baseCfg({ volTargetPct: 50, volTargetWindowSeconds: 600, volTargetMaxMult: 2 })
+    const smoothTarget = engine.run(smooth, targetCfg)
+    const wildTarget = engine.run(wild, targetCfg)
+
+    // Smooth series: realized vol below target → multiplier ≥ 1, capped by
+    // maxSingle → same size as base.
+    assert.closeTo(smoothTarget.trades[0].quantity, base.trades[0].quantity, 1e-6)
+    // Wild series: vol above target → floor 0.2 multiplier → much smaller.
+    assert.isBelow(wildTarget.trades[0].quantity, base.trades[0].quantity * 0.5)
+  })
+
   test('unsorted input is sorted by time', ({ assert }) => {
     const samples = series((i) => 100 * Math.pow(1.0001, i), 3600)
     samples.reverse()

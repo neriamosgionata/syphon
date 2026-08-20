@@ -146,6 +146,28 @@ export default class AlgoConfig extends BaseModel {
   @column()
   declare fastVolumeMinRatio: number
 
+  // Execution + vol targeting (migration 18)
+  @column()
+  declare fastMakerExecution: boolean
+
+  @column()
+  declare fastLimitFillSeconds: number
+
+  @column()
+  declare fastLimitOffsetPct: number
+
+  @column()
+  declare fastMakerFeePct: number
+
+  @column()
+  declare fastVolTargetPct: number
+
+  @column()
+  declare fastVolTargetWindowSeconds: number
+
+  @column()
+  declare fastVolTargetMaxMult: number
+
   // Safety rails + exit quality (migration 17)
   @column()
   declare fastCorrelatedExposurePct: number
@@ -240,6 +262,13 @@ export default class AlgoConfig extends BaseModel {
       fastRegimeSlopeMinPct: 0.02,
       fastVolumeWindowSeconds: 300,
       fastVolumeMinRatio: 0,
+      fastMakerExecution: false,
+      fastLimitFillSeconds: 15,
+      fastLimitOffsetPct: 0.05,
+      fastMakerFeePct: 0.0008,
+      fastVolTargetPct: 0,
+      fastVolTargetWindowSeconds: 3600,
+      fastVolTargetMaxMult: 2,
       fastCorrelatedExposurePct: 0,
       fastRiskPerTradePct: 0,
       fastMaxLossStreak: 0,

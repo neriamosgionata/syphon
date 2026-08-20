@@ -1,6 +1,6 @@
 import { test } from '@japa/runner'
 import { MomentumFeed } from '../../app/services/MomentumFeed.js'
-import { FastStrategy, FastStrategyConfig } from '../../app/services/FastStrategy.js'
+import { FastStrategy, FastStrategyConfig, volatilityMultiplier } from '../../app/services/FastStrategy.js'
 
 // FastStrategy is the pure deterministic entry/exit core shared by the
 // live loop and the backtester. All tests are synthetic price series fed
@@ -311,6 +311,29 @@ test.group('FastStrategy volume gate', () => {
     feed.push('BTC', 106, t0 + 300_000, 10)
     const signal = strategy.evaluateEntry(feed, 'BTC', 106, t0 + 300_000, volCfg({ volumeMinRatio: 0 }))
     assert.isTrue(signal.shouldEnter)
+  })
+})
+
+test.group('volatilityMultiplier', () => {
+  test('scales exposure to hit the target annualized vol', ({ assert }) => {
+    // 0.0068%/s ≈ 38% annualized → target 50% → mult ≈ 1.31
+    const m = volatilityMultiplier(0.0068, 50, 2)
+    assert.isAbove(m, 1)
+    assert.isBelow(m, 2)
+    assert.closeTo(m, 50 / (0.0068 * Math.sqrt(31_536_000)), 0.05)
+  })
+
+  test('de-risks when realized vol exceeds the target', ({ assert }) => {
+    const m = volatilityMultiplier(0.03, 50, 2) // 168% annualized → mult 0.3
+    assert.isAbove(m, 0.2)
+    assert.isBelow(m, 1)
+  })
+
+  test('clamps to maxMult and the 0.2 floor', ({ assert }) => {
+    assert.equal(volatilityMultiplier(0.0001, 50, 2), 2)
+    assert.equal(volatilityMultiplier(1.0, 50, 2), 0.2)
+    assert.equal(volatilityMultiplier(null, 50, 2), 1)
+    assert.equal(volatilityMultiplier(0.0068, 0, 2), 1) // target off
   })
 })
 

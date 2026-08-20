@@ -23,6 +23,26 @@
 
 import { MomentumFeed, MomentumScore } from '#services/MomentumFeed'
 
+const SECONDS_PER_YEAR = 31_536_000
+
+/**
+ * Volatility-targeting multiplier (Moreira-Muir): scale exposure so the
+ * portfolio's realized vol matches a target. `perSampleVolPct` is the
+ * per-sample (≈1s) stddev of returns in % — annualized with sqrt(seconds
+ * per year). Clamped to [0.2, maxMult]. 1.0 when vol is unmeasurable.
+ */
+export function volatilityMultiplier(
+  perSampleVolPct: number | null,
+  targetAnnPct: number,
+  maxMult = 2
+): number {
+  if (perSampleVolPct === null || perSampleVolPct <= 0 || !Number.isFinite(perSampleVolPct)) return 1
+  if (targetAnnPct <= 0) return 1
+  const annualized = perSampleVolPct * Math.sqrt(SECONDS_PER_YEAR)
+  if (annualized <= 0 || !Number.isFinite(annualized)) return 1
+  return Math.min(Math.max(maxMult, 0), Math.max(0.2, targetAnnPct / annualized))
+}
+
 export interface FastStrategyConfig {
   momentumSeconds: number
   momentumThresholdPct: number
@@ -92,8 +112,7 @@ export interface FastStrategyConfig {
  * Structural mapping from a persisted config row (AlgoConfig or a plain
  * object with the same field names) onto the strategy config. A value of
  * 0/null disables the corresponding control.
- */
-export function fastStrategyFromConfig(cfg: {
+ */export function fastStrategyFromConfig(cfg: {
   fastMomentumSeconds: number
   fastMomentumThresholdPct: number
   fastRsiLow: number

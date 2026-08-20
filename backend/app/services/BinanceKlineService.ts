@@ -12,7 +12,7 @@ import type { BacktestSample } from '#services/BacktestEngine'
 
 const BINANCE_REST = 'https://api.binance.com'
 const MAX_KLINES_PER_REQUEST = 1000
-const MAX_PAGES = 600 // ~6.9 days of 1s data
+const MAX_PAGES = 2000 // ~23 days of 1s data
 const PAGE_DELAY_MS = 150
 
 interface BinanceKline {
@@ -48,7 +48,8 @@ export function parseBinanceKline(raw: any[]): BinanceKline {
 export async function fetchBinanceKlines1s(
   symbol: string,
   startTime: number,
-  endTime: number
+  endTime: number,
+  opts?: { onProgress?: (samples: BacktestSample[]) => void }
 ): Promise<BacktestSample[]> {
   const pair = toBinancePair(symbol)
   const samples: BacktestSample[] = []
@@ -113,8 +114,11 @@ export async function fetchBinanceKlines1s(
     if (next <= cursor) break // no progress → guard against infinite loop
     cursor = next + 1000
     pages++
+    // Checkpoint ~every 25 pages so an interrupted fetch can resume.
+    if (pages % 25 === 0) opts?.onProgress?.(samples)
     if (pages < MAX_PAGES) await new Promise((r) => setTimeout(r, PAGE_DELAY_MS))
   }
+  opts?.onProgress?.(samples)
 
   samples.sort((a, b) => a.t - b.t)
   logger.info('[Binance] Fetched %d 1s samples for %s (%d pages)', samples.length, pair, pages)
