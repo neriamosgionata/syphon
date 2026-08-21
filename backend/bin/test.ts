@@ -12,6 +12,20 @@
 
 process.env.NODE_ENV = 'test'
 
+// Point the SQLite connection at a throwaway file BEFORE the app boots:
+// @adonisjs/env captures process.env values at app init, so this must run
+// before the Ignitor is created. Keeps unit tests (which exercise lucid
+// models) off the dev database (syphon.sqlite3 holds live trading rows).
+// Note: bun auto-loads backend/.env into process.env at startup, so the
+// value must be OVERWRITTEN unconditionally.
+// tests/bootstrap.ts runs the migrations on the throwaway DB and removes it
+// during teardown.
+if (process.env.TEST_SUITE === 'unit') {
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  process.env.SQLITE_FILENAME = join(tmpdir(), `syphon-unit-${process.pid}.sqlite`)
+}
+
 import 'reflect-metadata'
 import { Ignitor, prettyPrintError } from '@adonisjs/core'
 import { configure, processCLIArgs, run } from '@japa/runner'

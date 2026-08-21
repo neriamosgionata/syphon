@@ -4,6 +4,26 @@ import app from '@adonisjs/core/services/app'
 import type { Config } from '@japa/runner/types'
 import { pluginAdonisJS } from '@japa/plugin-adonisjs'
 import testUtils from '@adonisjs/core/services/test_utils'
+import os from 'node:os'
+import path from 'node:path'
+import fs from 'node:fs'
+
+/**
+ * Unit specs exercise lucid models (FastAlgoService, AlgoConfig, ...).
+ * Point the SQLite connection at a throwaway file so the dev database
+ * (syphon.sqlite3, live trading rows!) is never touched. Must happen at
+ * module scope: config/database.ts reads SQLITE_FILENAME during app boot,
+ * which occurs after this module is imported (bin/test.ts imports it in the
+ * ace configure phase). process.env wins over .env in @adonisjs/env.
+ */
+const UNIT_DB_FILE =
+  process.env.TEST_SUITE === 'unit'
+    ? path.join(os.tmpdir(), `syphon-unit-${process.pid}.sqlite`)
+    : null
+
+if (UNIT_DB_FILE) {
+  process.env.SQLITE_FILENAME = UNIT_DB_FILE
+}
 
 export const plugins: Config['plugins'] = [
   assert(),
@@ -12,7 +32,16 @@ export const plugins: Config['plugins'] = [
 ]
 
 export const runnerHooks: Required<Pick<Config, 'setup' | 'teardown'>> = {
-  setup: [],
+  setup: [
+    ...(UNIT_DB_FILE
+      ? [
+          async () => {
+            // Fresh schema for the throwaway DB (runs all migrations).
+            await testUtils.db().migrate()
+          },
+        ]
+      : []),
+  ],
   teardown: [
     // Close every open handle (BullMQ queues/workers, Redis, DB, Kraken WS)
     // so the process can exit once the suite finishes. Without this, the
@@ -34,6 +63,16 @@ export const runnerHooks: Required<Pick<Config, 'setup' | 'teardown'>> = {
         KrakenWS.disconnect()
       } catch {
         /* noop */
+      }
+      // Remove the throwaway DB (plus WAL/SHM sidecars).
+      if (UNIT_DB_FILE) {
+        for (const suffix of ['', '-wal', '-shm']) {
+          try {
+            fs.rmSync(`${UNIT_DB_FILE}${suffix}`, { force: true })
+          } catch {
+            /* noop */
+          }
+        }
       }
     },
   ],
