@@ -32,6 +32,9 @@ export default class Backtest extends BaseCommand {
   @flags.number({ description: 'Taker fee per side as fraction (default 0.0026)' })
   declare fee: number
 
+  @flags.number({ description: 'Slippage in bps per side (default: config fast_slippage_bps)' })
+  declare slippageBps: number
+
   @flags.string({ description: 'JSON overrides for the strategy config, e.g. {"fastStopLossPct":0.8,"fastEmaPeriod":0}' })
   declare config: string
 
@@ -71,6 +74,10 @@ export default class Backtest extends BaseCommand {
         'fastMakerExecution', 'fastLimitFillSeconds', 'fastLimitOffsetPct',
         'fastMakerFeePct', 'fastVolTargetPct', 'fastVolTargetWindowSeconds',
         'fastVolTargetMaxMult',
+        'fastHarVolForecast', 'fastCusumWindowSeconds', 'fastCusumExitPct',
+        'fastJumpSlackPct', 'fastChoppinessPeriod', 'fastChoppinessMax',
+        'fastTradeStartUtc', 'fastTradeEndUtc', 'fastConvictionSizing',
+        'fastSlippageBps',
         'fastCooldownSeconds', 'maxPositions', 'maxExposurePct', 'maxSinglePositionPct',
       ]),
       ...overrides,
@@ -111,6 +118,7 @@ export default class Backtest extends BaseCommand {
       volTargetPct: merged.fastVolTargetPct,
       volTargetWindowSeconds: merged.fastVolTargetWindowSeconds,
       volTargetMaxMult: merged.fastVolTargetMaxMult,
+      slippageBps: this.slippageBps ?? merged.fastSlippageBps,
     })
 
     this.printReport(result)

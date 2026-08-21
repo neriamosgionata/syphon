@@ -84,6 +84,40 @@ interface RankedRow {
   maxDrawdownPct: number
   avgHold: number | null
   vsBaselinePp: number
+  /** Annualized Sharpe from the equity curve (decision-period returns). */
+  sharpe: number
+  /** Return / max drawdown. */
+  calmar: number
+  /** Mean/std × sqrt(n) — the honest signal-to-noise stat. */
+  tstat: number
+}
+
+/**
+ * Risk-adjusted stats from the equity curve. PF alone is a biased ranking
+ * objective (multiple testing — see López de Prado's deflated Sharpe): the
+ * t-stat is the signal-to-noise estimate, Sharpe annualizes it, Calmar
+ * penalizes drawdown.
+ */
+export function riskMetrics(result: BacktestResult): { sharpe: number; calmar: number; tstat: number } {
+  const curve = result.equityCurve
+  const rets: number[] = []
+  for (let i = 1; i < curve.length; i++) {
+    const prev = curve[i - 1].value
+    if (prev > 0) rets.push(curve[i].value / prev - 1)
+  }
+  const n = rets.length
+  if (n < 2) return { sharpe: 0, calmar: 0, tstat: 0 }
+  const m = rets.reduce((s, v) => s + v, 0) / n
+  const variance = rets.reduce((s, v) => s + (v - m) ** 2, 0) / (n - 1)
+  const sd = Math.sqrt(variance)
+  const dtSec = curve.length > 1 ? Math.max(1, (curve[1].t - curve[0].t) / 1000) : 10
+  const periodsPerYear = 31_536_000 / dtSec
+  const sharpe = sd > 0 ? (m / sd) * Math.sqrt(periodsPerYear) : 0
+  const tstat = sd > 0 ? (m / sd) * Math.sqrt(n) : 0
+  const calmar = result.metrics.maxDrawdownPct > 0
+    ? result.strategyReturnPct / result.metrics.maxDrawdownPct
+    : result.strategyReturnPct
+  return { sharpe, calmar, tstat }
 }
 
 export default class BacktestSweep extends BaseCommand {
@@ -109,11 +143,15 @@ export default class BacktestSweep extends BaseCommand {
   @flags.string({ description: 'JSON overrides applied to the baseline before sweeping, e.g. {"fastRsiHigh":1000}' })
   declare config: string
 
+  @flags.string({ description: 'Ranking objective: pf | sharpe | calmar | tstat (default pf)' })
+  declare rankBy: string
+
   async run() {
     const symbol = (this.symbol || 'BTC').toUpperCase()
     const hours = Math.min(Math.max(this.hours || 72, 6), 504)
     const minTrades = this.minTrades || 10
     const top = this.top || 20
+    const rankBy = ['pf', 'sharpe', 'calmar', 'tstat'].includes(this.rankBy || '') ? this.rankBy! : 'pf'
 
     const cfg = await AlgoConfig.getConfig()
     const overrides: Record<string, any> = this.config ? JSON.parse(this.config) : {}
@@ -137,6 +175,10 @@ export default class BacktestSweep extends BaseCommand {
         'fastMakerExecution', 'fastLimitFillSeconds', 'fastLimitOffsetPct',
         'fastMakerFeePct', 'fastVolTargetPct', 'fastVolTargetWindowSeconds',
         'fastVolTargetMaxMult',
+        'fastHarVolForecast', 'fastCusumWindowSeconds', 'fastCusumExitPct',
+        'fastJumpSlackPct', 'fastChoppinessPeriod', 'fastChoppinessMax',
+        'fastTradeStartUtc', 'fastTradeEndUtc', 'fastConvictionSizing',
+        'fastSlippageBps',
         'fastCooldownSeconds', 'maxPositions', 'maxExposurePct', 'maxSinglePositionPct',
       ]),
       ...overrides,
@@ -164,6 +206,7 @@ export default class BacktestSweep extends BaseCommand {
       volTargetPct: cfg.fastVolTargetPct,
       volTargetWindowSeconds: cfg.fastVolTargetWindowSeconds,
       volTargetMaxMult: cfg.fastVolTargetMaxMult,
+      slippageBps: cfg.fastSlippageBps,
     }
 
     const engine = new BacktestEngine()
@@ -173,6 +216,7 @@ export default class BacktestSweep extends BaseCommand {
     for (const row of buildSweepList(base)) {
       const result = engine.run(samples, { ...baseConfig, strategy: row.strategy, ...row.patch })
       if (result.metrics.totalTrades < minTrades) continue
+      const risk = riskMetrics(result)
       rows.push({
         label: row.label,
         trades: result.metrics.totalTrades,
@@ -182,17 +226,28 @@ export default class BacktestSweep extends BaseCommand {
         maxDrawdownPct: result.metrics.maxDrawdownPct,
         avgHold: result.metrics.avgHoldingSeconds,
         vsBaselinePp: result.strategyReturnPct - baseline.strategyReturnPct,
+        sharpe: risk.sharpe,
+        calmar: risk.calmar,
+        tstat: risk.tstat,
       })
     }
 
     rows.sort((a, b) => {
-      const pf = (b.profitFactor === Infinity ? 999 : b.profitFactor) - (a.profitFactor === Infinity ? 999 : a.profitFactor)
-      if (pf !== 0) return pf
+      if (rankBy === 'sharpe') {
+        if (b.sharpe !== a.sharpe) return b.sharpe - a.sharpe
+      } else if (rankBy === 'calmar') {
+        if (b.calmar !== a.calmar) return b.calmar - a.calmar
+      } else if (rankBy === 'tstat') {
+        if (b.tstat !== a.tstat) return b.tstat - a.tstat
+      } else {
+        const pf = (b.profitFactor === Infinity ? 999 : b.profitFactor) - (a.profitFactor === Infinity ? 999 : a.profitFactor)
+        if (pf !== 0) return pf
+      }
       if (b.winRate !== a.winRate) return b.winRate - a.winRate
       return a.maxDrawdownPct - b.maxDrawdownPct
     })
 
-    this.printReport(symbol, hours, samples.length, baseline, rows, top)
+    this.printReport(symbol, hours, samples.length, baseline, rows, top, rankBy)
   }
 
   private async loadSamples(symbol: string, hours: number, fresh: boolean): Promise<BacktestSample[]> {
@@ -247,26 +302,28 @@ export default class BacktestSweep extends BaseCommand {
     sampleCount: number,
     baseline: BacktestResult,
     rows: RankedRow[],
-    top: number
+    top: number,
+    rankBy: string
   ): void {
     const bm = baseline.metrics
+    const bRisk = riskMetrics(baseline)
     this.logger.info('')
-    this.logger.info(`=== Sweep: ${symbol} ${hours}h (${sampleCount} samples) ===`)
-    this.logger.info(`Baseline: ${bm.totalTrades} trades, WR ${(bm.winRate * 100).toFixed(1)}%, PF ${bm.profitFactor === Infinity ? 'inf' : bm.profitFactor.toFixed(2)}, net ${baseline.strategyReturnPct >= 0 ? '+' : ''}${baseline.strategyReturnPct.toFixed(2)}%, maxDD ${bm.maxDrawdownPct.toFixed(2)}%, avgHold ${bm.avgHoldingSeconds?.toFixed(0) ?? '-'}s`)
+    this.logger.info(`=== Sweep: ${symbol} ${hours}h (${sampleCount} samples), rank by ${rankBy} ===`)
+    this.logger.info(`Baseline: ${bm.totalTrades} trades, WR ${(bm.winRate * 100).toFixed(1)}%, PF ${bm.profitFactor === Infinity ? 'inf' : bm.profitFactor.toFixed(2)}, net ${baseline.strategyReturnPct >= 0 ? '+' : ''}${baseline.strategyReturnPct.toFixed(2)}%, maxDD ${bm.maxDrawdownPct.toFixed(2)}%, Sharpe ${bRisk.sharpe.toFixed(2)}, t-stat ${bRisk.tstat.toFixed(2)}, avgHold ${bm.avgHoldingSeconds?.toFixed(0) ?? '-'}s`)
     this.logger.info(`Buy&hold: ${baseline.buyHoldReturnPct >= 0 ? '+' : ''}${baseline.buyHoldReturnPct.toFixed(2)}%`)
     this.logger.info('')
-    this.logger.info(`${'#'.padStart(3)} ${'Parameter'.padEnd(22)} ${'Trades'.padStart(6)} ${'WR'.padStart(6)} ${'PF'.padStart(6)} ${'Net%'.padStart(8)} ${'maxDD'.padStart(7)} ${'avgHold'.padStart(7)} ${'vsBase'.padStart(8)}`)
+    this.logger.info(`${'#'.padStart(3)} ${'Parameter'.padEnd(22)} ${'Trades'.padStart(6)} ${'WR'.padStart(6)} ${'PF'.padStart(6)} ${'Net%'.padStart(8)} ${'maxDD'.padStart(7)} ${'Sharpe'.padStart(7)} ${'tstat'.padStart(7)} ${'vsBase'.padStart(8)}`)
     rows.slice(0, top).forEach((r, i) => {
       const net = `${r.netPct >= 0 ? '+' : ''}${r.netPct.toFixed(2)}`.padStart(8)
       const vs = `${r.vsBaselinePp >= 0 ? '+' : ''}${r.vsBaselinePp.toFixed(2)}`.padStart(8)
       this.logger.info(
         `${String(i + 1).padStart(3)} ${r.label.padEnd(22)} ${String(r.trades).padStart(6)} ` +
         `${(r.winRate * 100).toFixed(1).padStart(6)} ${(r.profitFactor === Infinity ? 'inf' : r.profitFactor.toFixed(2)).padStart(6)} ` +
-        `${net} ${r.maxDrawdownPct.toFixed(2).padStart(7)} ${(r.avgHold === null ? '-' : r.avgHold.toFixed(0)).padStart(7)} ` +
+        `${net} ${r.maxDrawdownPct.toFixed(2).padStart(7)} ${r.sharpe.toFixed(2).padStart(7)} ${r.tstat.toFixed(2).padStart(7)} ` +
         `${vs}`
       )
     })
     this.logger.info('')
-    this.logger.info('Rows below min-trades threshold were dropped; PF inf = no losing trades.')
+    this.logger.info('Rows below min-trades threshold were dropped; PF inf = no losing trades. Sharpe/tstat from the equity curve; t-stat is the honest multiple-testing-aware signal measure.')
   }
 }

@@ -71,6 +71,10 @@ export default class BacktestWalkforward extends BaseCommand {
         'fastMakerExecution', 'fastLimitFillSeconds', 'fastLimitOffsetPct',
         'fastMakerFeePct', 'fastVolTargetPct', 'fastVolTargetWindowSeconds',
         'fastVolTargetMaxMult',
+        'fastHarVolForecast', 'fastCusumWindowSeconds', 'fastCusumExitPct',
+        'fastJumpSlackPct', 'fastChoppinessPeriod', 'fastChoppinessMax',
+        'fastTradeStartUtc', 'fastTradeEndUtc', 'fastConvictionSizing',
+        'fastSlippageBps',
         'fastCooldownSeconds', 'maxPositions', 'maxExposurePct', 'maxSinglePositionPct',
         'fastIntervalSeconds',
       ]),
@@ -109,6 +113,7 @@ export default class BacktestWalkforward extends BaseCommand {
       volTargetPct: merged.fastVolTargetPct,
       volTargetWindowSeconds: merged.fastVolTargetWindowSeconds,
       volTargetMaxMult: merged.fastVolTargetMaxMult,
+      slippageBps: merged.fastSlippageBps,
     })
 
     this.logger.info('')

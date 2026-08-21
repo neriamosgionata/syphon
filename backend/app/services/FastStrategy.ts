@@ -7,19 +7,23 @@
 // behaviour are the same code path.
 //
 // Entry gates (all must pass):
-//   1. momentum + RSI   (MomentumFeed.score — momentum over window,
+//   1. session gate      (optional UTC hour window — time-of-day seasonality)
+//   2. choppiness gate   (optional CHOP <= max — skip ranging markets)
+//   3. momentum + RSI   (MomentumFeed.score — momentum over window,
 //                        Wilder RSI-7 within [rsiLow, rsiHigh])
-//   2. EMA trend filter (price above EMA when emaPeriod > 0; lenient
+//   4. EMA trend filter (price above EMA when emaPeriod > 0; lenient
 //                        while the EMA is still warming up)
-//   3. volatility ceiling (skip when measured vol exceeds the ceiling)
+//   5. volatility ceiling (skip when measured vol exceeds the ceiling)
 //
 // Exit rules (checked in priority order):
 //   1. stop loss        (fixed price level; ratcheted by trailing stop)
 //   2. take profit      (fixed price level)
 //   3. trailing stop    (arms once profit >= activatePct, trails
 //                        trailingStopPct behind the peak)
-//   4. max hold         (force-close after maxHoldSeconds)
-//   5. momentum reversal (momentum drops to/below exitReversalPct)
+//   4. CUSUM trend break (cumulative price-vs-EMA deviation exits early
+//                        on regime change — changepoint-detection analog)
+//   5. max hold         (force-close after maxHoldSeconds)
+//   6. momentum reversal (momentum drops to/below exitReversalPct)
 
 import { MomentumFeed, MomentumScore } from '#services/MomentumFeed'
 
@@ -106,6 +110,32 @@ export interface FastStrategyConfig {
    * (0-1). 0 = off. The caller executes the partial close.
    */
   scaleOutPct: number
+  /**
+   * Use the HAR multi-horizon volatility forecast (Corsi 2009; BTC-validated
+   * by Hu, Härdle & Kuo 2021) instead of a single-window stddev for SL/TP
+   * scaling, trailing width, the vol ceiling and vol targeting.
+   */
+  harVolForecast: boolean
+  /** CUSUM trend-break exit: window (s) over which price-vs-EMA deviations accumulate. 0 = off. */
+  cusumWindowSeconds: number
+  /** Exit a BUY (SELL) when cumulative (ema-price)/ema over the window >= (+/-) this %. 0 = off. */
+  cusumExitPct: number
+  /**
+   * Jump-aware SL slack: when a single-sample down move >= this % occurred in
+   * the vol window, widen the stop by (1 + slack/100). Negative jumps raise
+   * near-term risk (Hu et al. 2021). 0 = off.
+   */
+  jumpSlackPct: number
+  /** Choppiness gate: entry requires CHOP <= choppinessMax over this many samples. 0 = off. */
+  choppinessPeriod: number
+  /** Max close-based Choppiness Index to allow an entry (low = trending). 0 = off. */
+  choppinessMax: number
+  /** UTC hour when trading may start (0-23). Gate off when endUtc <= startUtc. */
+  tradeStartUtc: number
+  /** UTC hour when trading stops (1-24; 24 = end of day). Gate off when endUtc <= startUtc. */
+  tradeEndUtc: number
+  /** Scale position size with signal strength (slope/momentum vs threshold). 0 = off. */
+  convictionSizing: boolean
 }
 
 /**
@@ -138,6 +168,15 @@ export interface FastStrategyConfig {
   fastVolumeMinRatio?: number | null
   fastTrailingVolatilityMult?: number | null
   fastScaleOutPct?: number | null
+  fastHarVolForecast?: boolean | number | null
+  fastCusumWindowSeconds?: number | null
+  fastCusumExitPct?: number | null
+  fastJumpSlackPct?: number | null
+  fastChoppinessPeriod?: number | null
+  fastChoppinessMax?: number | null
+  fastTradeStartUtc?: number | null
+  fastTradeEndUtc?: number | null
+  fastConvictionSizing?: boolean | number | null
 }): FastStrategyConfig {
   return {
     momentumSeconds: cfg.fastMomentumSeconds,
@@ -165,6 +204,15 @@ export interface FastStrategyConfig {
     volumeMinRatio: cfg.fastVolumeMinRatio ?? 0,
     trailingVolatilityMult: cfg.fastTrailingVolatilityMult ?? 0,
     scaleOutPct: cfg.fastScaleOutPct ?? 0,
+    harVolForecast: cfg.fastHarVolForecast === true || cfg.fastHarVolForecast === 1,
+    cusumWindowSeconds: cfg.fastCusumWindowSeconds ?? 0,
+    cusumExitPct: cfg.fastCusumExitPct ?? 0,
+    jumpSlackPct: cfg.fastJumpSlackPct ?? 0,
+    choppinessPeriod: cfg.fastChoppinessPeriod ?? 0,
+    choppinessMax: cfg.fastChoppinessMax ?? 0,
+    tradeStartUtc: cfg.fastTradeStartUtc ?? 0,
+    tradeEndUtc: cfg.fastTradeEndUtc ?? 24,
+    convictionSizing: cfg.fastConvictionSizing === true || cfg.fastConvictionSizing === 1,
   }
 }
 
@@ -175,6 +223,8 @@ export interface EntrySignal {
   rsi: number | null
   ema: number | null
   volatilityPct: number | null
+  /** Trend-mode EMA slope % over the slope window (null in burst mode / warming). */
+  slopePct: number | null
   /** Entry price levels (computed only when shouldEnter is true). */
   stopLoss: number | null
   takeProfit: number | null
@@ -218,6 +268,32 @@ export class FastStrategy {
     now: number,
     cfg: FastStrategyConfig
   ): EntrySignal {
+    // Session gate: only trade during the configured UTC hours (crypto
+    // vol/volume follow time-of-day seasonality — Saef et al. 2021,
+    // Petukhina et al. 2020). Off when endUtc <= startUtc.
+    const utcHour = new Date(now).getUTCHours()
+    if (cfg.tradeEndUtc > cfg.tradeStartUtc && (utcHour < cfg.tradeStartUtc || utcHour >= cfg.tradeEndUtc)) {
+      return {
+        shouldEnter: false,
+        reason: `session: UTC ${utcHour}h outside [${cfg.tradeStartUtc}, ${cfg.tradeEndUtc})`,
+        momentumPct: null, rsi: null, ema: null, volatilityPct: null, slopePct: null,
+        stopLoss: null, takeProfit: null, stopLossPct: null,
+      }
+    }
+
+    // Choppiness gate: stand aside while the market is ranging (high CHOP).
+    if (cfg.choppinessPeriod > 0 && cfg.choppinessMax > 0) {
+      const chop = feed.choppiness(symbol, cfg.choppinessPeriod, now)
+      if (chop !== null && chop > cfg.choppinessMax) {
+        return {
+          shouldEnter: false,
+          reason: `choppiness ${chop.toFixed(1)} > ${cfg.choppinessMax} (ranging)`,
+          momentumPct: null, rsi: null, ema: null, volatilityPct: null, slopePct: null,
+          stopLoss: null, takeProfit: null, stopLossPct: null,
+        }
+      }
+    }
+
     // Volume confirmation — skipped live (no per-tick volume) and while the
     // median window is warming up.
     if (cfg.volumeMinRatio > 0 && cfg.volumeWindowSamples > 0) {
@@ -227,7 +303,7 @@ export class FastStrategy {
         return {
           shouldEnter: false,
           reason: `volume ${last.toFixed(0)} < median ${median.toFixed(0)} × ${cfg.volumeMinRatio}`,
-          momentumPct: null, rsi: null, ema: null, volatilityPct: null,
+          momentumPct: null, rsi: null, ema: null, volatilityPct: null, slopePct: null,
           stopLoss: null, takeProfit: null, stopLossPct: null,
         }
       }
@@ -257,6 +333,7 @@ export class FastStrategy {
         rsi: score.rsi,
         ema: null,
         volatilityPct: null,
+        slopePct: null,
         stopLoss: null,
         takeProfit: null,
       }
@@ -283,7 +360,7 @@ export class FastStrategy {
     // Volatility ceiling — skip wild markets.
     let volatilityPct: number | null = null
     if (cfg.volatilityCeilingPct > 0 && cfg.volatilityWindowSamples > 0) {
-      volatilityPct = feed.volatilityPct(symbol, cfg.volatilityWindowSamples, now)
+      volatilityPct = this.measuredVolPct(feed, symbol, cfg.volatilityWindowSamples, now, cfg)
       if (volatilityPct !== null && volatilityPct > cfg.volatilityCeilingPct) {
         return {
           shouldEnter: false,
@@ -292,6 +369,7 @@ export class FastStrategy {
           rsi: score.rsi,
           ema,
           volatilityPct,
+          slopePct: null,
           stopLoss: null,
           takeProfit: null,
         }
@@ -306,6 +384,7 @@ export class FastStrategy {
       rsi: score.rsi,
       ema,
       volatilityPct,
+      slopePct: null,
       stopLoss: levels.stopLoss,
       takeProfit: levels.takeProfit,
       stopLossPct: levels.stopLossPct,
@@ -323,8 +402,8 @@ export class FastStrategy {
       return {
         shouldEnter: false,
         reason: 'trend mode requires fastEmaPeriod > 0',
-        momentumPct: null, rsi: null, ema: null, volatilityPct: null,
-        stopLoss: null, takeProfit: null, stopLossPct: null,
+        momentumPct: null, rsi: null, ema: null, volatilityPct: null, slopePct: null,
+          stopLoss: null, takeProfit: null, stopLossPct: null,
       }
     }
 
@@ -337,7 +416,7 @@ export class FastStrategy {
         return {
           shouldEnter: false,
           reason: `regime: EMA-${cfg.regimeEmaPeriod} slope ${regimeSlope.toFixed(3)}% < ${cfg.regimeSlopeMinPct}% over ${cfg.regimeSlopeWindowSeconds}s (not trending)`,
-          momentumPct: null, rsi: null, ema: null, volatilityPct: null,
+          momentumPct: null, rsi: null, ema: null, volatilityPct: null, slopePct: null,
           stopLoss: null, takeProfit: null, stopLossPct: null,
         }
       }
@@ -348,7 +427,7 @@ export class FastStrategy {
       return {
         shouldEnter: false,
         reason: `price ${price.toFixed(2)} <= EMA-${cfg.emaPeriod} ${ema.toFixed(2)} (no uptrend)`,
-        momentumPct: null, rsi: null, ema, volatilityPct: null,
+        momentumPct: null, rsi: null, ema, volatilityPct: null, slopePct: null,
         stopLoss: null, takeProfit: null, stopLossPct: null,
       }
     }
@@ -361,7 +440,7 @@ export class FastStrategy {
         return {
           shouldEnter: false,
           reason: `EMA-${cfg.emaPeriod} slope ${slope.toFixed(3)}% < ${cfg.trendSlopePct}% over ${cfg.trendSlopeWindowSeconds}s`,
-          momentumPct: null, rsi: null, ema, volatilityPct: null,
+          momentumPct: null, rsi: null, ema, volatilityPct: null, slopePct: null,
           stopLoss: null, takeProfit: null, stopLossPct: null,
         }
       }
@@ -377,6 +456,7 @@ export class FastStrategy {
       rsi: null,
       ema,
       volatilityPct: null,
+      slopePct: slope,
       stopLoss: levels.stopLoss,
       takeProfit: levels.takeProfit,
       stopLossPct: levels.stopLossPct,
@@ -384,10 +464,30 @@ export class FastStrategy {
   }
 
   /**
+   * Volatility estimate honoring the HAR-forecast flag: single-window stddev
+   * by default, multi-horizon HAR blend (Corsi 2009) when enabled. HAR
+   * windows scale as 1×/10×/60× the configured window (1m/10m/1h at the
+   * default 60s window).
+   */
+  private measuredVolPct(
+    feed: MomentumFeed,
+    symbol: string,
+    windowSamples: number,
+    now: number,
+    cfg: FastStrategyConfig
+  ): number | null {
+    if (cfg.harVolForecast && windowSamples > 0) {
+      return feed.harVolatilityPct(symbol, windowSamples, windowSamples * 10, windowSamples * 60, now)
+    }
+    return feed.volatilityPct(symbol, windowSamples, now)
+  }
+
+  /**
    * Entry stop/take-profit levels. Percentages are scaled up by volatility:
    * measured per-minute vol above the floor widens SL (and TP, preserving
    * the configured risk/reward ratio) so trades aren't stopped out by noise
-   * in choppy conditions.
+   * in choppy conditions. A recent downward jump widens the SL further
+   * (negative jumps raise near-term risk — Hu, Härdle & Kuo 2021).
    */
   public entryLevels(
     feed: MomentumFeed,
@@ -401,7 +501,7 @@ export class FastStrategy {
     let takeProfitPct = cfg.takeProfitPct
 
     if (cfg.volatilityWindowSamples > 0 && cfg.volatilityMult > 0 && price > 0) {
-      const volPct = measuredVolPct ?? feed.volatilityPct(symbol, cfg.volatilityWindowSamples, now)
+      const volPct = measuredVolPct ?? this.measuredVolPct(feed, symbol, cfg.volatilityWindowSamples, now, cfg)
       if (volPct !== null) {
         // Per-sample (≈per-second) vol → per-minute, floored.
         const minuteVol = Math.max(volPct * Math.sqrt(60), cfg.volatilityFloorPct)
@@ -411,6 +511,15 @@ export class FastStrategy {
           stopLossPct = scaled
           takeProfitPct = cfg.takeProfitPct > 0 ? cfg.takeProfitPct * factor : 0
         }
+      }
+    }
+
+    // Jump-aware SL: a recent single-sample down move >= jumpSlackPct means
+    // elevated near-term downside — widen the stop (TP unchanged).
+    if (cfg.jumpSlackPct > 0 && cfg.volatilityWindowSamples > 0) {
+      const worst = feed.maxDownMovePct(symbol, cfg.volatilityWindowSamples, now)
+      if (worst !== null && worst <= -cfg.jumpSlackPct) {
+        stopLossPct *= 1 + cfg.jumpSlackPct / 100
       }
     }
 
@@ -454,7 +563,7 @@ export class FastStrategy {
       if (gainPct >= cfg.trailingActivatePct) {
         let trailPct = cfg.trailingStopPct
         if (cfg.trailingVolatilityMult > 0 && cfg.volatilityWindowSamples > 0) {
-          const volPct = feed.volatilityPct(symbol, cfg.volatilityWindowSamples, now)
+          const volPct = this.measuredVolPct(feed, symbol, cfg.volatilityWindowSamples, now, cfg)
           if (volPct !== null) {
             const minuteVol = Math.max(volPct * Math.sqrt(60), cfg.volatilityFloorPct)
             trailPct = Math.max(trailPct, cfg.trailingVolatilityMult * minuteVol)
@@ -495,6 +604,20 @@ export class FastStrategy {
       return { shouldExit: true, reason: `trailing stop: ${price.toFixed(2)} >= ${trailingStop.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false }
     }
 
+    // CUSUM trend-break exit (changepoint-detection analog — Wood, Roberts &
+    // Zohren 2021): when price spent the window below (above) its EMA, the
+    // trend bet is wrong — cut it instead of waiting for a slow EMA cross.
+    if (cfg.cusumExitPct > 0 && cfg.cusumWindowSeconds > 0 && cfg.emaPeriod > 0) {
+      const cusum = feed.cusumDeviationPct(symbol, cfg.emaPeriod, cfg.cusumWindowSeconds, now)
+      if (cusum !== null && (isBuy ? cusum >= cfg.cusumExitPct : cusum <= -cfg.cusumExitPct)) {
+        return {
+          shouldExit: true,
+          reason: `cusum trend break: ${cusum.toFixed(3)}% ${isBuy ? '>=' : '<='} ${isBuy ? '+' : '-'}${cfg.cusumExitPct}%`,
+          trailingStop, peakPrice: peak, scaleOut: false,
+        }
+      }
+    }
+
     if (cfg.maxHoldSeconds > 0 && now - pos.openedAt > cfg.maxHoldSeconds * 1000) {
       const held = Math.round((now - pos.openedAt) / 1000)
       return { shouldExit: true, reason: `max hold: ${held}s >= ${cfg.maxHoldSeconds}s`, trailingStop, peakPrice: peak, scaleOut: false }
@@ -506,6 +629,21 @@ export class FastStrategy {
     }
 
     return { shouldExit: false, reason: null, trailingStop, peakPrice: peak, scaleOut }
+  }
+
+  /**
+   * Conviction-scaled position sizing (deterministic mirror of the learned
+   * position-sizing layer of Deep Momentum Networks, Lim et al. 2019): the
+   * stronger the signal vs its threshold, the larger the size — bounded
+   * [0.5, 1.5]. Returns 1 when disabled or the signal is unmeasurable.
+   */
+  public convictionMultiplier(signal: EntrySignal, cfg: FastStrategyConfig): number {
+    if (!cfg.convictionSizing) return 1
+    const base = cfg.trendMode ? signal.slopePct : signal.momentumPct
+    const threshold = cfg.trendMode ? cfg.trendSlopePct : cfg.momentumThresholdPct
+    if (base === null || threshold <= 0) return 1
+    const ratio = base / threshold
+    return Math.min(1.5, Math.max(0.5, 0.5 + 0.5 * (ratio / 2)))
   }
 }
 

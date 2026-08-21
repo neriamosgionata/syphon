@@ -56,6 +56,11 @@ export class FastAlgoService {
   private lastTickError: string | null = null
   private lastEngineStartAttempt = 0
 
+  // Re-entrancy guard: a tick can outlive the loop interval (maker entries
+  // wait for fills up to 15-30s on a 10s loop). Without this, overlapping
+  // ticks could double-enter positions.
+  private tickInFlight = false
+
   private configCache: { data: AlgoConfig | null; at: number } = { data: null, at: 0 }
   private portfolioCache: { value: number; at: number } = { value: 0, at: 0 }
   private symbolCooldowns = new Map<string, number>()
@@ -237,6 +242,16 @@ export class FastAlgoService {
         volTargetPct: cfg.fastVolTargetPct,
         volTargetWindowSeconds: cfg.fastVolTargetWindowSeconds,
         volTargetMaxMult: cfg.fastVolTargetMaxMult,
+        slippageBps: cfg.fastSlippageBps,
+        harVolForecast: !!cfg.fastHarVolForecast,
+        cusumWindowSeconds: cfg.fastCusumWindowSeconds,
+        cusumExitPct: cfg.fastCusumExitPct,
+        jumpSlackPct: cfg.fastJumpSlackPct,
+        choppinessPeriod: cfg.fastChoppinessPeriod,
+        choppinessMax: cfg.fastChoppinessMax,
+        tradeStartUtc: cfg.fastTradeStartUtc,
+        tradeEndUtc: cfg.fastTradeEndUtc,
+        convictionSizing: !!cfg.fastConvictionSizing,
         lossStreak: this.lossStreak,
       } : null,
       cooldowns: [...this.symbolCooldowns.entries()]
@@ -257,6 +272,11 @@ export class FastAlgoService {
   // ── Main decision loop ──────────────────────────────────────
 
   private async tick(): Promise<void> {
+    if (this.tickInFlight) {
+      logger.warn('[FastAlgo] Skipping tick — previous tick still in flight')
+      return
+    }
+    this.tickInFlight = true
     try {
       const cfg = await this.getConfig()
       this.rescheduleIfNeeded(cfg.fastIntervalSeconds)
@@ -303,6 +323,8 @@ export class FastAlgoService {
     } catch (err) {
       this.lastTickError = (err as Error).message
       logger.error('[FastAlgo] Tick failed: %s', this.lastTickError)
+    } finally {
+      this.tickInFlight = false
     }
   }
 
@@ -569,11 +591,16 @@ export class FastAlgoService {
       // Volatility targeting (Moreira-Muir): scale exposure so the
       // portfolio's realized vol matches the target.
       if (cfg.fastVolTargetPct > 0 && cfg.fastVolTargetWindowSeconds > 0) {
-        const volPct = this.feed.volatilityPct(symbol, cfg.fastVolTargetWindowSeconds, now)
+        const volPct = cfg.fastHarVolForecast
+          ? this.feed.harVolatilityPct(symbol, cfg.fastVolTargetWindowSeconds, cfg.fastVolTargetWindowSeconds * 10, cfg.fastVolTargetWindowSeconds * 60, now)
+          : this.feed.volatilityPct(symbol, cfg.fastVolTargetWindowSeconds, now)
         const mult = volatilityMultiplier(volPct, cfg.fastVolTargetPct, cfg.fastVolTargetMaxMult || 2)
         // Scale but never exceed the per-position cap.
         sizePct = Math.min(sizePct * mult, cfg.maxSinglePositionPct)
       }
+      // Conviction sizing: stronger signal, bigger size (bounded).
+      const conviction = this.strategy.convictionMultiplier(signal, this.toStrategyConfig(cfg))
+      sizePct = Math.min(sizePct * conviction, cfg.maxSinglePositionPct)
       if (sizePct <= 0) break
 
       const rawQty = (portfolioValue * sizePct) / price

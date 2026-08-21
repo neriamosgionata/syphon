@@ -31,6 +31,15 @@ function baseCfg(overrides: Partial<BacktestConfig> = {}): BacktestConfig {
       volatilityMult: 0,
       volatilityFloorPct: 0.05,
       volatilityCeilingPct: 0,
+      harVolForecast: false,
+      cusumWindowSeconds: 0,
+      cusumExitPct: 0,
+      jumpSlackPct: 0,
+      choppinessPeriod: 0,
+      choppinessMax: 0,
+      tradeStartUtc: 0,
+      tradeEndUtc: 24,
+      convictionSizing: false,
     },
     loopIntervalSeconds: 10,
     portfolioUsd: 10_000,
@@ -325,5 +334,45 @@ test.group('BacktestEngine', () => {
     samples.reverse()
     const result = engine.run(samples, baseCfg())
     assert.equal(result.trades[0].entryTime, T0 + 60_000) // first decision with a warm 60s feed
+  })
+
+  test('slippage erodes returns and shows in fill prices', ({ assert }) => {
+    const samples = series((i) => 100 * Math.pow(1.0001, i), 4 * 3600)
+    const clean = engine.run(samples, baseCfg())
+    const slipped = engine.run(samples, baseCfg({ slippageBps: 50 }))
+
+    assert.isAbove(clean.metrics.totalTrades, 1)
+    assert.equal(slipped.metrics.totalTrades, clean.metrics.totalTrades)
+    assert.isBelow(slipped.endUsd, clean.endUsd)
+    // Market entries fill at price × (1 + 50bps).
+    assert.isAbove(slipped.trades[0].entryPrice, clean.trades[0].entryPrice)
+  })
+
+  test('slippage applies to stop-loss fills (worse fills on exits)', ({ assert }) => {
+    // Rally, then a crash into the stop: SL sells at stop × (1 - slip).
+    // TP is set far away so the rally cannot take profit before the crash.
+    const samples: BacktestSample[] = []
+    for (let i = 0; i < 600; i++) samples.push({ t: T0 + i * 1000, p: 100 + (110 - 100) * (i / 600) })
+    for (let i = 600; i < 1200; i++) samples.push({ t: T0 + i * 1000, p: 110 - (110 - 95) * ((i - 600) / 600) })
+    const strategy = { ...baseCfg().strategy, takeProfitPct: 50, exitReversalPct: -50 } // SL-only exits
+
+    const clean = engine.run(samples, baseCfg({ strategy }))
+    const slipped = engine.run(samples, baseCfg({ strategy, slippageBps: 100 }))
+    const slTrade = slipped.trades.find((t) => (t.exitReason || '').includes('stop-loss'))
+    assert.isNotNull(slTrade)
+    // SL level ≈ 0.5% below entry; slipped exit fills lower still.
+    assert.isBelow(slTrade!.exitPrice, slTrade!.entryPrice * 0.995 * (1 - 0.01))
+  })
+
+  test('conviction sizing runs without changing capped-size behavior', ({ assert }) => {
+    const samples = series((i) => 100 * Math.pow(1.0001, i), 4 * 3600)
+    const cfg = baseCfg()
+    cfg.strategy.convictionSizing = true
+    const result = engine.run(samples, cfg)
+    assert.isAbove(result.metrics.totalTrades, 1)
+    assert.isAbove(result.endUsd, result.startUsd)
+    // Strong momentum → multiplier hits the 1.5 cap, but maxSinglePositionPct
+    // (0.2) still binds → identical sizing to the baseline.
+    assert.closeTo(result.trades[0].quantity, engine.run(samples, baseCfg()).trades[0].quantity, 1e-6)
   })
 })

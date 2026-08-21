@@ -62,6 +62,13 @@ export interface BacktestConfig {
   volTargetWindowSeconds?: number
   /** Max exposure multiplier from vol targeting. */
   volTargetMaxMult?: number
+  /**
+   * Execution slippage in basis points per side — market fills get
+   * price × (1 ± slip), stop/target fills fill at the level minus slippage.
+   * The taker fee is charged on the slipped fill price. 0 = no slippage
+   * (optimistic — the honest baseline is > 0).
+   */
+  slippageBps?: number
 }
 
 export interface BacktestTrade {
@@ -150,6 +157,13 @@ export class BacktestEngine {
     let feedIndex = 0
     let prevFeedIndex = 0
 
+    // Slippage: market fills at price × (1 ± bps/10000). Buys slip up,
+    // sells slip down — always against the trader.
+    const slip = (cfg.slippageBps || 0) / 10000
+    const buyFill = (p: number): number => p * (1 + slip)
+    const sellFill = (p: number): number => p * (1 - slip)
+    const fillFor = (p: number, isBuy: boolean): number => (isBuy ? buyFill(p) : sellFill(p))
+
     const equityAt = (price: number): number =>
       cash + positions.reduce((s, p) => s + p.quantity * price, 0)
 
@@ -163,10 +177,12 @@ export class BacktestEngine {
       partial = false
     ): void => {
       const isBuy = pos.side === 'BUY'
+      // Slippage against the trader: closing a BUY sells at a worse price.
+      const fillPrice = isBuy ? sellFill(price) : buyFill(price)
       const gross = isBuy
-        ? quantity * price - quantity * pos.entryPrice
-        : quantity * pos.entryPrice - quantity * price
-      const feePaid = quantity * price * cfg.feePct
+        ? quantity * fillPrice - quantity * pos.entryPrice
+        : quantity * pos.entryPrice - quantity * fillPrice
+      const feePaid = quantity * fillPrice * cfg.feePct
       const pnl = gross - feePaid
       const costBasis = quantity * pos.entryPrice
       trades.push({
@@ -175,7 +191,7 @@ export class BacktestEngine {
         entryTime: pos.entryTime,
         entryPrice: pos.entryPrice,
         exitTime: time,
-        exitPrice: price,
+        exitPrice: fillPrice,
         quantity,
         pnl,
         pnlPct: costBasis > 0 ? (pnl / costBasis) * 100 : 0,
@@ -185,8 +201,8 @@ export class BacktestEngine {
         closedAtEnd,
         partial,
       })
-      if (isBuy) cash += quantity * price * (1 - cfg.feePct)
-      else cash -= quantity * price * (1 + cfg.feePct)
+      if (isBuy) cash += quantity * fillPrice * (1 - cfg.feePct)
+      else cash -= quantity * fillPrice * (1 + cfg.feePct)
     }
 
     // Decision times: every loopIntervalSeconds from the first sample.
@@ -330,11 +346,16 @@ export class BacktestEngine {
               }
               // Volatility targeting: scale exposure to a target vol level.
               if (cfg.volTargetPct && cfg.volTargetPct > 0 && cfg.volTargetWindowSeconds && cfg.volTargetWindowSeconds > 0) {
-                const volPct = this.feed.volatilityPct(cfg.symbol, cfg.volTargetWindowSeconds, t)
+                const volPct = cfg.strategy.harVolForecast
+                  ? this.feed.harVolatilityPct(cfg.symbol, cfg.volTargetWindowSeconds, cfg.volTargetWindowSeconds * 10, cfg.volTargetWindowSeconds * 60, t)
+                  : this.feed.volatilityPct(cfg.symbol, cfg.volTargetWindowSeconds, t)
                 const mult = volatilityMultiplier(volPct, cfg.volTargetPct, cfg.volTargetMaxMult || 2)
                 // Scale but never exceed the per-position cap.
                 sizePct = Math.min(sizePct * mult, cfg.maxSinglePositionPct)
               }
+              // Conviction sizing: stronger signal, bigger size (bounded).
+              const conviction = this.strategy.convictionMultiplier(signal, cfg.strategy)
+              sizePct = Math.min(sizePct * conviction, cfg.maxSinglePositionPct)
               if (sizePct > 0) {
                 const rawQty = (equity * sizePct) / price
                 const quantity = Math.floor(rawQty * 1e6) / 1e6
@@ -370,16 +391,17 @@ export class BacktestEngine {
                       scaledOut: false,
                     })
                   } else {
-                    cash -= quantity * price * (1 + entryFee)
+                    const entryFill = buyFill(price)
+                    cash -= quantity * entryFill * (1 + entryFee)
                     positions.push({
                       symbol: cfg.symbol,
                       side: 'BUY',
                       quantity,
-                      entryPrice: price,
+                      entryPrice: entryFill,
                       entryTime: t,
                       stopLoss: signal.stopLoss,
                       takeProfit: signal.takeProfit,
-                      peakPrice: price,
+                      peakPrice: entryFill,
                       scaledOut: false,
                     })
                     cooldowns.set(cfg.symbol, t)

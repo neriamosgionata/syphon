@@ -192,6 +192,139 @@ export class MomentumFeed {
   }
 
   /**
+   * HAR-style multi-horizon volatility forecast (Corsi 2009): a weighted
+   * blend of realized variance over short/mid/long windows. Lagged RV
+   * strongly predicts future RV in crypto (Hu, Härdle & Kuo 2021), so the
+   * blend is a smoother, more persistent vol estimate than a single window.
+   * Returns per-sample stddev in %. Windows default to 1m/10m/1h of 1s
+   * samples; horizons with insufficient data are dropped (lenient).
+   */
+  public harVolatilityPct(
+    symbol: string,
+    shortWindow = 60,
+    midWindow = 600,
+    longWindow = 3600,
+    now: number = Date.now()
+  ): number | null {
+    const arr = this.series.get(symbol)
+    if (!arr || arr.length < 2) return null
+    // Only samples at/behind `now` count (live pushes arrive slightly ahead).
+    let end = arr.length
+    while (end > 0 && arr[end - 1].t > now) end--
+    if (end < 2) return null
+
+    const rv = (window: number): number | null => {
+      if (window <= 0) return null
+      const n = Math.min(window, end - 1)
+      if (n < 1) return null
+      // Mean-centered realized variance per horizon (same drift-insensitive
+      // semantics as volatilityPct — a steady uptrend is NOT volatility).
+      let sum = 0
+      let sumSq = 0
+      for (let i = end - n; i < end; i++) {
+        const prev = arr[i - 1].p
+        if (prev <= 0) return null
+        const r = (arr[i].p - prev) / prev
+        sum += r
+        sumSq += r * r
+      }
+      const mean = sum / n
+      return sumSq / n - mean * mean
+    }
+
+    const parts: Array<[number | null, number]> = [
+      [rv(shortWindow), 0.5],
+      [rv(midWindow), 0.3],
+      [rv(longWindow), 0.2],
+    ]
+    const used = parts.filter(([v]) => v !== null && v > 0) as Array<[number, number]>
+    if (used.length === 0) return null
+    const wSum = used.reduce((s, [, w]) => s + w, 0)
+    const variance = used.reduce((s, [v, w]) => s + w * v, 0) / wSum
+    return Math.sqrt(variance) * 100
+  }
+
+  /**
+   * Close-based Choppiness Index (0-100). 100·log10(Σ|Δp|/(max-min)) /
+   * log10(n) — low (< ~40-50) = trending, high = choppy/ranging. Uses closes
+   * (the feed has no intrabar h/l), a standard approximation of the
+   * true-range CHOP. Returns 100 when the window is perfectly flat.
+   */
+  public choppiness(symbol: string, period: number, now: number = Date.now()): number | null {
+    if (period <= 0) return null
+    const arr = this.series.get(symbol)
+    if (!arr || arr.length < period) return null
+    let end = arr.length
+    while (end > 0 && arr[end - 1].t > now) end--
+    if (end < period) return null
+    let sumAbs = 0
+    let max = -Infinity
+    let min = Infinity
+    for (let i = end - period; i < end; i++) {
+      const p = arr[i].p
+      if (p > max) max = p
+      if (p < min) min = p
+      if (i > 0) sumAbs += Math.abs(arr[i].p - arr[i - 1].p)
+    }
+    const range = max - min
+    if (range <= 0 || sumAbs <= 0) return 100
+    return (100 * Math.log10(sumAbs / range)) / Math.log10(period)
+  }
+
+  /**
+   * CUSUM-style trend-break statistic: cumulative (ema − price)/ema over the
+   * last `windowSeconds`, in %. Positive = price spent most of the window
+   * below its EMA (bearish for a BUY position). The changepoint-detection
+   * literature (Wood, Roberts & Zohren 2021) shows trend bets should be cut
+   * on regime breaks rather than waiting for a slow EMA cross. Null while
+   * the EMA or window has not filled.
+   */
+  public cusumDeviationPct(
+    symbol: string,
+    period: number,
+    windowSeconds: number,
+    now: number = Date.now()
+  ): number | null {
+    if (period <= 0 || windowSeconds <= 0) return null
+    const arr = this.series.get(symbol)
+    if (!arr || arr.length < period + 1) return null
+    const k = 2 / (period + 1)
+    let ema = 0
+    for (let i = 0; i < period; i++) ema += arr[i].p
+    ema /= period
+    const boundary = now - windowSeconds * 1000
+    let sum = 0
+    let has = false
+    for (let i = period; i < arr.length; i++) {
+      ema = arr[i].p * k + ema * (1 - k)
+      if (arr[i].t > boundary) {
+        if (ema > 0) sum += (ema - arr[i].p) / ema
+        has = true
+      }
+    }
+    return has ? sum * 100 : null
+  }
+
+  /** Worst single-sample down move in % over the last `windowSamples` (negative or 0). */
+  public maxDownMovePct(symbol: string, windowSamples: number, now: number = Date.now()): number | null {
+    if (windowSamples <= 0) return null
+    const arr = this.series.get(symbol)
+    if (!arr || arr.length < windowSamples + 1) return null
+    let end = arr.length
+    while (end > 0 && arr[end - 1].t > now) end--
+    if (end < windowSamples + 1) return null
+    let worst = 0
+    for (let i = end - windowSamples; i < end; i++) {
+      const prev = arr[i - 1].p
+      if (prev > 0) {
+        const r = ((arr[i].p - prev) / prev) * 100
+        if (r < worst) worst = r
+      }
+    }
+    return worst
+  }
+
+  /**
    * Percent change of the EMA over `windowSeconds` — the trend-direction
    * filter for trend mode. EMA computed over the raw samples (same
    * semantics as `ema()`); the "past" value is the EMA at the last sample

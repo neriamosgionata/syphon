@@ -31,6 +31,15 @@ function baseCfg(overrides: Partial<FastStrategyConfig> = {}): FastStrategyConfi
     volatilityMult: 0,
     volatilityFloorPct: 0.05,
     volatilityCeilingPct: 0,
+    harVolForecast: false,
+    cusumWindowSeconds: 0,
+    cusumExitPct: 0,
+    jumpSlackPct: 0,
+    choppinessPeriod: 0,
+    choppinessMax: 0,
+    tradeStartUtc: 0,
+    tradeEndUtc: 24,
+    convictionSizing: false,
     ...overrides,
   }
 }
@@ -514,5 +523,209 @@ test.group('FastStrategy exit', () => {
     const signal = strategy.evaluateExit(feed, 'BTC', 100.2, now, buyPosition(), baseCfg())
     assert.isFalse(signal.shouldExit)
     assert.isNull(signal.reason)
+  })
+})
+
+test.group('FastStrategy session gate', () => {
+  test('blocks entries outside the configured UTC window', ({ assert }) => {
+    // t0 = 10_000_000 ms = 02:46 UTC → hour 2, outside [6, 12).
+    const { feed, now } = feedFrom((i) => 100 + i * 0.02, 180, 10_000_000)
+    const signal = strategy.evaluateEntry(
+      feed, 'BTC', feed.lastPrice('BTC')!, now,
+      baseCfg({ tradeStartUtc: 6, tradeEndUtc: 12 })
+    )
+    assert.isFalse(signal.shouldEnter)
+    assert.match(signal.reason!, /session/)
+  })
+
+  test('allows entries inside the configured UTC window', ({ assert }) => {
+    // t0 = 10h exactly → hour 10, inside [6, 12).
+    const { feed, now } = feedFrom((i) => 100 + i * 0.02, 180, 10 * 3600_000)
+    const signal = strategy.evaluateEntry(
+      feed, 'BTC', feed.lastPrice('BTC')!, now,
+      baseCfg({ tradeStartUtc: 6, tradeEndUtc: 12 })
+    )
+    assert.isTrue(signal.shouldEnter)
+  })
+
+  test('disabled by default (0-24) never blocks', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => 100 + i * 0.02, 180, 10_000_000)
+    const signal = strategy.evaluateEntry(feed, 'BTC', feed.lastPrice('BTC')!, now, baseCfg())
+    assert.isTrue(signal.shouldEnter)
+  })
+})
+
+test.group('FastStrategy choppiness gate', () => {
+  test('blocks entries in a ranging (high-CHOP) market', ({ assert }) => {
+    // ±1 zigzag with flat momentum-relevant window: CHOP ≈ 85 > 50.
+    const { feed, now } = feedFrom((i) => 100 + (i % 2 === 0 ? 1 : -1), 180)
+    const signal = strategy.evaluateEntry(
+      feed, 'BTC', feed.lastPrice('BTC')!, now,
+      baseCfg({ choppinessPeriod: 120, choppinessMax: 50 })
+    )
+    assert.isFalse(signal.shouldEnter)
+    assert.match(signal.reason!, /choppiness/)
+  })
+
+  test('passes a trending (low-CHOP) market', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => 100 + i * 0.02, 180)
+    const signal = strategy.evaluateEntry(
+      feed, 'BTC', feed.lastPrice('BTC')!, now,
+      baseCfg({ choppinessPeriod: 120, choppinessMax: 50 })
+    )
+    assert.isTrue(signal.shouldEnter)
+  })
+
+  test('disabled (period 0) never blocks', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => 100 + (i % 2 === 0 ? 1 : -1), 180)
+    const signal = strategy.evaluateEntry(
+      feed, 'BTC', feed.lastPrice('BTC')!, now,
+      baseCfg({ choppinessPeriod: 120, choppinessMax: 0 })
+    )
+    // falls through to the momentum gate, which rejects the flat series
+    assert.isFalse(signal.shouldEnter)
+    assert.notMatch(signal.reason!, /choppiness/)
+  })
+})
+
+test.group('FastStrategy CUSUM trend-break exit', () => {
+  test('exits a BUY position when price lingers below its EMA', ({ assert }) => {
+    // Rally to 110, then drop to 101 and sit: 300s of (ema - p)/ema
+    // accumulation ~1.5% > 1.0% threshold → early regime-break exit.
+    const { feed, now } = feedFrom((i) => {
+      if (i < 800) return 100 + (110 - 100) * (i / 800)
+      return 101
+    }, 1100)
+    const signal = strategy.evaluateExit(
+      feed, 'BTC', 101, now,
+      buyPosition({ entryPrice: 100, stopLoss: 95, takeProfit: 150 }),
+      baseCfg({ emaPeriod: 100, cusumWindowSeconds: 300, cusumExitPct: 1.0 })
+    )
+    assert.isTrue(signal.shouldExit)
+    assert.match(signal.reason!, /cusum trend break/)
+  })
+
+  test('does not exit while price rides above its EMA', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => 100 * Math.pow(1.0001, i), 1100)
+    const signal = strategy.evaluateExit(
+      feed, 'BTC', feed.lastPrice('BTC')!, now,
+      buyPosition({ entryPrice: 100, stopLoss: 95, takeProfit: 150 }),
+      baseCfg({ emaPeriod: 100, cusumWindowSeconds: 300, cusumExitPct: 1.0 })
+    )
+    assert.isFalse(signal.shouldExit)
+  })
+
+  test('disabled (0 threshold) never fires', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => {
+      if (i < 800) return 100 + (110 - 100) * (i / 800)
+      return 101
+    }, 1100)
+    const signal = strategy.evaluateExit(
+      feed, 'BTC', 101, now,
+      buyPosition({ entryPrice: 100, stopLoss: 95, takeProfit: 150 }),
+      baseCfg({ emaPeriod: 100, cusumWindowSeconds: 300, cusumExitPct: 0 })
+    )
+    assert.isFalse(signal.shouldExit)
+  })
+})
+
+test.group('FastStrategy jump-aware stop', () => {
+  test('widens the stop after a recent downward jump', ({ assert }) => {
+    const t0 = 1_000_000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 60; i++) feed.push('BTC', 100, t0 + i * 1000)
+    feed.push('BTC', 99, t0 + 60_000) // -1% single-sample jump
+
+    const levels = strategy.entryLevels(
+      feed, 'BTC', 100, t0 + 60_000,
+      baseCfg({ volatilityWindowSamples: 60, jumpSlackPct: 0.5 }), null
+    )
+    // SL = 0.5% × 1.005 = 0.5025% → 99.4975; TP unchanged at 1.0%
+    assert.closeTo(levels.stopLoss, 99.4975, 1e-9)
+    assert.closeTo(levels.takeProfit, 101, 1e-9)
+  })
+
+  test('leaves the stop unchanged without a jump', ({ assert }) => {
+    const t0 = 1_000_000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 61; i++) feed.push('BTC', 100, t0 + i * 1000)
+    const levels = strategy.entryLevels(
+      feed, 'BTC', 100, t0 + 60_000,
+      baseCfg({ volatilityWindowSamples: 60, jumpSlackPct: 0.5 }), null
+    )
+    assert.closeTo(levels.stopLoss, 99.5, 1e-9)
+  })
+
+  test('disabled (slack 0) never widens', ({ assert }) => {
+    const t0 = 1_000_000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 60; i++) feed.push('BTC', 100, t0 + i * 1000)
+    feed.push('BTC', 99, t0 + 60_000)
+    const levels = strategy.entryLevels(
+      feed, 'BTC', 100, t0 + 60_000,
+      baseCfg({ volatilityWindowSamples: 60, jumpSlackPct: 0 }), null
+    )
+    assert.closeTo(levels.stopLoss, 99.5, 1e-9)
+  })
+})
+
+test.group('FastStrategy conviction sizing', () => {
+  test('disabled returns 1 regardless of signal strength', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => 100 + i * 0.02, 180)
+    const signal = strategy.evaluateEntry(feed, 'BTC', feed.lastPrice('BTC')!, now, baseCfg())
+    assert.isTrue(signal.shouldEnter)
+    assert.equal(strategy.convictionMultiplier(signal, baseCfg()), 1)
+  })
+
+  test('burst mode: stronger momentum vs threshold → bigger size, capped 1.5', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => 100 + i * 0.02, 180)
+    const cfg = baseCfg({ convictionSizing: true })
+    const signal = strategy.evaluateEntry(feed, 'BTC', feed.lastPrice('BTC')!, now, cfg)
+    assert.isTrue(signal.shouldEnter)
+    assert.isAbove(signal.momentumPct!, 0.3) // ratio > 3 → capped at 1.5
+    assert.equal(strategy.convictionMultiplier(signal, cfg), 1.5)
+  })
+
+  test('trend mode: scales with the EMA slope vs threshold', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => 100 * Math.pow(1.00001, i), 3600)
+    const cfg = baseCfg({ convictionSizing: true, trendMode: true, emaPeriod: 300, trendSlopePct: 0.05, trendSlopeWindowSeconds: 1800, takeProfitPct: 0 })
+    const signal = strategy.evaluateEntry(feed, 'BTC', feed.lastPrice('BTC')!, now, cfg)
+    assert.isTrue(signal.shouldEnter)
+    assert.isAbove(signal.slopePct!, 0.05) // ratio > 1 → multiplier > 0.75
+    const mult = strategy.convictionMultiplier(signal, cfg)
+    assert.isAbove(mult, 0.75)
+    assert.isAtMost(mult, 1.5)
+  })
+
+  test('unmeasurable signal (warming) falls back to 1', ({ assert }) => {
+    const signal = {
+      shouldEnter: true, reason: 'x', momentumPct: null, rsi: null, ema: null,
+      volatilityPct: null, slopePct: null, stopLoss: 99, takeProfit: 101, stopLossPct: 0.5,
+    } as unknown as Parameters<typeof strategy.convictionMultiplier>[0]
+    assert.equal(strategy.convictionMultiplier(signal, baseCfg({ convictionSizing: true })), 1)
+  })
+})
+
+test.group('FastStrategy HAR volatility', () => {
+  test('harVolForecast flag routes the vol ceiling through the HAR blend', ({ assert }) => {
+    // Calm series: HAR ≈ single-window ≈ 0 → ceiling passes either way.
+    const { feed, now } = feedFrom((i) => 100 + i * 0.02, 180)
+    const signal = strategy.evaluateEntry(
+      feed, 'BTC', feed.lastPrice('BTC')!, now,
+      baseCfg({ volatilityWindowSamples: 60, volatilityCeilingPct: 1, harVolForecast: true })
+    )
+    assert.isTrue(signal.shouldEnter)
+  })
+
+  test('HAR damps a short-window vol spike via the longer horizons', ({ assert }) => {
+    const t0 = 1_000_000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 1700; i++) feed.push('BTC', 100, t0 + i * 1000)
+    for (let i = 0; i < 300; i++) feed.push('BTC', 100 + (i % 2 === 0 ? 1 : -1), t0 + (1700 + i) * 1000)
+
+    const short = feed.volatilityPct('BTC', 30)!
+    const har = feed.harVolatilityPct('BTC', 30, 300, 1800)!
+    assert.isAbove(short, 1) // the spike dominates the 30s window
+    assert.isBelow(har, short) // long-horizon calm drags the blend down
   })
 })

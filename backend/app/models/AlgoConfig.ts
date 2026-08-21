@@ -168,6 +168,37 @@ export default class AlgoConfig extends BaseModel {
   @column()
   declare fastVolTargetMaxMult: number
 
+  // Signal upgrades + execution realism (migration 19)
+  @column()
+  declare fastHarVolForecast: boolean
+
+  @column()
+  declare fastCusumWindowSeconds: number
+
+  @column()
+  declare fastCusumExitPct: number
+
+  @column()
+  declare fastJumpSlackPct: number
+
+  @column()
+  declare fastChoppinessPeriod: number
+
+  @column()
+  declare fastChoppinessMax: number
+
+  @column()
+  declare fastTradeStartUtc: number
+
+  @column()
+  declare fastTradeEndUtc: number
+
+  @column()
+  declare fastConvictionSizing: boolean
+
+  @column()
+  declare fastSlippageBps: number
+
   // Safety rails + exit quality (migration 17)
   @column()
   declare fastCorrelatedExposurePct: number
@@ -265,10 +296,20 @@ export default class AlgoConfig extends BaseModel {
       fastMakerExecution: false,
       fastLimitFillSeconds: 15,
       fastLimitOffsetPct: 0.05,
-      fastMakerFeePct: 0.0008,
+      fastMakerFeePct: 0.0016,
       fastVolTargetPct: 0,
       fastVolTargetWindowSeconds: 3600,
       fastVolTargetMaxMult: 2,
+      fastHarVolForecast: false,
+      fastCusumWindowSeconds: 0,
+      fastCusumExitPct: 0,
+      fastJumpSlackPct: 0,
+      fastChoppinessPeriod: 0,
+      fastChoppinessMax: 0,
+      fastTradeStartUtc: 0,
+      fastTradeEndUtc: 24,
+      fastConvictionSizing: false,
+      fastSlippageBps: 0,
       fastCorrelatedExposurePct: 0,
       fastRiskPerTradePct: 0,
       fastMaxLossStreak: 0,

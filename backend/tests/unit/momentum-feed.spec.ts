@@ -207,3 +207,112 @@ test.group('MomentumFeed', (group) => {
     assert.isNull(feed.volumeMedian('BTC', 0, t0 + 241000))
   })
 })
+
+test.group('MomentumFeed HAR volatility', () => {
+  test('matches the single-window stddev on a calm series', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 2000; i++) feed.push('BTC', 100 + i * 0.001, t0 + i * 1000)
+    const short = feed.volatilityPct('BTC', 30)!
+    const har = feed.harVolatilityPct('BTC', 30, 300, 1800)!
+    assert.closeTo(har, short, 0.0001)
+  })
+
+  test('blends short/mid/long horizons — a short spike is damped', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 1700; i++) feed.push('BTC', 100, t0 + i * 1000)
+    for (let i = 0; i < 300; i++) feed.push('BTC', 100 + (i % 2 === 0 ? 1 : -1), t0 + (1700 + i) * 1000)
+
+    const short = feed.volatilityPct('BTC', 30)!
+    const mid = feed.volatilityPct('BTC', 300)!
+    const har = feed.harVolatilityPct('BTC', 30, 300, 1800)!
+    assert.isAbove(short, 1)
+    assert.isAbove(mid, 1)
+    assert.isBelow(har, short) // the 30m-ish calm horizon drags the blend down
+    assert.isAbove(har, 0)
+  })
+
+  test('lenient when horizons lack data', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 100; i++) feed.push('BTC', 100 + (i % 2 === 0 ? 1 : -1), t0 + i * 1000)
+    // long window (1800) has no data → blend of short+mid only, still a number
+    const har = feed.harVolatilityPct('BTC', 30, 300, 1800)!
+    assert.isAbove(har, 1)
+    assert.isNull(feed.harVolatilityPct('BTC', 0, 0, 0))
+    assert.isNull(feed.harVolatilityPct('BTC', 30, 300, 1800, t0 - 1)) // empty symbol window
+  })
+})
+
+test.group('MomentumFeed choppiness', () => {
+  test('near 0 on a monotonic trend', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 120; i++) feed.push('BTC', 100 + i * 0.1, t0 + i * 1000)
+    const chop = feed.choppiness('BTC', 120, t0 + 120000)!
+    assert.isBelow(chop, 45)
+  })
+
+  test('high on a zigzag range', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 120; i++) feed.push('BTC', 100 + (i % 2 === 0 ? 1 : -1), t0 + i * 1000)
+    const chop = feed.choppiness('BTC', 120, t0 + 120000)!
+    assert.isAbove(chop, 55)
+  })
+
+  test('100 on a perfectly flat series (no trend to measure)', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 120; i++) feed.push('BTC', 100, t0 + i * 1000)
+    assert.equal(feed.choppiness('BTC', 120, t0 + 120000), 100)
+    assert.isNull(feed.choppiness('BTC', 0))
+    assert.isNull(feed.choppiness('BTC', 120, t0 - 1))
+  })
+})
+
+test.group('MomentumFeed CUSUM deviation', () => {
+  test('positive when price sits below its EMA', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 800; i++) feed.push('BTC', 100 + (110 - 100) * (i / 800), t0 + i * 1000)
+    for (let i = 0; i < 300; i++) feed.push('BTC', 101, t0 + (800 + i) * 1000)
+    const cusum = feed.cusumDeviationPct('BTC', 100, 300, t0 + 1_100_000)!
+    assert.isAbove(cusum, 0)
+  })
+
+  test('negative when price rides above its EMA', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 1100; i++) feed.push('BTC', 100 * Math.pow(1.0001, i), t0 + i * 1000)
+    const cusum = feed.cusumDeviationPct('BTC', 100, 300, t0 + 1_100_000)!
+    assert.isBelow(cusum, 0)
+  })
+
+  test('null while warming up', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 50; i++) feed.push('BTC', 100, t0 + i * 1000)
+    assert.isNull(feed.cusumDeviationPct('BTC', 100, 300, t0 + 50_000))
+  })
+})
+
+test.group('MomentumFeed max down move', () => {
+  test('worst single-sample down move in the window', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 60; i++) feed.push('BTC', 100, t0 + i * 1000)
+    feed.push('BTC', 98, t0 + 60_000)
+    feed.push('BTC', 98.5, t0 + 61_000)
+    const worst = feed.maxDownMovePct('BTC', 60, t0 + 61_000)!
+    assert.closeTo(worst, -2, 1e-9)
+  })
+
+  test('null without enough samples', ({ assert }) => {
+    const t0 = 1000000
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 10; i++) feed.push('BTC', 100, t0 + i * 1000)
+    assert.isNull(feed.maxDownMovePct('BTC', 60, t0 + 10_000))
+  })
+})
