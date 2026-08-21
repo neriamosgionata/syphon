@@ -55,6 +55,17 @@ export function buildSweepList(base: FastStrategyConfig): SweepRow[] {
   sweep('trend mode on', (c) => { c.trendMode = true; c.emaPeriod = 900; c.trendSlopePct = 0.1; c.trendSlopeWindowSeconds = 1800; c.takeProfitPct = 0; c.trailingStopPct = 2.0; c.trailingActivatePct = 1.5; c.maxHoldSeconds = 0 }, { cooldownSeconds: 1800 })
   sweep('trend + regime gate', (c) => { c.trendMode = true; c.emaPeriod = 900; c.trendSlopePct = 0.1; c.trendSlopeWindowSeconds = 1800; c.takeProfitPct = 0; c.trailingStopPct = 2.0; c.trailingActivatePct = 1.5; c.regimeEmaPeriod = 3600; c.regimeSlopeWindowSeconds = 3600; c.regimeSlopeMinPct = 0.3 }, { cooldownSeconds: 1800 })
 
+  // Migration-19 signal upgrades — one-at-a-time around the baseline.
+  sweep('HAR vol forecast on', (c) => { c.harVolForecast = true })
+  sweep('CUSUM 300s/1.0% (EMA-900)', (c) => { c.emaPeriod = 900; c.cusumWindowSeconds = 300; c.cusumExitPct = 1.0 })
+  sweep('CUSUM 600s/2.0% (EMA-900)', (c) => { c.emaPeriod = 900; c.cusumWindowSeconds = 600; c.cusumExitPct = 2.0 })
+  sweep('choppiness gate 300/50', (c) => { c.choppinessPeriod = 300; c.choppinessMax = 50 })
+  sweep('choppiness gate 600/45', (c) => { c.choppinessPeriod = 600; c.choppinessMax = 45 })
+  sweep('jump slack 0.5%', (c) => { c.jumpSlackPct = 0.5 })
+  sweep('session 13-21 UTC', (c) => { c.tradeStartUtc = 13; c.tradeEndUtc = 21 })
+  sweep('session 0-7 UTC', (c) => { c.tradeStartUtc = 0; c.tradeEndUtc = 7 })
+  sweep('conviction sizing', (c) => { c.convictionSizing = true })
+
   // Presets: coherent multi-param profiles.
   rows.push({
     label: 'PRESET scalp',
