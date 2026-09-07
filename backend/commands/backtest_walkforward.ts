@@ -4,10 +4,18 @@ import path from 'node:path'
 import AlgoConfig from '#models/AlgoConfig'
 import { fastStrategyFromConfig, FastStrategyConfig } from '#services/FastStrategy'
 import { BacktestEngine, BacktestConfig, BacktestResult, BacktestSample } from '#services/BacktestEngine'
-import { fetchBinanceKlines1s } from '#services/BinanceKlineService'
+import { fetchBinanceKlines } from '#services/BinanceKlineService'
 import { buildSweepList } from './backtest_sweep.js'
 
 const CACHE_DIR = path.join(process.cwd(), 'backtests', 'cache')
+
+function maxHoursFor(intervalSeconds: number): number {
+  return intervalSeconds === 1 ? 504 : 87_600
+}
+
+function intervalSecondsFor(raw: string | undefined): number {
+  return raw === '1m' ? 60 : 1
+}
 
 // Walk-forward: sweep the grid on window N, validate the winner on window
 // N+1 (out-of-sample). A config whose out-of-sample PF collapses fails —
@@ -15,6 +23,11 @@ const CACHE_DIR = path.join(process.cwd(), 'backtests', 'cache')
 //
 // Windows are ordered oldest -> newest: window 0 ends `(windows-1)*hours`
 // hours ago, the last window ends now.
+//
+// On coarse bars (--bar-interval=1m) the 1s-tuned sweep grid is not
+// interval-agnostic, so no sweep happens: each window simply runs the live
+// config and adjacent windows are compared (OOS = the next window's run of
+// the SAME config). No IS selection = no multiple-testing bias.
 
 export default class BacktestWalkforward extends BaseCommand {
   static commandName = 'backtest:walkforward'
@@ -24,7 +37,10 @@ export default class BacktestWalkforward extends BaseCommand {
   @flags.string({ description: 'Symbol (default BTC)' })
   declare symbol: string
 
-  @flags.number({ description: 'Hours per window (default 72, max 72)' })
+  @flags.string({ description: 'Bar interval: 1s (default) or 1m' })
+  declare barInterval: string
+
+  @flags.number({ description: 'Hours per window (default 72, max 504 on 1s, 87600 on 1m)' })
   declare hours: number
 
   @flags.number({ description: 'Number of consecutive windows (default 3)' })
@@ -44,7 +60,9 @@ export default class BacktestWalkforward extends BaseCommand {
 
   async run() {
     const symbol = (this.symbol || 'BTC').toUpperCase()
-    const hours = Math.min(Math.max(this.hours || 72, 6), 504)
+    const intervalSeconds = intervalSecondsFor(this.barInterval)
+    const coarse = intervalSeconds > 1
+    const hours = Math.min(Math.max(this.hours || 72, 1), maxHoursFor(intervalSeconds))
     const windowCount = Math.min(Math.max(this.windows || 3, 2), 12)
     const minTrades = this.minTrades || 10
     const minPf = this.minPf || 1.2
@@ -80,7 +98,7 @@ export default class BacktestWalkforward extends BaseCommand {
       ]),
       ...overrides,
     }
-    const base = fastStrategyFromConfig(merged)
+    const base = fastStrategyFromConfig(merged, { sampleIntervalSeconds: intervalSeconds })
     const engine = new BacktestEngine()
 
     // Windows oldest -> newest.
@@ -90,7 +108,7 @@ export default class BacktestWalkforward extends BaseCommand {
     }
 
     const windows = await Promise.all(
-      endTimes.map((endTime, index) => this.loadSamples(symbol, endTime - hours * 3600_000, endTime, hours, index))
+      endTimes.map((endTime, index) => this.loadSamples(symbol, endTime - hours * 3600_000, endTime, hours, index, intervalSeconds))
     )
 
     const baseConfig = (strategy: FastStrategyConfig): BacktestConfig => ({
@@ -117,7 +135,7 @@ export default class BacktestWalkforward extends BaseCommand {
     })
 
     this.logger.info('')
-    this.logger.info(`=== Walk-forward: ${symbol} ${windowCount}×${hours}h (oldest -> newest) ===`)
+    this.logger.info(`=== Walk-forward: ${symbol} ${windowCount}×${hours}h (oldest -> newest)${coarse ? ' [1m bars, live config only]' : ''} ===`)
 
     interface Verdict {
       trainIdx: number
@@ -136,6 +154,29 @@ export default class BacktestWalkforward extends BaseCommand {
       const trainSamples = windows[i]
       const oosSamples = windows[i + 1]
       const trainResult = engine.run(trainSamples, baseConfig(base))
+      const fmt = (v: number) => (v === Infinity ? 'inf' : v.toFixed(2))
+
+      if (coarse) {
+        // No grid: the live config itself is the candidate on every window.
+        const oosCoarseResult = engine.run(oosSamples, baseConfig(base))
+        const pass = oosCoarseResult.metrics.totalTrades >= minTrades
+          && oosCoarseResult.metrics.profitFactor >= minPf
+          && oosCoarseResult.strategyReturnPct > 0
+        verdicts.push({
+          trainIdx: i,
+          winner: 'baseline (live config)',
+          isTrades: trainResult.metrics.totalTrades,
+          isPf: trainResult.metrics.profitFactor,
+          isNet: trainResult.strategyReturnPct,
+          oosTrades: oosCoarseResult.metrics.totalTrades,
+          oosPf: oosCoarseResult.metrics.profitFactor,
+          oosNet: oosCoarseResult.strategyReturnPct,
+          pass,
+        })
+        this.logger.info(`w${i} (${trainSamples.length} samples): net ${trainResult.strategyReturnPct >= 0 ? '+' : ''}${trainResult.strategyReturnPct.toFixed(2)}%  ${trainResult.metrics.totalTrades}t PF ${fmt(trainResult.metrics.profitFactor)}  buy&hold ${trainResult.buyHoldReturnPct >= 0 ? '+' : ''}${trainResult.buyHoldReturnPct.toFixed(2)}%`)
+        this.logger.info(`  OOS w${i + 1}: ${oosCoarseResult.metrics.totalTrades}t PF ${fmt(oosCoarseResult.metrics.profitFactor)} net ${oosCoarseResult.strategyReturnPct >= 0 ? '+' : ''}${oosCoarseResult.strategyReturnPct.toFixed(2)}%  buy&hold ${oosCoarseResult.buyHoldReturnPct >= 0 ? '+' : ''}${oosCoarseResult.buyHoldReturnPct.toFixed(2)}%  ${pass ? 'PASS' : 'FAIL'} (need PF>=${minPf}, net>0, >=${minTrades}t)`)
+        continue
+      }
 
       // Rank the grid on this window.
       const ranked: Array<{ label: string; strategy: FastStrategyConfig; patch: Partial<BacktestConfig>; result: BacktestResult }> = []
@@ -161,19 +202,18 @@ export default class BacktestWalkforward extends BaseCommand {
         && oosResult.metrics.profitFactor >= minPf
         && oosResult.strategyReturnPct > 0
 
-      verdicts.push({
-        trainIdx: i,
-        winner: winner.label,
-        isTrades: winner.result.metrics.totalTrades,
-        isPf: winner.result.metrics.profitFactor,
-        isNet: winner.result.strategyReturnPct,
-        oosTrades: oosResult.metrics.totalTrades,
-        oosPf: oosResult.metrics.profitFactor,
-        oosNet: oosResult.strategyReturnPct,
-        pass,
-      })
+        verdicts.push({
+          trainIdx: i,
+          winner: winner.label,
+          isTrades: winner.result.metrics.totalTrades,
+          isPf: winner.result.metrics.profitFactor,
+          isNet: winner.result.strategyReturnPct,
+          oosTrades: oosResult.metrics.totalTrades,
+          oosPf: oosResult.metrics.profitFactor,
+          oosNet: oosResult.strategyReturnPct,
+          pass,
+        })
 
-      const fmt = (v: number) => (v === Infinity ? 'inf' : v.toFixed(2))
       this.logger.info(`Train w${i} (${trainSamples.length} samples): live config PF ${fmt(trainResult.metrics.profitFactor)} net ${trainResult.strategyReturnPct.toFixed(2)}%`)
       this.logger.info(`  winner: ${winner.label}  IS ${winner.result.metrics.totalTrades}t PF ${fmt(winner.result.metrics.profitFactor)} net ${winner.result.strategyReturnPct >= 0 ? '+' : ''}${winner.result.strategyReturnPct.toFixed(2)}%`)
       this.logger.info(`  OOS w${i + 1}: ${oosResult.metrics.totalTrades}t PF ${fmt(oosResult.metrics.profitFactor)} net ${oosResult.strategyReturnPct >= 0 ? '+' : ''}${oosResult.strategyReturnPct.toFixed(2)}%  ${pass ? 'PASS' : 'FAIL'} (need PF>=${minPf}, net>0, >=${minTrades}t)`)
@@ -196,35 +236,51 @@ export default class BacktestWalkforward extends BaseCommand {
     startTime: number,
     endTime: number,
     hours: number,
-    index: number
+    index: number,
+    intervalSeconds: number
   ): Promise<BacktestSample[]> {
-    const cacheFile = path.join(CACHE_DIR, `${symbol}_1s_${hours}h_wf${index}_v2.json`)
+    const tag = intervalSeconds === 1 ? '1s' : '1m'
+    const cacheFile = path.join(CACHE_DIR, `${symbol}_${tag}_${hours}h_wf${index}_v2.json`)
     if (!this.fresh && fs.existsSync(cacheFile)) {
       try {
         const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf8')) as BacktestSample[]
-        this.logger.info(`Loaded ${raw.length} cached samples from ${cacheFile}`)
-        return raw
+        const first = raw[0]?.t
+        const last = raw[raw.length - 1]?.t
+        // A cached window is only valid if it COVERS the requested span —
+        // walk-forward windows are anchored to Date.now(), so yesterday's
+        // cache for "window 3" is stale today.
+        if (raw.length >= 2 && first !== undefined && last !== undefined &&
+            first <= startTime + intervalSeconds * 1000 && last >= endTime - intervalSeconds * 1000) {
+          const windowed = raw.filter((s) => s.t >= startTime && s.t < endTime)
+          this.logger.info(`Loaded ${windowed.length} cached samples from ${cacheFile}`)
+          return windowed
+        }
+        this.logger.info(`Cache ${cacheFile} no longer covers the requested window — refetching`)
       } catch (err) {
         this.logger.warn(`Cache unreadable, refetching: ${(err as Error).message}`)
       }
     }
 
+    // Partial resume only helps when it fills INSIDE the requested window.
     let pre: BacktestSample[] = []
     try {
       if (fs.existsSync(cacheFile)) {
-        pre = JSON.parse(fs.readFileSync(cacheFile, 'utf8')) as BacktestSample[]
-        this.logger.info(`Resuming from ${pre.length} partial samples`)
+        const parsedPre = JSON.parse(fs.readFileSync(cacheFile, 'utf8')) as BacktestSample[]
+        pre = parsedPre.filter((s) => s.t >= startTime && s.t < endTime)
+        this.logger.info(`Resuming from ${pre.length} in-window samples`)
       }
     } catch { /* ignore unreadable partial */ }
     const cursorStart = pre.length > 0 ? pre[pre.length - 1].t + 1 : startTime
-    this.logger.info(`Fetching ${hours}h of 1s klines for ${symbol} (window ${index})…`)
+    this.logger.info(`Fetching ${hours}h of ${tag} klines for ${symbol} (window ${index})…`)
     fs.mkdirSync(CACHE_DIR, { recursive: true })
-    const samples = await fetchBinanceKlines1s(symbol, cursorStart, endTime, {
+    const samples = await fetchBinanceKlines(symbol, cursorStart, endTime, {
+      intervalSeconds,
       onProgress: (partial) => {
         try {
           const merged = [...pre, ...partial]
             .sort((a, b) => a.t - b.t)
             .filter((s, i, arr) => i === 0 || arr[i - 1].t !== s.t)
+            .filter((s) => s.t >= startTime && s.t < endTime)
           fs.writeFileSync(cacheFile, JSON.stringify(merged))
         } catch { /* checkpoint write is best-effort */ }
       },
@@ -232,6 +288,7 @@ export default class BacktestWalkforward extends BaseCommand {
     const merged = [...pre, ...samples]
       .sort((a, b) => a.t - b.t)
       .filter((s, i, arr) => i === 0 || arr[i - 1].t !== s.t)
+      .filter((s) => s.t >= startTime && s.t < endTime)
     try {
       fs.writeFileSync(cacheFile, JSON.stringify(merged))
       this.logger.info(`Cached ${merged.length} samples to ${cacheFile}`)

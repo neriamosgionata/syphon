@@ -5,19 +5,31 @@ import AlgoConfig from '#models/AlgoConfig'
 import { MomentumFeed } from '#services/MomentumFeed'
 import { fastStrategyFromConfig } from '#services/FastStrategy'
 import { BacktestEngine, BacktestResult, BacktestSample } from '#services/BacktestEngine'
-import { fetchBinanceKlines1s } from '#services/BinanceKlineService'
+import { fetchBinanceKlines } from '#services/BinanceKlineService'
 
 const CACHE_DIR = path.join(process.cwd(), 'backtests', 'cache')
 
+/** Max window hours per bar interval: 1s history is ~21 days deep, 1m goes back years. */
+function maxHoursFor(intervalSeconds: number): number {
+  return intervalSeconds === 1 ? 504 : 87_600 // 1s: 21d, 1m: 10y
+}
+
+function intervalSecondsFor(raw: string | undefined): number {
+  return raw === '1m' ? 60 : 1
+}
+
 export default class Backtest extends BaseCommand {
   static commandName = 'backtest'
-  static description = 'Backtest the fast algo strategy on Binance 1s klines'
+  static description = 'Backtest the fast algo strategy on Binance 1s/1m klines'
   static options = { startApp: true }
 
   @flags.string({ description: 'Symbol (e.g. BTC, BTCUSDT). Default: BTC' })
   declare symbol: string
 
-  @flags.number({ description: 'Hours of 1s data to fetch (default 6, max 72)' })
+  @flags.string({ description: 'Bar interval: 1s (default) or 1m' })
+  declare barInterval: string
+
+  @flags.number({ description: 'Hours of data to fetch (default 6; max 504 on 1s, 87600 on 1m)' })
   declare hours: number
 
   @flags.number({ description: 'Fetch a window ending N hours ago (walk-forward; default 0 = now)' })
@@ -46,7 +58,8 @@ export default class Backtest extends BaseCommand {
 
   async run() {
     const symbol = (this.symbol || 'BTC').toUpperCase()
-    const hours = Math.min(Math.max(this.hours || 6, 1), 504)
+    const intervalSeconds = intervalSecondsFor(this.barInterval)
+    const hours = Math.min(Math.max(this.hours || 6, 1), maxHoursFor(intervalSeconds))
     const portfolio = this.portfolio || 10000
     const fee = this.fee ?? 0.0026
 
@@ -82,11 +95,11 @@ export default class Backtest extends BaseCommand {
       ]),
       ...overrides,
     }
-    const interval = this.interval || cfg.fastIntervalSeconds || 10
+    const loopInterval = this.interval || cfg.fastIntervalSeconds || 10
 
     const endTime = Date.now() - (this.endHoursAgo || 0) * 3600_000
     const startTime = endTime - hours * 3600_000
-    const samples = await this.loadSamples(symbol, startTime, endTime, hours, !!this.fresh, this.endHoursAgo || 0)
+    const samples = await this.loadSamples(symbol, startTime, endTime, hours, !!this.fresh, this.endHoursAgo || 0, intervalSeconds)
 
     if (samples.length < 2) {
       this.logger.error(`No data fetched for ${symbol}`)
@@ -100,8 +113,8 @@ export default class Backtest extends BaseCommand {
 
     const result = new BacktestEngine().run(samples, {
       symbol,
-      strategy: fastStrategyFromConfig(merged),
-      loopIntervalSeconds: interval,
+      strategy: fastStrategyFromConfig(merged, { sampleIntervalSeconds: intervalSeconds }),
+      loopIntervalSeconds: loopInterval,
       portfolioUsd: portfolio,
       feePct: fee,
       maxPositions: merged.maxPositions,
@@ -130,21 +143,33 @@ export default class Backtest extends BaseCommand {
     endTime: number,
     hours: number,
     fresh: boolean,
-    endHoursAgo: number
+    endHoursAgo: number,
+    intervalSeconds: number
   ): Promise<BacktestSample[]> {
+    const tag = intervalSeconds === 1 ? '1s' : '1m'
     const windowTag = endHoursAgo > 0 ? `_ago${endHoursAgo}` : ''
-    const cacheFile = path.join(CACHE_DIR, `${symbol}_1s_${hours}h${windowTag}_v2.json`)
+    const cacheFile = path.join(CACHE_DIR, `${symbol}_${tag}_${hours}h${windowTag}_v2.json`)
     if (!fresh && fs.existsSync(cacheFile)) {
       try {
         const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf8')) as BacktestSample[]
-        this.logger.info(`Loaded ${raw.length} cached samples from ${cacheFile}`)
-        return raw
+        // A cache hit must actually COVER the requested window — a stale
+        // cache is backfilled (bounded by `hours`) rather than trusted.
+        const first = raw[0]?.t
+        const last = raw[raw.length - 1]?.t
+        if (raw.length >= 2 && first !== undefined && last !== undefined &&
+            first <= startTime + intervalSeconds * 1000 && last >= endTime - intervalSeconds * 1000) {
+          const windowed = raw.filter((s) => s.t >= startTime && s.t < endTime)
+          this.logger.info(`Loaded ${windowed.length} cached samples from ${cacheFile}`)
+          return windowed
+        }
+        this.logger.info(`Cache ${cacheFile} stale (${raw.length} samples, window not covering request) — refetching`)
       } catch (err) {
         this.logger.warn(`Cache unreadable, refetching: ${(err as Error).message}`)
       }
     }
 
-    // Resume from a partial cache (progressive checkpoints) if one exists.
+    // Resume from a partial cache (progressive checkpoints) if one exists —
+    // but only fetch the MISSING span, never the whole gap.
     let pre: BacktestSample[] = []
     try {
       if (fs.existsSync(cacheFile)) {
@@ -152,11 +177,13 @@ export default class Backtest extends BaseCommand {
         this.logger.info(`Resuming from ${pre.length} partial samples`)
       }
     } catch { /* ignore unreadable partial */ }
-    const cursorStart = pre.length > 0 ? pre[pre.length - 1].t + 1 : startTime
+    const lastT = pre.length > 0 ? pre[pre.length - 1].t : 0
+    const cursorStart = lastT >= startTime ? Math.min(lastT + 1, endTime) : startTime
 
-    this.logger.info(`Fetching ${hours}h of 1s klines for ${symbol} from Binance…`)
+    this.logger.info(`Fetching ${hours}h of ${tag} klines for ${symbol} from Binance…`)
     fs.mkdirSync(CACHE_DIR, { recursive: true })
-    const samples = await fetchBinanceKlines1s(symbol, cursorStart, endTime, {
+    const samples = await fetchBinanceKlines(symbol, cursorStart, endTime, {
+      intervalSeconds,
       onProgress: (partial) => {
         try {
           const merged = [...pre, ...partial]
@@ -170,6 +197,7 @@ export default class Backtest extends BaseCommand {
     const merged = [...pre, ...samples]
       .sort((a, b) => a.t - b.t)
       .filter((s, i, arr) => i === 0 || arr[i - 1].t !== s.t)
+      .filter((s) => s.t >= startTime && s.t < endTime)
     try {
       fs.writeFileSync(cacheFile, JSON.stringify(merged))
       this.logger.info(`Cached ${merged.length} samples to ${cacheFile}`)

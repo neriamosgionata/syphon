@@ -50,7 +50,12 @@ export interface BacktestConfig {
   maxLossStreak?: number
   /** Pause duration after hitting maxLossStreak. 0 = until the next win. */
   lossStreakPauseSeconds?: number
-  /** Maker execution: enter via limit, fill if touched within this window (s). 0 = MARKET. */
+  /**
+   * Maker execution: enter via limit, fill if touched within this window (s). 0 = MARKET.
+   * NOTE: on coarse bars a fill window shorter than the sample interval can
+   * never fill (no bar trades inside it) — the engine falls back to MARKET
+   * when limitFillSeconds < the bar interval.
+   */
   limitFillSeconds?: number
   /** Buy limit placed this % above the decision price. */
   limitOffsetPct?: number
@@ -141,6 +146,13 @@ export class BacktestEngine {
     // The feed is a class field so run() must be re-entrant: previous runs
     // (and any strategy warm-up) must not leak into this one.
     this.feed.clearAll()
+    // Coarse bars carry no information between samples — decide once per
+    // sample interval at most (a 10s loop over 1m bars would just replay
+    // the same close 6×, costing 6× CPU for identical decisions).
+    const intervalSeconds = Math.min(Math.max(cfg.strategy.sampleIntervalSeconds || 1, 1), 3600)
+    // Trim the feed to the longest lookback any indicator needs so multi-
+    // year 1m runs don't rescan the whole series every decision tick.
+    this.feed.setMaxSamples(this.feedSamplesNeeded(cfg, intervalSeconds))
     const series = [...samples].sort((a, b) => a.t - b.t)
     const startTime = series[0].t
     const endTime = series[series.length - 1].t
@@ -206,7 +218,8 @@ export class BacktestEngine {
     }
 
     // Decision times: every loopIntervalSeconds from the first sample.
-    const intervalMs = Math.max(1, Math.round(cfg.loopIntervalSeconds * 1000))
+    const loopSeconds = Math.max(Math.round(cfg.loopIntervalSeconds), intervalSeconds)
+    const intervalMs = Math.max(1, Math.round(loopSeconds * 1000))
     for (let t = startTime; t <= endTime; t += intervalMs) {
       // Advance the feed with every sample at or behind the decision time.
       prevFeedIndex = feedIndex
@@ -346,10 +359,11 @@ export class BacktestEngine {
               }
               // Volatility targeting: scale exposure to a target vol level.
               if (cfg.volTargetPct && cfg.volTargetPct > 0 && cfg.volTargetWindowSeconds && cfg.volTargetWindowSeconds > 0) {
+                const volWindow = Math.max(1, Math.round(cfg.volTargetWindowSeconds / intervalSeconds))
                 const volPct = cfg.strategy.harVolForecast
-                  ? this.feed.harVolatilityPct(cfg.symbol, cfg.volTargetWindowSeconds, cfg.volTargetWindowSeconds * 10, cfg.volTargetWindowSeconds * 60, t)
-                  : this.feed.volatilityPct(cfg.symbol, cfg.volTargetWindowSeconds, t)
-                const mult = volatilityMultiplier(volPct, cfg.volTargetPct, cfg.volTargetMaxMult || 2)
+                  ? this.feed.harVolatilityPct(cfg.symbol, volWindow, volWindow * 10, volWindow * 60, t)
+                  : this.feed.volatilityPct(cfg.symbol, volWindow, t)
+                const mult = volatilityMultiplier(volPct, cfg.volTargetPct, cfg.volTargetMaxMult || 2, intervalSeconds)
                 // Scale but never exceed the per-position cap.
                 sizePct = Math.min(sizePct * mult, cfg.maxSinglePositionPct)
               }
@@ -360,7 +374,9 @@ export class BacktestEngine {
                 const rawQty = (equity * sizePct) / price
                 const quantity = Math.floor(rawQty * 1e6) / 1e6
                 if (quantity > 0) {
-                  const makerMode = cfg.limitFillSeconds && cfg.limitFillSeconds > 0
+                  // A limit-fill window shorter than one bar can never fill
+                  // on coarse samples — fall back to MARKET in that case.
+                  const makerMode = !!cfg.limitFillSeconds && cfg.limitFillSeconds >= intervalSeconds
                   const entryFee = makerMode ? (cfg.makerFeePct ?? cfg.feePct) : cfg.feePct
                   const limit = price * (1 + (cfg.limitOffsetPct ?? 0) / 100)
 
@@ -435,6 +451,37 @@ export class BacktestEngine {
       trades,
       equityCurve,
     }
+  }
+
+  /**
+   * Longest sample lookback the strategy can ask the feed for. The feed
+   * trims to this so per-tick scans stay bounded on coarse (1m) bars; at 1s
+   * the bound stays 14400 (the feed default), preserving the live shape.
+   *
+   * Sample-count lookbacks (EMA periods, vol/HAR windows) dominate on 1s
+   * bars; on 1m bars the real-time windows (slope/CUSUM/momentum) plus a
+   * period of EMA seed cover the rest.
+   */
+  private feedSamplesNeeded(cfg: BacktestConfig, intervalSeconds: number): number {
+    const s = cfg.strategy
+    const bars = (seconds: number): number => (seconds > 0 ? Math.max(1, Math.round(seconds / intervalSeconds)) : 0)
+    const max = Math.max(
+      s.emaPeriod,
+      s.regimeEmaPeriod,
+      s.choppinessPeriod,
+      s.volumeWindowSamples,
+      s.volatilityWindowSamples * (s.harVolForecast ? 60 : 1),
+      s.emaPeriod + bars(s.trendSlopeWindowSeconds),
+      s.regimeEmaPeriod + bars(s.regimeSlopeWindowSeconds),
+      s.emaPeriod + bars(s.cusumWindowSeconds),
+      bars(s.momentumSeconds) + 1,
+      cfg.volTargetPct && cfg.volTargetPct > 0 && cfg.volTargetWindowSeconds
+        ? Math.max(1, Math.round(cfg.volTargetWindowSeconds / intervalSeconds)) * 60
+        : 0,
+      24
+    )
+    // 1s runs keep the live 14400-sample buffer untouched.
+    return intervalSeconds === 1 ? 14400 : Math.min(max + 4, 14400)
   }
 
   private computeMetrics(

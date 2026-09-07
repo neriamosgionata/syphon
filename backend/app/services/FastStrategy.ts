@@ -32,22 +32,32 @@ const SECONDS_PER_YEAR = 31_536_000
 /**
  * Volatility-targeting multiplier (Moreira-Muir): scale exposure so the
  * portfolio's realized vol matches a target. `perSampleVolPct` is the
- * per-sample (≈1s) stddev of returns in % — annualized with sqrt(seconds
- * per year). Clamped to [0.2, maxMult]. 1.0 when vol is unmeasurable.
+ * stddev of per-sample returns in % — annualized with sqrt(seconds per
+ * year / samples per second), i.e. cadence-corrected (1s samples use the
+ * full year; 60s samples annualize with sqrt of minutes per year).
+ * Clamped to [0.2, maxMult]. 1.0 when vol is unmeasurable.
  */
 export function volatilityMultiplier(
   perSampleVolPct: number | null,
   targetAnnPct: number,
-  maxMult = 2
+  maxMult = 2,
+  sampleIntervalSeconds = 1
 ): number {
   if (perSampleVolPct === null || perSampleVolPct <= 0 || !Number.isFinite(perSampleVolPct)) return 1
   if (targetAnnPct <= 0) return 1
-  const annualized = perSampleVolPct * Math.sqrt(SECONDS_PER_YEAR)
+  const interval = Math.min(Math.max(sampleIntervalSeconds || 1, 1), 3600)
+  const annualized = perSampleVolPct * Math.sqrt(SECONDS_PER_YEAR / interval)
   if (annualized <= 0 || !Number.isFinite(annualized)) return 1
   return Math.min(Math.max(maxMult, 0), Math.max(0.2, targetAnnPct / annualized))
 }
 
 export interface FastStrategyConfig {
+  /**
+   * Seconds between feed samples the strategy was built for: 1 on the live
+   * 1s loop, 60 for 1m-bar backtests. Sample-count lookbacks are expressed
+   * per-sample, so this keeps time semantics identical across cadences.
+   */
+  sampleIntervalSeconds?: number
   momentumSeconds: number
   momentumThresholdPct: number
   rsiLow: number
@@ -142,43 +152,60 @@ export interface FastStrategyConfig {
  * Structural mapping from a persisted config row (AlgoConfig or a plain
  * object with the same field names) onto the strategy config. A value of
  * 0/null disables the corresponding control.
- */export function fastStrategyFromConfig(cfg: {
-  fastMomentumSeconds: number
-  fastMomentumThresholdPct: number
-  fastRsiLow: number
-  fastRsiHigh: number
-  fastStopLossPct: number
-  fastTakeProfitPct: number
-  fastExitReversalPct: number
-  fastTrailingStopPct?: number | null
-  fastTrailingActivatePct?: number | null
-  fastMaxHoldSeconds?: number | null
-  fastEmaPeriod?: number | null
-  fastVolatilityWindowSeconds?: number | null
-  fastVolatilityMult?: number | null
-  fastVolatilityFloorPct?: number | null
-  fastVolatilityCeilingPct?: number | null
-  fastTrendMode?: boolean | number | null
-  fastTrendSlopePct?: number | null
-  fastTrendSlopeWindowSeconds?: number | null
-  fastRegimeEmaPeriod?: number | null
-  fastRegimeSlopeWindowSeconds?: number | null
-  fastRegimeSlopeMinPct?: number | null
-  fastVolumeWindowSeconds?: number | null
-  fastVolumeMinRatio?: number | null
-  fastTrailingVolatilityMult?: number | null
-  fastScaleOutPct?: number | null
-  fastHarVolForecast?: boolean | number | null
-  fastCusumWindowSeconds?: number | null
-  fastCusumExitPct?: number | null
-  fastJumpSlackPct?: number | null
-  fastChoppinessPeriod?: number | null
-  fastChoppinessMax?: number | null
-  fastTradeStartUtc?: number | null
-  fastTradeEndUtc?: number | null
-  fastConvictionSizing?: boolean | number | null
-}): FastStrategyConfig {
+ *
+ * `opts.sampleIntervalSeconds` (default 1) rescales the SAMPLE-COUNT
+ * lookbacks (EMA periods, volatility/volume/choppiness windows) so their
+ * wall-clock meaning is preserved on coarser bars: at 60s/bar an EMA-900s
+ * period becomes 15 samples, a 3600s vol window 60 samples, etc. True-time
+ * windows (momentum, CUSUM, slope windows, max hold) are cadence-free and
+ * pass through unchanged.
+ */
+export function fastStrategyFromConfig(
+  cfg: {
+    fastMomentumSeconds: number
+    fastMomentumThresholdPct: number
+    fastRsiLow: number
+    fastRsiHigh: number
+    fastStopLossPct: number
+    fastTakeProfitPct: number
+    fastExitReversalPct: number
+    fastTrailingStopPct?: number | null
+    fastTrailingActivatePct?: number | null
+    fastMaxHoldSeconds?: number | null
+    fastEmaPeriod?: number | null
+    fastVolatilityWindowSeconds?: number | null
+    fastVolatilityMult?: number | null
+    fastVolatilityFloorPct?: number | null
+    fastVolatilityCeilingPct?: number | null
+    fastTrendMode?: boolean | number | null
+    fastTrendSlopePct?: number | null
+    fastTrendSlopeWindowSeconds?: number | null
+    fastRegimeEmaPeriod?: number | null
+    fastRegimeSlopeWindowSeconds?: number | null
+    fastRegimeSlopeMinPct?: number | null
+    fastVolumeWindowSeconds?: number | null
+    fastVolumeMinRatio?: number | null
+    fastTrailingVolatilityMult?: number | null
+    fastScaleOutPct?: number | null
+    fastHarVolForecast?: boolean | number | null
+    fastCusumWindowSeconds?: number | null
+    fastCusumExitPct?: number | null
+    fastJumpSlackPct?: number | null
+    fastChoppinessPeriod?: number | null
+    fastChoppinessMax?: number | null
+    fastTradeStartUtc?: number | null
+    fastTradeEndUtc?: number | null
+    fastConvictionSizing?: boolean | number | null
+  },
+  opts?: { sampleIntervalSeconds?: number }
+): FastStrategyConfig {
+  const sampleInterval = Math.min(Math.max(opts?.sampleIntervalSeconds || 1, 1), 3600)
+  const samples = (seconds: number | null | undefined): number => {
+    if (!seconds || seconds <= 0) return 0
+    return Math.max(1, Math.round(seconds / sampleInterval))
+  }
   return {
+    sampleIntervalSeconds: sampleInterval,
     momentumSeconds: cfg.fastMomentumSeconds,
     momentumThresholdPct: cfg.fastMomentumThresholdPct,
     rsiLow: cfg.fastRsiLow,
@@ -189,18 +216,18 @@ export interface FastStrategyConfig {
     trailingStopPct: cfg.fastTrailingStopPct ?? 0,
     trailingActivatePct: cfg.fastTrailingActivatePct ?? 0,
     maxHoldSeconds: cfg.fastMaxHoldSeconds ?? 0,
-    emaPeriod: cfg.fastEmaPeriod ?? 0,
-    volatilityWindowSamples: cfg.fastVolatilityWindowSeconds ?? 0,
+    emaPeriod: samples(cfg.fastEmaPeriod),
+    volatilityWindowSamples: samples(cfg.fastVolatilityWindowSeconds),
     volatilityMult: cfg.fastVolatilityMult ?? 0,
     volatilityFloorPct: cfg.fastVolatilityFloorPct ?? 0.05,
     volatilityCeilingPct: cfg.fastVolatilityCeilingPct ?? 0,
     trendMode: cfg.fastTrendMode === true || cfg.fastTrendMode === 1 || cfg.fastTrendMode === '1',
     trendSlopePct: cfg.fastTrendSlopePct ?? 0,
     trendSlopeWindowSeconds: cfg.fastTrendSlopeWindowSeconds ?? 0,
-    regimeEmaPeriod: cfg.fastRegimeEmaPeriod ?? 0,
+    regimeEmaPeriod: samples(cfg.fastRegimeEmaPeriod),
     regimeSlopeWindowSeconds: cfg.fastRegimeSlopeWindowSeconds ?? 0,
     regimeSlopeMinPct: cfg.fastRegimeSlopeMinPct ?? 0,
-    volumeWindowSamples: cfg.fastVolumeWindowSeconds ?? 0,
+    volumeWindowSamples: samples(cfg.fastVolumeWindowSeconds),
     volumeMinRatio: cfg.fastVolumeMinRatio ?? 0,
     trailingVolatilityMult: cfg.fastTrailingVolatilityMult ?? 0,
     scaleOutPct: cfg.fastScaleOutPct ?? 0,
@@ -208,7 +235,7 @@ export interface FastStrategyConfig {
     cusumWindowSeconds: cfg.fastCusumWindowSeconds ?? 0,
     cusumExitPct: cfg.fastCusumExitPct ?? 0,
     jumpSlackPct: cfg.fastJumpSlackPct ?? 0,
-    choppinessPeriod: cfg.fastChoppinessPeriod ?? 0,
+    choppinessPeriod: samples(cfg.fastChoppinessPeriod),
     choppinessMax: cfg.fastChoppinessMax ?? 0,
     tradeStartUtc: cfg.fastTradeStartUtc ?? 0,
     tradeEndUtc: cfg.fastTradeEndUtc ?? 24,
@@ -483,6 +510,16 @@ export class FastStrategy {
   }
 
   /**
+   * Per-sample vol → per-minute vol. Per-minute σ = per-sample σ × √(60 /
+   * interval): at 1s samples that's ×√60; a 60s bar already IS a minute
+   * (×1). Keeps vol-scaled stops/trails time-consistent across cadences.
+   */
+  private perMinuteVolPct(sampleVolPct: number, cfg: FastStrategyConfig): number {
+    const interval = Math.min(Math.max(cfg.sampleIntervalSeconds || 1, 1), 60)
+    return sampleVolPct * Math.sqrt(60 / interval)
+  }
+
+  /**
    * Entry stop/take-profit levels. Percentages are scaled up by volatility:
    * measured per-minute vol above the floor widens SL (and TP, preserving
    * the configured risk/reward ratio) so trades aren't stopped out by noise
@@ -503,8 +540,7 @@ export class FastStrategy {
     if (cfg.volatilityWindowSamples > 0 && cfg.volatilityMult > 0 && price > 0) {
       const volPct = measuredVolPct ?? this.measuredVolPct(feed, symbol, cfg.volatilityWindowSamples, now, cfg)
       if (volPct !== null) {
-        // Per-sample (≈per-second) vol → per-minute, floored.
-        const minuteVol = Math.max(volPct * Math.sqrt(60), cfg.volatilityFloorPct)
+        const minuteVol = Math.max(this.perMinuteVolPct(volPct, cfg), cfg.volatilityFloorPct)
         const scaled = cfg.volatilityMult * minuteVol
         if (scaled > cfg.stopLossPct) {
           const factor = scaled / cfg.stopLossPct
@@ -565,7 +601,7 @@ export class FastStrategy {
         if (cfg.trailingVolatilityMult > 0 && cfg.volatilityWindowSamples > 0) {
           const volPct = this.measuredVolPct(feed, symbol, cfg.volatilityWindowSamples, now, cfg)
           if (volPct !== null) {
-            const minuteVol = Math.max(volPct * Math.sqrt(60), cfg.volatilityFloorPct)
+            const minuteVol = Math.max(this.perMinuteVolPct(volPct, cfg), cfg.volatilityFloorPct)
             trailPct = Math.max(trailPct, cfg.trailingVolatilityMult * minuteVol)
           }
         }

@@ -1,6 +1,6 @@
 import { test } from '@japa/runner'
 import { MomentumFeed } from '../../app/services/MomentumFeed.js'
-import { FastStrategy, FastStrategyConfig, volatilityMultiplier } from '../../app/services/FastStrategy.js'
+import { FastStrategy, FastStrategyConfig, fastStrategyFromConfig, volatilityMultiplier } from '../../app/services/FastStrategy.js'
 
 // FastStrategy is the pure deterministic entry/exit core shared by the
 // live loop and the backtester. All tests are synthetic price series fed
@@ -727,5 +727,90 @@ test.group('FastStrategy HAR volatility', () => {
     const har = feed.harVolatilityPct('BTC', 30, 300, 1800)!
     assert.isAbove(short, 1) // the spike dominates the 30s window
     assert.isBelow(har, short) // long-horizon calm drags the blend down
+  })
+})
+
+test.group('fastStrategyFromConfig interval scaling', () => {
+  const baseRaw = {
+    fastMomentumSeconds: 60,
+    fastMomentumThresholdPct: 0.1,
+    fastRsiLow: 0,
+    fastRsiHigh: 1000,
+    fastStopLossPct: 0.5,
+    fastTakeProfitPct: 1.0,
+    fastExitReversalPct: -0.3,
+  }
+
+  test('1s default keeps sample counts as seconds', ({ assert }) => {
+    const s = fastStrategyFromConfig({ ...baseRaw, fastEmaPeriod: 900, fastVolatilityWindowSeconds: 3600, fastRegimeEmaPeriod: 3600, fastChoppinessPeriod: 600 })
+    assert.equal(s.sampleIntervalSeconds, 1)
+    assert.equal(s.emaPeriod, 900)
+    assert.equal(s.volatilityWindowSamples, 3600)
+    assert.equal(s.regimeEmaPeriod, 3600)
+    assert.equal(s.choppinessPeriod, 600)
+  })
+
+  test('60s bars rescale sample lookbacks, true-time windows pass through', ({ assert }) => {
+    const s = fastStrategyFromConfig(
+      { ...baseRaw, fastEmaPeriod: 900, fastVolatilityWindowSeconds: 3600, fastRegimeEmaPeriod: 3600, fastChoppinessPeriod: 600, fastMaxHoldSeconds: 7200, fastTrendSlopeWindowSeconds: 1800, fastCusumWindowSeconds: 300 },
+      { sampleIntervalSeconds: 60 }
+    )
+    assert.equal(s.sampleIntervalSeconds, 60)
+    assert.equal(s.emaPeriod, 15) // 900s / 60
+    assert.equal(s.volatilityWindowSamples, 60)
+    assert.equal(s.regimeEmaPeriod, 60)
+    assert.equal(s.choppinessPeriod, 10)
+    assert.equal(s.momentumSeconds, 60) // time-based: unchanged
+    assert.equal(s.maxHoldSeconds, 7200) // true time: unchanged
+    assert.equal(s.trendSlopeWindowSeconds, 1800) // true time: unchanged
+    assert.equal(s.cusumWindowSeconds, 300) // true time: unchanged
+  })
+
+  test('sub-period windows floor at one sample', ({ assert }) => {
+    const s = fastStrategyFromConfig({ ...baseRaw, fastEmaPeriod: 30, fastVolatilityWindowSeconds: 20 }, { sampleIntervalSeconds: 60 })
+    assert.equal(s.emaPeriod, 1)
+    assert.equal(s.volatilityWindowSamples, 1)
+  })
+})
+
+test.group('FastStrategy vol scaling cadence invariance', () => {
+  test('per-minute vol drives identical stops on 1s and 1m feeds', ({ assert }) => {
+    const r1s = 0.0003 // 0.03% per-second return
+    const r1m = r1s * Math.sqrt(60)
+
+    // 1s feed: 3601 samples with alternating ±r1s returns (σ = r1s) — a
+    // full vol window plus the seed return.
+    const feed1s = new MomentumFeed()
+    let p1s = 100
+    for (let i = 0; i <= 3600; i++) {
+      p1s *= 1 + (i % 2 === 0 ? r1s : -r1s)
+      feed1s.push('BTC', p1s, 1_000_000 + i * 1000)
+    }
+    // 1m feed: 61 samples with ±√60·r1s returns (σ = √60·r1s).
+    const feed1m = new MomentumFeed()
+    let p1m = 100
+    for (let i = 0; i <= 60; i++) {
+      p1m *= 1 + (i % 2 === 0 ? r1m : -r1m)
+      feed1m.push('BTC', p1m, 2_000_000 + i * 60_000)
+    }
+
+    const mk = (interval: number, windowSamples: number): FastStrategyConfig => ({
+      ...baseCfg(),
+      sampleIntervalSeconds: interval,
+      volatilityWindowSamples: windowSamples,
+      volatilityMult: 3,
+      volatilityFloorPct: 0, // no floor — we test pure scaling
+      volatilityCeilingPct: 0,
+      harVolForecast: false,
+    })
+    const now1s = 1_000_000 + 3600 * 1000
+    const now1m = 2_000_000 + 60 * 60_000
+    const l1s = strategy.entryLevels(feed1s, 'BTC', 100, now1s, mk(1, 3600), null)
+    const l1m = strategy.entryLevels(feed1m, 'BTC', 100, now1m, mk(60, 60), null)
+
+    // Same per-minute vol ⇒ same scaled stop distance, whatever the cadence.
+    assert.isAbove(l1s.stopLossPct, 0.5) // scaling engaged (above the base SL)
+    assert.closeTo(l1s.stopLossPct, l1m.stopLossPct, 0.001)
+    assert.closeTo(l1s.stopLoss, l1m.stopLoss, 0.1)
   })
 })

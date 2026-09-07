@@ -376,3 +376,82 @@ test.group('BacktestEngine', () => {
     assert.closeTo(result.trades[0].quantity, engine.run(samples, baseCfg()).trades[0].quantity, 1e-6)
   })
 })
+
+test.group('BacktestEngine coarse intervals', () => {
+  const strategy = (overrides: Record<string, unknown> = {}) => ({
+    ...baseCfg().strategy,
+    momentumSeconds: 60,
+    momentumThresholdPct: 0.02,
+    stopLossPct: 0.5,
+    takeProfitPct: 5,
+    exitReversalPct: -5,
+    cooldownSeconds: 30,
+    sampleIntervalSeconds: 60,
+    ...overrides,
+  })
+
+  test('decision loop floors to the sample interval on 1m bars', ({ assert }) => {
+    // 3h of 1m bars in a steady uptrend.
+    const samples = Array.from({ length: 180 }, (_, i) => ({
+      t: T0 + i * 60_000,
+      p: 100 * Math.pow(1.0002, i),
+    }))
+    const result = engine.run(samples, baseCfg({ strategy: strategy(), loopIntervalSeconds: 10, cooldownSeconds: 30 }))
+    // Coarse bars carry no new information between samples — decide at 60s.
+    const step = result.equityCurve.length > 1 ? result.equityCurve[1].t - result.equityCurve[0].t : 0
+    assert.equal(step, 60_000)
+    assert.isAbove(result.metrics.totalTrades, 0)
+    assert.isAbove(result.strategyReturnPct, 0)
+  })
+
+  test('run is re-entrant across interval switches', ({ assert }) => {
+    const coarse = Array.from({ length: 120 }, (_, i) => ({ t: T0 + i * 60_000, p: 100 * Math.pow(1.0001, i) }))
+    const fine = Array.from({ length: 4 * 3600 }, (_, i) => ({ t: T0 + i * 1000, p: 100 * Math.pow(1.0001, i) }))
+    engine.run(coarse, baseCfg({ strategy: strategy(), loopIntervalSeconds: 10 }))
+    const back = engine.run(fine, baseCfg({ strategy: { ...strategy(), sampleIntervalSeconds: 1 } }))
+    assert.isAbove(back.metrics.totalTrades, 1)
+    // Feed buffer shrank for the coarse run; the fine run must restore the 1s bound.
+    assert.isAbove(back.equityCurve.length, 100)
+  })
+})
+
+test.group('BacktestEngine maker fallback on coarse bars', () => {
+  const coarseSeries = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ t: T0 + i * 60_000, p: 100 * Math.pow(1.0003, i) }))
+
+  const mkStrategy = () => ({
+    ...baseCfg().strategy,
+    sampleIntervalSeconds: 60,
+    momentumSeconds: 60,
+    momentumThresholdPct: 0.02,
+    stopLossPct: 0.5,
+    takeProfitPct: 5,
+    exitReversalPct: -5,
+  })
+
+  test('sub-bar limit window cannot fill — falls back to MARKET so entries still happen', ({ assert }) => {
+    // 15s limit window < 60s bars: a limit could never fill (pre-fix: 0 trades).
+    const samples = coarseSeries(240)
+    const result = engine.run(samples, baseCfg({
+      strategy: mkStrategy(),
+      limitFillSeconds: 15,
+      limitOffsetPct: 0.05,
+      feePct: 0.001,
+      cooldownSeconds: 30,
+    }))
+    assert.isAbove(result.metrics.totalTrades, 0)
+  })
+
+  test('full-bar limit window keeps maker execution on coarse bars', ({ assert }) => {
+    const samples = coarseSeries(240)
+    const result = engine.run(samples, baseCfg({
+      strategy: mkStrategy(),
+      limitFillSeconds: 60,
+      limitOffsetPct: 0.05,
+      feePct: 0.001,
+      cooldownSeconds: 30,
+    }))
+    assert.isAbove(result.metrics.totalTrades, 0)
+    assert.isAbove(result.metrics.totalPnl, 0)
+  })
+})

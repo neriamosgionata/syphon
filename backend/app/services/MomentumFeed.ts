@@ -74,6 +74,19 @@ export class MomentumFeed {
   private series = new Map<string, MomentumSample[]>()
   private maxSamples = 14400 // 4 hours at 1s sampling (trend mode needs long windows)
 
+  /**
+   * Resize the per-symbol sample buffer. The backtester trims the buffer to
+   * the longest indicator lookback so coarse-interval (1m) multi-year runs
+   * don't rescan huge arrays on every decision tick. Live default (14400)
+   * is left untouched.
+   */
+  public setMaxSamples(max: number): void {
+    this.maxSamples = Math.min(Math.max(Math.round(max), 24), 200_000)
+    for (const [symbol, arr] of this.series) {
+      if (arr.length > this.maxSamples) arr.splice(0, arr.length - this.maxSamples)
+    }
+  }
+
   public push(symbol: string, price: number, t: number = Date.now(), volume?: number): void {
     if (!Number.isFinite(price) || price <= 0) return
     let arr = this.series.get(symbol)

@@ -2,6 +2,25 @@
 
 Where the algo work stands. Maker-execution + volatility-targeting shipped (migration 18, committed). Month-long validation DONE: the edge is regime-lucky, not validated. Toolchain moved to Bun (see AGENTS.md "Bun runtime" section).
 
+## Multi-year 1m certification — THE VERDICT (2026-09-07): strategy loses money
+
+Built the coarse-bar pipeline and answered the certification question on 3 years of data. **The live config loses ~15-18%/yr net of realistic execution. It does not generate value.**
+
+- **`bun ace backtest:longterm --symbol=BTC --days=1095 --window-days=30`** (new command): crawls multi-year Binance 1m klines (checkpointed, `backtests/cache/{SYM}_1m_{days}d.json`; 3y = 1.58M bars ≈ 15 min first fetch), runs the LIVE config (no IS selection) over the full span + consecutive 30d windows.
+- **Full span (2023-09 → 2026-09): −45.6% net, 1171 trades, WR 21.3%, PF 0.34, maxDD 45.9%** vs buy&hold +206%. Maker variant (best case): −37.9%, PF 0.38. **1/37 windows net-positive; 0/37 beat buy&hold.** The only positive window is the trending-rally month — same regime-luck as the 1s data. Post-vacation window (Aug 23–Sep 7): −0.38% (9t).
+- Matches the 21d 1s month verdict (PF 0.79): the intraminute trend-rider does not pay for its ~78% losers across regimes at 0.26% fees + 10bps slip. The 1s toolchain was right to stay skeptical; 3y of 1m data confirms it. This was ALGO_WIP's open question since 2026-08-21 — now closed: **the edge does not exist at this horizon**. Do NOT deploy as-is.
+- Toolchain changes: `BacktestEngine`/`FastStrategy`/`MomentumFeed` are now interval-aware (`sampleIntervalSeconds`, default 1 = zero change; 60 = 1m bars: sample-count lookbacks ÷60, time windows untouched, per-minute vol + vol-target annualization cadence-corrected, engine decides once per bar, feed buffer trimmed to longest lookback). `fetchBinanceKlines(symbol, start, end, {intervalSeconds})` generalizes the 1s fetcher (fixes cursor advance). Commands gained `--bar-interval=1s|1m` + interval-aware hour caps; `backtest:walkforward` on 1m runs live-config-only (no 1s-tuned sweep grid). Cache-window COVERAGE check fixed (stale/partial caches refetch only the missing span — the Aug-20 bug that silently backfilled 495h). **Maker limits with a fill window shorter than one bar can never fill on coarse bars — engine falls back to MARKET** (live 15s window → market fills at 1m; pass `fastLimitFillSeconds >= 60` override for the maker analog). 345 unit tests.
+
+## Walk-forward retry after vacation (2026-09-07, BTC 7×72h windows Aug 18 → Sep 7)
+
+Nightly cron ran 16/17 nights during vacation (Aug 21 → Sep 6); missed Sep 7 01:30 (laptop off), gap filled manually with `backtest:update-cache` (BTC cache slid to now at 504h; ETH/SOL reached 423h and climb ~24h/night toward 504h).
+
+- **Verdicts: 0/6 PASS.** Every in-sample winner collapses out-of-sample — same pattern as pre-vacation, ~4-12 trades/window means IS PF 3.25 on 11 trades is still grid noise (OOS PF 0.94). Window w4 untestable (no config ≥10t). Best OOS nets on the fresh vacation-period windows (w1, w6): −0.15%, −0.43%.
+- **Live config on freshest window (Sep 4–7):** −0.01% net, 1 trade (+0.09% via momentum-reversal exit), buy&hold +0.33%. Flat, as designed (very selective).
+- Bottom line: ~38 days of 1s data still cannot certify. 1m-klines engine (multi-year) remains the only honest path.
+- **Bug found (loadSamples resume logic, `backtest_walkforward.ts` + `backtest.ts`)**: when a stale window cache file exists, resume-from-partial backfills the ENTIRE gap from the stale file's last sample to now, ignoring the requested window size. First walk-forward attempt silently produced 219h "72h windows" of overlapping garbage (787k samples each). Walk-forward must run with `--fresh` AFTER deleting the `*_wf*` cache files. The `backtest` 72h run similarly backfilled 495h (1.78M samples). Resume should be bounded by `hours` (cap merge at requested window), not unbounded.
+- Also: two `fast-algo-service.spec.ts` unit-test processes hung since Aug 21 (17 days) — killed 2026-09-07.
+
 ## Toolchain
 - **Runtime: Bun 1.4.0-canary** (`bun ace.js ...`, `bun run test`). Works end-to-end after the fixes documented in AGENTS.md: inlined tsconfig (no `extends`), `packages/better-sqlite3` shim (bun:sqlite under Bun, node:sqlite under Node), `bunfig-preload.ts` (jsonschema resolveUrl + execa refCounted patches).
 - **Node v24 still works** (265/265) — same shim uses node:sqlite there. Node ≥ 22.5 required (node:sqlite).

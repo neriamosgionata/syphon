@@ -316,3 +316,17 @@ test.group('MomentumFeed max down move', () => {
     assert.isNull(feed.maxDownMovePct('BTC', 60, t0 + 10_000))
   })
 })
+
+test.group('MomentumFeed buffer sizing', () => {
+  test('setMaxSamples trims oldest samples and clamps', ({ assert }) => {
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 1000; i++) feed.push('BTC', 100 + i, 1_000_000 + i * 1000)
+    feed.setMaxSamples(50)
+    assert.equal(feed.sampleCount('BTC'), 50)
+    assert.equal(feed.lastPrice('BTC'), 1099) // newest kept
+    feed.setMaxSamples(10_000) // grow again — no data invented
+    assert.equal(feed.sampleCount('BTC'), 50)
+    feed.setMaxSamples(1) // clamped to the 24-sample floor
+    assert.equal(feed.sampleCount('BTC'), 24)
+  })
+})

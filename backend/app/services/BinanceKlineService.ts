@@ -1,19 +1,26 @@
-// ─── Binance 1s kline fetcher for backtesting ─────────────────
+// ─── Binance kline fetcher for backtesting ────────────────────
 //
 // Public REST, no API key. 1-second spot klines give the sub-minute
-// resolution the fast strategy needs (10-60s momentum windows).
+// resolution the fast strategy needs (10-60s momentum windows); 1m klines
+// provide the multi-year history the strategy can only be certified on.
 //
 // Rate limits: /api/v3/klines with limit=1000 costs 20 weight; the public
 // tier allows ~6000 weight/min, so ~150ms between pages is safe. Default
-// 6h of 1s data = ~22 pages.
+// 6h of 1s data = ~22 pages; a 3-year 1m crawl ≈ 1600 pages.
 
 import logger from '@adonisjs/core/services/logger'
 import type { BacktestSample } from '#services/BacktestEngine'
 
 const BINANCE_REST = 'https://api.binance.com'
 const MAX_KLINES_PER_REQUEST = 1000
-const MAX_PAGES = 2000 // ~23 days of 1s data
+const MAX_PAGES_1S = 2000 // ~23 days of 1s data
+const MAX_PAGES_COARSE = 100_000 // multi-year 1m crawls (~1600 pages/year)
 const PAGE_DELAY_MS = 150
+
+const INTERVALS_MS: Record<string, number> = {
+  '1s': 1000,
+  '1m': 60_000,
+}
 
 interface BinanceKline {
   openTime: number
@@ -41,24 +48,36 @@ export function parseBinanceKline(raw: any[]): BinanceKline {
   }
 }
 
+export interface BinanceFetchOptions {
+  onProgress?: (samples: BacktestSample[]) => void
+  /** Bar interval: '1s' (default) or '1m'. */
+  intervalSeconds?: number
+}
+
 /**
- * Fetch 1s closes in [startTime, endTime). Returns close prices only —
- * the feed/strategy consume a price series, not bars.
+ * Fetch kline closes in [startTime, endTime) at `intervalSeconds`
+ * (1 = 1s bars, 60 = 1m bars). Returns samples with intrabar h/l/v for
+ * stop/target fills and the volume gate.
  */
-export async function fetchBinanceKlines1s(
+export async function fetchBinanceKlines(
   symbol: string,
   startTime: number,
   endTime: number,
-  opts?: { onProgress?: (samples: BacktestSample[]) => void }
+  opts?: BinanceFetchOptions
 ): Promise<BacktestSample[]> {
+  const intervalSeconds = Math.min(Math.max(opts?.intervalSeconds || 1, 1), 3600)
+  const intervalKey = intervalSeconds >= 60 ? '1m' : '1s'
+  const intervalLabel = intervalSeconds >= 60 ? `${intervalSeconds / 60}m` : `${intervalSeconds}s`
+  const intervalMs = INTERVALS_MS[intervalKey]
   const pair = toBinancePair(symbol)
   const samples: BacktestSample[] = []
   const seen = new Set<number>()
+  const maxPages = intervalKey === '1s' ? MAX_PAGES_1S : MAX_PAGES_COARSE
 
   let cursor = startTime
   let pages = 0
-  while (cursor < endTime && pages < MAX_PAGES) {
-    const url = `${BINANCE_REST}/api/v3/klines?symbol=${pair}&interval=1s` +
+  while (cursor < endTime && pages < maxPages) {
+    const url = `${BINANCE_REST}/api/v3/klines?symbol=${pair}&interval=${intervalKey}` +
       `&startTime=${cursor}&endTime=${endTime}&limit=${MAX_KLINES_PER_REQUEST}`
 
     let json: any[]
@@ -112,15 +131,28 @@ export async function fetchBinanceKlines1s(
 
     const next = json[json.length - 1][0] as number
     if (next <= cursor) break // no progress → guard against infinite loop
-    cursor = next + 1000
+    cursor = next + intervalMs
     pages++
     // Checkpoint ~every 25 pages so an interrupted fetch can resume.
     if (pages % 25 === 0) opts?.onProgress?.(samples)
-    if (pages < MAX_PAGES) await new Promise((r) => setTimeout(r, PAGE_DELAY_MS))
+    if (pages < maxPages) await new Promise((r) => setTimeout(r, PAGE_DELAY_MS))
   }
   opts?.onProgress?.(samples)
 
   samples.sort((a, b) => a.t - b.t)
-  logger.info('[Binance] Fetched %d 1s samples for %s (%d pages)', samples.length, pair, pages)
+  logger.info('[Binance] Fetched %d %s samples for %s (%d pages)', samples.length, intervalLabel, pair, pages)
   return samples
+}
+
+/**
+ * Fetch 1s closes in [startTime, endTime) — close-only series for the
+ * intraminute feed (backward-compatible wrapper).
+ */
+export async function fetchBinanceKlines1s(
+  symbol: string,
+  startTime: number,
+  endTime: number,
+  opts?: { onProgress?: (samples: BacktestSample[]) => void }
+): Promise<BacktestSample[]> {
+  return fetchBinanceKlines(symbol, startTime, endTime, opts)
 }
