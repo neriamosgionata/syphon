@@ -4,11 +4,19 @@ Where the algo work stands. Maker-execution + volatility-targeting shipped (migr
 
 ## Multi-year 1m certification — THE VERDICT (2026-09-07): strategy loses money
 
-Built the coarse-bar pipeline and answered the certification question on 3 years of data. **The live config loses ~15-18%/yr net of realistic execution. It does not generate value.**
+Built the coarse-bar pipeline and answered the certification question on 3 years of data. **The live config loses 15-36%/yr net of realistic execution across all three assets. It does not generate value. Do NOT deploy.**
 
-- **`bun ace backtest:longterm --symbol=BTC --days=1095 --window-days=30`** (new command): crawls multi-year Binance 1m klines (checkpointed, `backtests/cache/{SYM}_1m_{days}d.json`; 3y = 1.58M bars ≈ 15 min first fetch), runs the LIVE config (no IS selection) over the full span + consecutive 30d windows.
-- **Full span (2023-09 → 2026-09): −45.6% net, 1171 trades, WR 21.3%, PF 0.34, maxDD 45.9%** vs buy&hold +206%. Maker variant (best case): −37.9%, PF 0.38. **1/37 windows net-positive; 0/37 beat buy&hold.** The only positive window is the trending-rally month — same regime-luck as the 1s data. Post-vacation window (Aug 23–Sep 7): −0.38% (9t).
-- Matches the 21d 1s month verdict (PF 0.79): the intraminute trend-rider does not pay for its ~78% losers across regimes at 0.26% fees + 10bps slip. The 1s toolchain was right to stay skeptical; 3y of 1m data confirms it. This was ALGO_WIP's open question since 2026-08-21 — now closed: **the edge does not exist at this horizon**. Do NOT deploy as-is.
+- **`bun ace backtest:longterm --symbol=BTC --days=1095 --window-days=30`** (new command, committed `8e9598e`): crawls multi-year Binance 1m klines (checkpointed, `backtests/cache/{SYM}_1m_{days}d.json`; 3y ≈ 1.58M bars ≈ 15 min first fetch), runs the LIVE config (no IS selection) over the full span + consecutive 30d windows.
+- **Full span (2023-09 → 2026-09, live config, 10bps slip, market fills):**
+
+  | Symbol | net | trades | WR | PF | maxDD | 30d windows >0 | vs buy&hold |
+  |---|---|---|---|---|---|---|---|
+  | BTC | −45.6% | 1171 | 21% | 0.34 | 46% | 1/37 | +206% bh |
+  | ETH | −60.5% | 1966 | 20% | 0.31 | 61% | 0/37 | +52% bh |
+  | SOL | −74.2% | 3233 | 20% | 0.32 | 74% | 0/37 | +432% bh |
+
+  Annualized ≈ −18%/yr (BTC), −27%/yr (ETH), −36%/yr (SOL). BTC maker variant (best case): −37.9%, PF 0.38. **111 window-months across 3 assets, exactly ONE net-positive** (BTC's trending-rally month — same regime-luck as the 1s data). Post-vacation BTC window (Aug 23–Sep 7): −0.38% (9t).
+- Matches the 21d 1s month verdict (PF 0.79): the intraminute trend-rider does not pay for its ~78-80% losers across regimes at 0.26% fees + 10bps slip. The 1s toolchain was right to stay skeptical; 3y of 1m data on three assets confirms it. This was ALGO_WIP's open question since 2026-08-21 — now closed: **the edge does not exist at this horizon**.
 - Toolchain changes: `BacktestEngine`/`FastStrategy`/`MomentumFeed` are now interval-aware (`sampleIntervalSeconds`, default 1 = zero change; 60 = 1m bars: sample-count lookbacks ÷60, time windows untouched, per-minute vol + vol-target annualization cadence-corrected, engine decides once per bar, feed buffer trimmed to longest lookback). `fetchBinanceKlines(symbol, start, end, {intervalSeconds})` generalizes the 1s fetcher (fixes cursor advance). Commands gained `--bar-interval=1s|1m` + interval-aware hour caps; `backtest:walkforward` on 1m runs live-config-only (no 1s-tuned sweep grid). Cache-window COVERAGE check fixed (stale/partial caches refetch only the missing span — the Aug-20 bug that silently backfilled 495h). **Maker limits with a fill window shorter than one bar can never fill on coarse bars — engine falls back to MARKET** (live 15s window → market fills at 1m; pass `fastLimitFillSeconds >= 60` override for the maker analog). 345 unit tests.
 
 ## Walk-forward retry after vacation (2026-09-07, BTC 7×72h windows Aug 18 → Sep 7)
