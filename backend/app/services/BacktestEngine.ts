@@ -475,6 +475,7 @@ export class BacktestEngine {
       s.regimeEmaPeriod + bars(s.regimeSlopeWindowSeconds),
       s.emaPeriod + bars(s.cusumWindowSeconds),
       bars(s.momentumSeconds) + 1,
+      s.efficiencyWindowDays > 0 ? Math.ceil((s.efficiencyWindowDays * 86_400) / intervalSeconds) : 0,
       cfg.volTargetPct && cfg.volTargetPct > 0 && cfg.volTargetWindowSeconds
         ? Math.max(1, Math.round(cfg.volTargetWindowSeconds / intervalSeconds)) * 60
         : 0,

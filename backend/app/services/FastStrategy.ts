@@ -144,6 +144,23 @@ export interface FastStrategyConfig {
   tradeStartUtc: number
   /** UTC hour when trading stops (1-24; 24 = end of day). Gate off when endUtc <= startUtc. */
   tradeEndUtc: number
+  /**
+   * Kaufman efficiency-ratio entry gate (0 = off): skip entries unless the
+   * market was directional over the last `efficiencyWindowDays` days — the
+   * |net move| / path-length ratio must be >= efficiencyMinPct (in %,
+   * e.g. 30 = 0.30). A trending market has ER ~40-70, chop ~5-20. Directly
+   * blocks "buy the rally pop inside a chop year" whipsaw entries.
+   */
+  efficiencyWindowDays?: number
+  efficiencyMinPct?: number
+  /**
+   * Efficiency-collapse exit (0 = off): while a position is held WITHOUT an
+   * armed trailing stop, exit if the efficiency ratio over
+   * `efficiencyWindowDays` drops below this % — the directional regime that
+   * justified the entry is gone and the open position is now chop-exposed.
+   * Trail-armed winners are left alone (the stop already protects them).
+   */
+  efficiencyExitPct?: number
   /** Scale position size with signal strength (slope/momentum vs threshold). 0 = off. */
   convictionSizing: boolean
 }
@@ -195,6 +212,9 @@ export function fastStrategyFromConfig(
     fastChoppinessMax?: number | null
     fastTradeStartUtc?: number | null
     fastTradeEndUtc?: number | null
+    fastEfficiencyWindowDays?: number | null
+    fastEfficiencyMinPct?: number | null
+    fastEfficiencyExitPct?: number | null
     fastConvictionSizing?: boolean | number | null
   },
   opts?: { sampleIntervalSeconds?: number }
@@ -239,6 +259,9 @@ export function fastStrategyFromConfig(
     choppinessMax: cfg.fastChoppinessMax ?? 0,
     tradeStartUtc: cfg.fastTradeStartUtc ?? 0,
     tradeEndUtc: cfg.fastTradeEndUtc ?? 24,
+    efficiencyWindowDays: cfg.fastEfficiencyWindowDays ?? 0,
+    efficiencyMinPct: cfg.fastEfficiencyMinPct ?? 0,
+    efficiencyExitPct: cfg.fastEfficiencyExitPct ?? 0,
     convictionSizing: cfg.fastConvictionSizing === true || cfg.fastConvictionSizing === 1,
   }
 }
@@ -305,6 +328,21 @@ export class FastStrategy {
         reason: `session: UTC ${utcHour}h outside [${cfg.tradeStartUtc}, ${cfg.tradeEndUtc})`,
         momentumPct: null, rsi: null, ema: null, volatilityPct: null, slopePct: null,
         stopLoss: null, takeProfit: null, stopLossPct: null,
+      }
+    }
+
+    // Efficiency-ratio gate: only enter when recent price action was
+    // directional, not a random-walk chop (Kaufman 1995). Lenient while the
+    // daily grid is warming up.
+    if (cfg.efficiencyWindowDays > 0 && cfg.efficiencyMinPct > 0) {
+      const er = feed.efficiencyRatioPct(symbol, cfg.efficiencyWindowDays, now)
+      if (er !== null && er < cfg.efficiencyMinPct) {
+        return {
+          shouldEnter: false,
+          reason: `efficiency ${er.toFixed(1)} < ${cfg.efficiencyMinPct} over ${cfg.efficiencyWindowDays}d (chop)`,
+          momentumPct: null, rsi: null, ema: null, volatilityPct: null, slopePct: null,
+          stopLoss: null, takeProfit: null, stopLossPct: null,
+        }
       }
     }
 
@@ -638,6 +676,20 @@ export class FastStrategy {
     }
     if (trailingStop !== null && !isBuy && price >= trailingStop) {
       return { shouldExit: true, reason: `trailing stop: ${price.toFixed(2)} >= ${trailingStop.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false }
+    }
+
+    // Efficiency-collapse cut: entry regime gone while the trail is still
+    // unarmed → don't sit through chop waiting for the stop. Trail-armed
+    // winners are exempt (their stop already ratchets).
+    if (cfg.efficiencyExitPct && cfg.efficiencyExitPct > 0 && cfg.efficiencyWindowDays && cfg.efficiencyWindowDays > 0 && trailingStop === null) {
+      const er = feed.efficiencyRatioPct(symbol, cfg.efficiencyWindowDays, now)
+      if (er !== null && er < cfg.efficiencyExitPct) {
+        return {
+          shouldExit: true,
+          reason: `efficiency collapse: ${er.toFixed(1)} < ${cfg.efficiencyExitPct} over ${cfg.efficiencyWindowDays}d`,
+          trailingStop, peakPrice: peak, scaleOut: false,
+        }
+      }
     }
 
     // CUSUM trend-break exit (changepoint-detection analog — Wood, Roberts &

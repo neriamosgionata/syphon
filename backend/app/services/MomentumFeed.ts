@@ -367,6 +367,43 @@ export class MomentumFeed {
   }
 
   /**
+   * Kaufman efficiency ratio over the last `windowDays` days: |net move| /
+   * path length, in percent (0-100). 100 = perfectly directional, ~0 =
+   * random walk/chop. Computed on a daily close grid derived from the
+   * sample cadence (one close per ~day), so it stays cheap on any bar size.
+   * Null while the lookback hasn't filled.
+   */
+  public efficiencyRatioPct(symbol: string, windowDays: number, now: number = Date.now()): number | null {
+    if (windowDays <= 0) return null
+    const arr = this.series.get(symbol)
+    if (!arr || arr.length < 4) return null
+    // Median inter-sample gap → daily step in samples.
+    const gaps: number[] = []
+    for (let i = Math.max(1, arr.length - 12); i < arr.length; i++) {
+      gaps.push(arr[i].t - arr[i - 1].t)
+    }
+    gaps.sort((a, b) => a - b)
+    const gapMs = gaps[Math.floor(gaps.length / 2)] || 0
+    if (gapMs <= 0) return null
+    const perDay = Math.max(1, Math.round(86_400_000 / gapMs))
+    const needed = windowDays * perDay
+    if (arr.length < needed + 2) return null
+
+    const closes: number[] = []
+    for (let i = arr.length - 1; i >= 0 && closes.length <= windowDays; i -= perDay) {
+      closes.push(arr[i].p)
+    }
+    if (closes.length < windowDays + 1) return null
+    let path = 0
+    for (let i = 0; i < closes.length - 1; i++) {
+      path += Math.abs(closes[i + 1] - closes[i])
+    }
+    const net = Math.abs(closes[0] - closes[closes.length - 1])
+    if (path <= 0) return 0
+    return (net / path) * 100
+  }
+
+  /**
    * Combined entry gate for the intraminute loop.
    * Passes when momentum over the window clears the threshold and RSI is
    * between the configured bounds. Missing RSI data is lenient (momentum

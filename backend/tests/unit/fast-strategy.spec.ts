@@ -814,3 +814,36 @@ test.group('FastStrategy vol scaling cadence invariance', () => {
     assert.closeTo(l1s.stopLoss, l1m.stopLoss, 0.1)
   })
 })
+
+test.group('FastStrategy efficiency-ratio gate', () => {
+  test('blocks entries when recent action is chop', ({ assert }) => {
+    const feed = new MomentumFeed()
+    let p = 100
+    // 12 days of alternating whole-day direction — multi-day chop.
+    for (let d = 0; d < 12; d++) {
+      const drift = d % 2 === 0 ? 1.02 : 1 / 1.02
+      for (let i = 0; i < 1440; i++) {
+        p *= Math.pow(drift, 1 / 1440)
+        feed.push('BTC', p, 1_000_000_000 + (d * 1440 + i) * 60_000)
+      }
+    }
+    const now = 1_000_000_000 + (12 * 1440 - 1) * 60_000
+    const cfg = { ...baseCfg(), trendMode: true, emaPeriod: 15, trendSlopePct: 0.1, trendSlopeWindowSeconds: 1800, efficiencyWindowDays: 5, efficiencyMinPct: 40 }
+    const sig = strategy.evaluateEntry(feed, 'BTC', p, now, cfg)
+    assert.isFalse(sig.shouldEnter)
+    assert.match(sig.reason ?? '', /efficiency/)
+  })
+
+  test('passes when recent action is directional', ({ assert }) => {
+    const feed = new MomentumFeed()
+    let p = 100
+    for (let i = 0; i < 3 * 1440; i++) {
+      p *= 1.0001
+      feed.push('BTC', p, 3_000_000_000 + i * 60_000)
+    }
+    const now = 3_000_000_000 + (3 * 1440 - 1) * 60_000
+    const cfg = { ...baseCfg(), trendMode: true, emaPeriod: 15, trendSlopePct: 0.1, trendSlopeWindowSeconds: 1800, efficiencyWindowDays: 1, efficiencyMinPct: 40, stopLossPct: 5, takeProfitPct: 0 }
+    const sig = strategy.evaluateEntry(feed, 'BTC', p, now, cfg)
+    assert.isTrue(sig.shouldEnter)
+  })
+})

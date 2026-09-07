@@ -330,3 +330,39 @@ test.group('MomentumFeed buffer sizing', () => {
     assert.equal(feed.sampleCount('BTC'), 24)
   })
 })
+
+test.group('MomentumFeed efficiency ratio', () => {
+  test('trending series scores high, multi-day chop scores low', ({ assert }) => {
+    // 3 days of 1m bars, steady drift → ER over 1 day ≈ 100.
+    const trend = new MomentumFeed()
+    let p = 100
+    for (let i = 0; i < 3 * 1440; i++) {
+      p *= 1.0001
+      trend.push('BTC', p, 1_000_000_000 + i * 60_000)
+    }
+    const tEr = trend.efficiencyRatioPct('BTC', 1, 1_000_000_000 + (3 * 1440 - 1) * 60_000)
+    assert.isNotNull(tEr)
+    assert.isAbove(tEr!, 90)
+
+    // 12 days alternating whole-day direction (+1% day, -1% day) — real
+    // chop happens at multi-day scale, so the daily close grid sees it.
+    const chop = new MomentumFeed()
+    p = 100
+    for (let d = 0; d < 12; d++) {
+      const drift = d % 2 === 0 ? 1.01 : 1 / 1.01
+      for (let i = 0; i < 1440; i++) {
+        p *= Math.pow(drift, 1 / 1440)
+        chop.push('BTC', p, 2_000_000_000 + (d * 1440 + i) * 60_000)
+      }
+    }
+    const cEr = chop.efficiencyRatioPct('BTC', 5, 2_000_000_000 + (12 * 1440 - 1) * 60_000)
+    assert.isNotNull(cEr)
+    assert.isBelow(cEr!, 25)
+  })
+
+  test('returns null while the daily lookback is warming up', ({ assert }) => {
+    const feed = new MomentumFeed()
+    for (let i = 0; i < 100; i++) feed.push('BTC', 100 + i, 1_000_000 + i * 1000)
+    assert.isNull(feed.efficiencyRatioPct('BTC', 30, 1_000_000 + 99 * 1000))
+  })
+})
