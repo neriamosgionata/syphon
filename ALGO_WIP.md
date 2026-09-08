@@ -91,3 +91,19 @@ finding. See AGENTS.md "Funding-carry subsystem" + `backend/backtests/carry_veri
   2026-09-08. Real execution NOT wired: needs Kraken Futures (or Binance Futures)
   executor + API keys + settlement reconciliation. See ALGO_PRODUCT.md for the
   (now blocked) daily-trend candidate, which this supersedes.
+
+## Venue rule + Kraken carry reality (2026-09-08)
+
+VENUE RULE: **Kraken only** — Binance is unavailable in Italy; ignored for
+everything (Binance 1s update-cache cron removed; historical Binance cache
+files kept as research data only).
+
+Kraken re-verification (`backend/backtests/carry_verify_kraken.ts`): the
+funding-carry edge is **~7× weaker on Kraken than Binance**. Kraken exposes
+~1y of hourly funding (REST `/derivatives/api/v3/historical-funding-rates`).
+Over 2025-09 → 2026-09: BTC +3.3%/yr (t 3.13), ETH +3.2%/yr (t 3.82) —
+significant; XRP/DOGE/LINK near zero; ADA −2.0%, LTC −2.0% negative.
+Composite +0.9%/yr, t 0.97 (NOT significant). Basket trimmed to BTC/ETH.
+Kraken carry = ~+3%/yr on notional, worst month −0.3%, negative streaks ≤3
+months — real but modest; the Binance-scale +0.5%/mo edge does not transfer.
+Live execution (Kraken Futures executor + keys) still unwired.
