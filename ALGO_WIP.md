@@ -74,3 +74,20 @@ UPDATE algo_configs SET fast_maker_execution=1, fast_limit_fill_seconds=15,
 2. Re-verify after more 1s history accumulates: walk-forward needs ≥10 trades/window; ~2-3 more weeks of cache accumulation makes the stack testable.
 3. Longer-horizon validation: adapt BacktestEngine to Binance 1m klines (multi-year) — the only honest certification path; 1s data is one-regime-sample thin.
 4. If the stack holds OOS: re-open mom30 combo (in-window PF 2.00).
+
+## Funding-carry — the verified edge (2026-09-08)
+
+Supersedes the directional-trend line as the only statistically significant
+finding. See AGENTS.md "Funding-carry subsystem" + `backend/backtests/carry_verify.ts`.
+
+- Delta-neutral (spot long + perp short, equal notional): P&L ≈ funding received.
+- Binance USDⓈ-M funding, 11 perps, 3y (2023-09 → 2026-09): composite +18.1% cum,
+  t 4.33, every year positive (+3.1/+12.9/+3.5/+0.7), worst month −0.3%, max streak
+  3 negative months, ~2%/mo on 25% margin. BNB negative (drop); SOL/AVAX/DOT weak.
+- Always-receive is the rule: funding positive ~90%+ of months; sign-flip overlay
+  (monthly, 0.2-0.4%/flip) adds nothing. Upper bound (Σ|rate|) = +24% — small
+  timing ceiling, not worth the costs.
+- Status: paper basket live (8 perps, $1k notional each, hourly cron) since
+  2026-09-08. Real execution NOT wired: needs Kraken Futures (or Binance Futures)
+  executor + API keys + settlement reconciliation. See ALGO_PRODUCT.md for the
+  (now blocked) daily-trend candidate, which this supersedes.
