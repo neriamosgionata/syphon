@@ -13,6 +13,7 @@ import ScraperService from '#services/ScraperService'
 import MeilisearchService from '#services/MeilisearchService'
 import AlgoConfig from '#models/AlgoConfig'
 import FastAlgoService from '#services/FastAlgoService'
+import FundingCarryService from '#services/FundingCarryService'
 
 async function boot() {
   try {
@@ -46,9 +47,18 @@ async function boot() {
     registerBackfillNewsWorker()
     logger.info('BullMQ workers registered')
 
-    // Intraminute algo loop (fast trading merged into the algo system).
-    // Self-contained: idles unless algo_config has fastEnabled + broker=kraken.
-    FastAlgoService.start()
+// Intraminute algo loop (fast trading merged into the algo system).
+      // Self-contained: idles unless algo_config has fastEnabled + broker=kraken.
+      FastAlgoService.start()
+
+      // Funding-carry paper loop (delta-neutral perp premium harvest).
+      // Dry-run by default — logs intents, records paper P&L. Real execution
+      // requires the Kraken Futures executor + keys (not yet wired).
+      cron.schedule('0 * * * *', async () => {
+        logger.info('[Cron] Funding-carry paper tick')
+        await FundingCarryService.tick()
+      })
+      logger.info('Funding-carry hourly paper tick scheduled')
 
     // Recurring jobs are only scheduled for long-running environments. Tests
     // boot the same preloads, and a cron tick mid-suite would enqueue network
