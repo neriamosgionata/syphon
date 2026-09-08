@@ -15,11 +15,19 @@ import CarryPosition from '#models/CarryPosition'
 // the KrakenFuturesExecutor implementation — not yet wired. This service is
 // the paper/verification loop that the live executor plugs into.
 
-const ASSETS = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'LINK', 'LTC'] as const
+// SOL excluded: FTX/Alameda collapse (Nov-2022) drove SOL perp funding to
+// -35% in a single month (always-receive would have lost 38% that year).
+// Stress test over full funding history (2019/2020-2026): every kept asset
+// is robust (t 5.5-6.9, every year positive, worst month -0.2%..-3.9%).
+const ASSETS = ['BTC', 'ETH', 'XRP', 'ADA', 'DOGE', 'LINK', 'LTC'] as const
 const NOTIONAL_PER_ASSET = 1_000
 const PERP_MARGIN_PCT = 0.25
 const FUNDING_HALT_TRAIL_DAYS = 30
-const FUNDING_HALT_NEG_MONTHS = 2 // stop opening after 2 negative trailing months
+// Catastrophic-only backstop: halt when trailing 30d funding < -0.5%
+// (approx -6%/yr negative carry = genuine crisis). Evidence: never fires
+// for the kept basket in 7y; the halt rule at any looser threshold costs
+// more in flip fees than it saves (negative-funding episodes mean-revert).
+const FUNDING_HALT_TRAIL_PCT = -0.5
 const DRIFT_REBALANCE_PCT = 0.01 // rebalance perp leg when |spotPnl - perpPnl| > 1% notional
 
 export interface CarryPrices { spot: number; perp: number }
@@ -139,9 +147,9 @@ export class FundingCarryService {
     const trailing = await this.provider.getTrailingFundingPct(symbol, FUNDING_HALT_TRAIL_DAYS, now)
 
     if (!row || row.status === 'halted') {
-      if (trailing >= 0) {
+      if (trailing >= FUNDING_HALT_TRAIL_PCT) {
         await this.open(symbol, now, trailing)
-      } else if (row?.status === 'halted' && trailing >= 0) {
+      } else if (row?.status === 'halted' && trailing >= FUNDING_HALT_TRAIL_PCT) {
         row.status = 'monitoring'
         await row.save()
       }
@@ -149,8 +157,8 @@ export class FundingCarryService {
     }
 
     if (row.status === 'monitoring' || row.status === 'open') {
-      if (trailing < 0) {
-        await this.closeAndHalt(row, now, `trailing ${FUNDING_HALT_TRAIL_DAYS}d funding ${trailing.toFixed(3)}%`)
+      if (trailing < FUNDING_HALT_TRAIL_PCT) {
+        await this.closeAndHalt(row, now, `trailing ${FUNDING_HALT_TRAIL_DAYS}d funding ${trailing.toFixed(3)}% < ${FUNDING_HALT_TRAIL_PCT}%`)
         return
       }
       await this.accrueAndRebalance(row, now)
