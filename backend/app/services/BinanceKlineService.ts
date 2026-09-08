@@ -20,6 +20,13 @@ const PAGE_DELAY_MS = 150
 const INTERVALS_MS: Record<string, number> = {
   '1s': 1000,
   '1m': 60_000,
+  '1d': 86_400_000,
+}
+
+function intervalKeyFor(intervalSeconds: number): string {
+  if (intervalSeconds >= 86_400) return '1d'
+  if (intervalSeconds >= 60) return '1m'
+  return '1s'
 }
 
 interface BinanceKline {
@@ -65,9 +72,9 @@ export async function fetchBinanceKlines(
   endTime: number,
   opts?: BinanceFetchOptions
 ): Promise<BacktestSample[]> {
-  const intervalSeconds = Math.min(Math.max(opts?.intervalSeconds || 1, 1), 3600)
-  const intervalKey = intervalSeconds >= 60 ? '1m' : '1s'
-  const intervalLabel = intervalSeconds >= 60 ? `${intervalSeconds / 60}m` : `${intervalSeconds}s`
+  const intervalSeconds = Math.min(Math.max(opts?.intervalSeconds || 1, 1), 3600 * 24)
+  const intervalKey = intervalKeyFor(intervalSeconds)
+  const intervalLabel = intervalSeconds >= 86_400 ? '1d' : intervalSeconds >= 60 ? `${intervalSeconds / 60}m` : `${intervalSeconds}s`
   const intervalMs = INTERVALS_MS[intervalKey]
   const pair = toBinancePair(symbol)
   const samples: BacktestSample[] = []

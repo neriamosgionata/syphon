@@ -210,7 +210,7 @@ export class FundingCarryService {
     // Drift: price moves break the hedge — top up the perp leg.
     const drift = Math.abs(spotPnl - perpPnl)
     if (drift > (row.spotNotional ?? 0) * DRIFT_REBALANCE_PCT) {
-      const delta = perpPnl - spotPnl
+      const delta = spotPnl - perpPnl // extra short notional needed to re-hedge
       await this.executor.adjustPerpShort(row.symbol, delta)
       row.perpQuantity = (row.perpQuantity ?? 0) + delta / prices.perp
       row.lastRebalanceAt = DateTime.fromMillis(now)
