@@ -1,10 +1,15 @@
 # ALGO PRODUCT — Daily-Trend Composite (frozen candidate 2026-09-07)
 
 The most-verified money-maker the syphon algo investigation produced. Freeze
-status: **config frozen for evaluation, NOT deployed**. Every parameter below
-was tested on 3 assets × 3 years (1,576,800 × 3 one-minute bars from Binance,
-5m-decimated runs, 0.26% taker per side + 10bps slippage). The full
-investigation history and the rejected alternatives live in `ALGO_WIP.md`.
+status: **config frozen for evaluation, NOT deployed** — and as of 2026-09-07
+a follow-up found the freeze numbers are cadence-dependent. The freeze
+evidence below came from 5m-close-only decisions; on the finer 1m cadence
+(closer to live execution reality) the product fails its own risk contract
+(2025 composite −29%, ETH −20-26% over 3y). Trail-confirmation (30-240s)
+recovers part of the gap but not enough. **Deployment blocked until the
+cadence question is resolved or the product is re-certified on the chosen
+execution granularity.** The investigation history and rejected alternatives
+live in `ALGO_WIP.md`.
 
 ## What it is
 
