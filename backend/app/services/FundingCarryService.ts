@@ -15,11 +15,11 @@ import CarryPosition from '#models/CarryPosition'
 // the KrakenFuturesExecutor implementation — not yet wired. This service is
 // the paper/verification loop that the live executor plugs into.
 
-// SOL excluded: FTX/Alameda collapse (Nov-2022) drove SOL perp funding to
-// -35% in a single month (always-receive would have lost 38% that year).
-// Stress test over full funding history (2019/2020-2026): every kept asset
-// is robust (t 5.5-6.9, every year positive, worst month -0.2%..-3.9%).
-const ASSETS = ['BTC', 'ETH', 'XRP', 'ADA', 'DOGE', 'LINK', 'LTC'] as const
+// Kraken funding is ~7x weaker than Binance (verified on Kraken's own
+// history, carry_verify_kraken.ts, ~1y): only BTC (+3.3%/yr, t 3.13) and
+// ETH (+3.2%/yr, t 3.82) carry a significant premium; alt perps fund near
+// zero or negative (ADA -2.0%, LTC -2.0% over the window). Basket = BTC/ETH.
+const ASSETS = ['BTC', 'ETH'] as const
 const NOTIONAL_PER_ASSET = 1_000
 const PERP_MARGIN_PCT = 0.25
 const FUNDING_HALT_TRAIL_DAYS = 30
@@ -66,49 +66,57 @@ export class DryRunExecutor implements CarryExecutor {
   async adjustPerpShort(symbol: string, deltaNotionalUsd: number) { await this.log('ADJUST PERP SHORT', symbol, deltaNotionalUsd) }
 }
 
-const BINANCE_SPOT = 'https://api.binance.com/api/v3/ticker/price'
-const BINANCE_FAPI = 'https://fapi.binance.com'
+const KRAKEN_SPOT = 'https://api.kraken.com'
+const KRAKEN_FUTURES = 'https://futures.kraken.com/derivatives/api/v3'
+
+// Kraken spot pair + perp instrument per basket symbol (BTC = XBT on Kraken).
+const KRAKEN_SPOT_PAIRS: Record<string, string> = {
+  BTC: 'XBTUSD', ETH: 'ETHUSD', XRP: 'XRPUSD', ADA: 'ADAUSD',
+  DOGE: 'DOGEUSD', LINK: 'LINKUSD', LTC: 'LTCUSD',
+}
+const KRAKEN_PERP_SYMBOLS: Record<string, string> = {
+  BTC: 'PF_XBTUSD', ETH: 'PF_ETHUSD', XRP: 'PF_XRPUSD', ADA: 'PF_ADAUSD',
+  DOGE: 'PF_DOGEUSD', LINK: 'PF_LINKUSD', LTC: 'PF_LTCUSD',
+}
 
 /**
- * Public-data provider over Binance spot + USDⓈ-M futures (no auth). Used for
- * paper accounting and funding signals; live execution on Kraken Futures
- * (same funding economics) plugs in behind the CarryExecutor interface.
+ * Public-data provider over Kraken spot + Kraken Futures perps (no auth).
+ * Kraken funding settles HOURLY; the REST history endpoint returns the last
+ * ~1 year of hourly rates (no pagination) — the venue-relevant window.
  */
-export class BinanceCarryDataProvider implements CarryDataProvider {
-  private pair(symbol: string): string {
-    const up = symbol.toUpperCase()
-    return up.endsWith('USDT') ? up : `${up}USDT`
-  }
-
+export class KrakenCarryDataProvider implements CarryDataProvider {
   public async getPrices(symbol: string): Promise<CarryPrices> {
-    const pair = this.pair(symbol)
+    const up = symbol.toUpperCase()
+    const spotPair = KRAKEN_SPOT_PAIRS[up]
+    const perpSymbol = KRAKEN_PERP_SYMBOLS[up]
+    if (!spotPair || !perpSymbol) throw new Error(`no Kraken mapping for ${symbol}`)
     const [spotRes, perpRes] = await Promise.all([
-      fetch(`${BINANCE_SPOT}?symbol=${pair}`),
-      fetch(`${BINANCE_FAPI}/fapi/v1/ticker/price?symbol=${pair}`),
+      fetch(`${KRAKEN_SPOT}/0/public/Ticker?pair=${spotPair}`),
+      fetch(`${KRAKEN_FUTURES}/tickers?symbol=${perpSymbol}`),
     ])
-    if (!spotRes.ok || !perpRes.ok) throw new Error(`price fetch failed for ${pair} (${spotRes.status}/${perpRes.status})`)
-    const spot = (await spotRes.json()) as { price: string }
-    const perp = (await perpRes.json()) as { price: string }
-    return { spot: Number(spot.price), perp: Number(perp.price) }
+    if (!spotRes.ok || !perpRes.ok) throw new Error(`price fetch failed for ${symbol} (${spotRes.status}/${perpRes.status})`)
+    const spotJson = (await spotRes.json()) as { result?: Record<string, { c: string[] }>; error?: string[] }
+    if (!spotJson.result || spotJson.error?.length) throw new Error(`kraken spot ticker failed for ${symbol}: ${JSON.stringify(spotJson.error)}`)
+    const spot = Number(Object.values(spotJson.result)[0].c[0])
+    const perpJson = (await perpRes.json()) as { tickers?: Array<{ markPrice?: number; last?: number }> }
+    const perp = perpJson.tickers?.[0]?.markPrice ?? perpJson.tickers?.[0]?.last
+    if (!Number.isFinite(spot) || !Number.isFinite(perp)) throw new Error(`invalid price for ${symbol}`)
+    return { spot, perp }
   }
 
   public async getFunding(symbol: string, sinceMs: number): Promise<FundingSettlement[]> {
-    const pair = this.pair(symbol)
-    const out: FundingSettlement[] = []
-    let cursor = sinceMs
-    while (cursor < Date.now()) {
-      const url = `${BINANCE_FAPI}/fapi/v1/fundingRate?symbol=${pair}&startTime=${cursor}&limit=1000`
-      const res = await fetch(url)
-      if (!res.ok) throw new Error(`funding fetch failed for ${pair}: ${res.status}`)
-      const json = (await res.json()) as any[]
-      if (!json.length) break
-      for (const row of json) out.push({ time: Number(row.fundingTime), rate: Number(row.fundingRate) })
-      const last = Number(json[json.length - 1].fundingTime)
-      if (last <= cursor) break
-      cursor = last + 1
-      await new Promise((r) => setTimeout(r, 110))
-    }
-    return out.sort((a, b) => a.time - b.time)
+    const up = symbol.toUpperCase()
+    const perpSymbol = KRAKEN_PERP_SYMBOLS[up]
+    if (!perpSymbol) throw new Error(`no Kraken perp for ${symbol}`)
+    const url = `${KRAKEN_FUTURES}/historical-funding-rates?symbol=${perpSymbol}`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`kraken funding fetch failed for ${perpSymbol}: ${res.status}`)
+    const json = (await res.json()) as { result?: string; rates?: Array<{ timestamp: string; relativeFundingRate: number }> }
+    if (json.result !== 'success' || !json.rates) throw new Error(`kraken funding bad response for ${perpSymbol}`)
+    return json.rates
+      .filter((r) => Date.parse(r.timestamp) >= sinceMs)
+      .map((r) => ({ time: Date.parse(r.timestamp), rate: r.relativeFundingRate }))
+      .sort((a, b) => a.time - b.time)
   }
 
   public async getTrailingFundingPct(symbol: string, days: number, now: number = Date.now()): Promise<number> {
@@ -259,4 +267,4 @@ export class FundingCarryService {
   }
 }
 
-export default new FundingCarryService(new BinanceCarryDataProvider())
+export default new FundingCarryService(new KrakenCarryDataProvider())
