@@ -9,7 +9,7 @@ export default class FastRegimeGates extends BaseSchema {
       table.integer('fast_regime_slope_window_seconds').defaultTo(3600)
       table.decimal('fast_regime_slope_min_pct', 8, 4).defaultTo(0.02)
       // Volume confirmation: entry bar volume >= rolling-median ratio.
-      // Backtest-only data source (Binance klines); live feed has no
+      // Backtest-only data source (cached OHLC klines); live feed has no
       // per-tick volume so the gate is lenient (skipped) live.
       table.integer('fast_volume_window_seconds').defaultTo(300)
       table.decimal('fast_volume_min_ratio', 6, 3).defaultTo(0)

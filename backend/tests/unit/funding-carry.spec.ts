@@ -8,7 +8,7 @@ import { FundingCarryService, CarryDataProvider, CarryExecutor, DryRunExecutor, 
 // the app container, so we focus on what's testable without it: the
 // data-provider/executor plumbing and the provider math.
 
-test.group('BinanceCarryDataProvider funding math', () => {
+test.group('CarryDataProvider funding math', () => {
   test('trailing funding sums signed rates over the window', async ({ assert }) => {
     const provider = new FakeProvider([{ time: 1, rate: 0.0001 }, { time: 2, rate: 0.0002 }, { time: 3, rate: -0.00005 }])
     const total = await provider.getTrailingFundingPct('BTC', 30, 100)

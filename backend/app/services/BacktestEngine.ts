@@ -6,7 +6,7 @@
 // whatever passes here is what the live loop will do.
 //
 // Model:
-// - samples are (epochMs, price) pairs, typically Binance 1s kline closes
+// - samples are (epochMs, price) pairs, typically OHLC bar closes
 // - decisions fire every `loopIntervalSeconds` of backtest time at the
 //   price of the last sample at/behind that time (live checks the WS price
 //   at tick time — same approximation)

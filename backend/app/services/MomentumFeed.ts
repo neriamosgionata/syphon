@@ -6,7 +6,7 @@
 export interface MomentumSample {
   t: number
   p: number
-  /** Optional per-sample volume (Binance 1s klines). Null/absent live. */
+  /** Optional per-sample volume. Null/absent live. */
   v?: number
 }
 

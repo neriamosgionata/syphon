@@ -6,7 +6,7 @@ import CarryPosition from '#models/CarryPosition'
 //
 // Collects the perpetual-funding premium (verified: composite ~+0.5%/mo on
 // notional, t 4.3, every year positive 2023-2026, worst month -0.3% on
-// Binance USDⓈ-M funding history) via a hedged structure:
+// perp funding history) via a hedged structure:
 //   LONG spot + SHORT perp, equal notional → price-neutral, P&L ≈ funding
 //   received on the short perp leg (+ basis drift).
 //
@@ -15,7 +15,7 @@ import CarryPosition from '#models/CarryPosition'
 // the KrakenFuturesExecutor implementation — not yet wired. This service is
 // the paper/verification loop that the live executor plugs into.
 
-// Kraken funding is ~7x weaker than Binance (verified on Kraken's own
+// Kraken funding is ~7x weaker than the historical baseline (verified on Kraken's own
 // history, carry_verify_kraken.ts, ~1y): only BTC (+3.3%/yr, t 3.13) and
 // ETH (+3.2%/yr, t 3.82) carry a significant premium; alt perps fund near
 // zero or negative (ADA -2.0%, LTC -2.0% over the window). Basket = BTC/ETH.
