@@ -74,6 +74,15 @@ export interface BacktestConfig {
    * (optimistic — the honest baseline is > 0).
    */
   slippageBps?: number
+  /**
+   * Trailing-stop confirmation window in seconds (0 = fire on the first
+   * breach — the default). Once the trailing stop has armed, a breach
+   * (intrabar low or close at/below the ratcheted level) must persist this
+   * long before the exit fires; recovering above the level resets it. Kills
+   * single-bar whipsaw exits on fine (1m) decision cadences. Execution-layer
+   * only — the pure strategy is unchanged.
+   */
+  trailConfirmSeconds?: number
 }
 
 export interface BacktestTrade {
@@ -133,6 +142,10 @@ interface OpenPosition {
   takeProfit: number
   peakPrice: number
   scaledOut: boolean
+  /** True once the trailing stop has ratcheted the stop level (gates confirm). */
+  trailArmed: boolean
+  /** Epoch ms the armed trail was first breached — null when above it. */
+  trailBreachSince?: number | null
 }
 
 export class BacktestEngine {
@@ -250,7 +263,14 @@ export class BacktestEngine {
         let exited = false
 
         // Intrabar SL/TP fills at the level price (SL wins if both hit).
-        const slHit = isBuy ? minLow <= pos.stopLoss : maxHigh >= pos.stopLoss
+        const confirmMs = (cfg.trailConfirmSeconds || 0) * 1000
+        const trailGated = pos.trailArmed && confirmMs > 0
+        let slHit = isBuy ? minLow <= pos.stopLoss : maxHigh >= pos.stopLoss
+        if (slHit && trailGated) {
+          // Armed-trail breach: defer until it persists the confirm window.
+          if (pos.trailBreachSince === undefined || pos.trailBreachSince === null) pos.trailBreachSince = t
+          if (t - pos.trailBreachSince < confirmMs) slHit = false
+        }
         if (slHit) {
           closePosition(pos, pos.stopLoss, t, `stop-loss (intrabar): ${pos.stopLoss.toFixed(2)}`, false)
           positions.splice(i, 1)
@@ -277,7 +297,7 @@ export class BacktestEngine {
           continue
         }
 
-        const signal = this.strategy.evaluateExit(this.feed, pos.symbol, price, t, {
+        let signal = this.strategy.evaluateExit(this.feed, pos.symbol, price, t, {
           side: pos.side,
           entryPrice: pos.entryPrice,
           stopLoss: pos.stopLoss,
@@ -290,6 +310,7 @@ export class BacktestEngine {
         if (signal.peakPrice !== pos.peakPrice) pos.peakPrice = signal.peakPrice
         if (signal.trailingStop !== null && signal.trailingStop !== pos.stopLoss) {
           pos.stopLoss = signal.trailingStop
+          pos.trailArmed = true
         }
 
         // Scale-out: lock in a fraction of the winner when the trail arms.
@@ -305,6 +326,20 @@ export class BacktestEngine {
           pos.scaledOut = true
         }
 
+        if (signal.shouldExit) {
+          const isStopExit = (signal.reason || '').startsWith('stop-loss') || (signal.reason || '').startsWith('trailing stop')
+          if (trailGated && isStopExit) {
+            if (pos.trailBreachSince === undefined || pos.trailBreachSince === null) pos.trailBreachSince = t
+            if (t - pos.trailBreachSince < confirmMs) {
+              signal = { ...signal, shouldExit: false, reason: null }
+            }
+          }
+        }
+        // Recovered above the trail — clear any pending breach marker.
+        if (trailGated) {
+          const stillBreached = isBuy ? minLow <= pos.stopLoss : maxHigh >= pos.stopLoss
+          if (!stillBreached) pos.trailBreachSince = null
+        }
         if (signal.shouldExit) {
           closePosition(pos, price, t, signal.reason || 'strategy exit', false)
           positions.splice(i, 1)
@@ -405,6 +440,7 @@ export class BacktestEngine {
                       takeProfit: signal.takeProfit > 0 ? signal.takeProfit * fillRatio : 0,
                       peakPrice: limit,
                       scaledOut: false,
+                      trailArmed: false,
                     })
                   } else {
                     const entryFill = buyFill(price)
@@ -419,6 +455,7 @@ export class BacktestEngine {
                       takeProfit: signal.takeProfit,
                       peakPrice: entryFill,
                       scaledOut: false,
+                      trailArmed: false,
                     })
                     cooldowns.set(cfg.symbol, t)
                   }

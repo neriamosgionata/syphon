@@ -415,6 +415,58 @@ test.group('BacktestEngine coarse intervals', () => {
   })
 })
 
+test.group('BacktestEngine trailing-stop confirmation', () => {
+  // A position whose trail is armed must have the breach PERSIST before the
+  // trailing stop fires; single-bar dips that recover are held.
+  const trailSeries = (n: number, fn: (i: number) => number) =>
+    Array.from({ length: n }, (_, i) => ({ t: T0 + i * 60_000, p: fn(i) }))
+
+  const armCfg = (over: Partial<BacktestConfig> = {}) => baseCfg({
+    strategy: {
+      ...baseCfg().strategy,
+      sampleIntervalSeconds: 60,
+      momentumSeconds: 30,
+      momentumThresholdPct: 0.01,
+      exitReversalPct: -99,
+      trailingStopPct: 5,
+      trailingActivatePct: 2,
+      stopLossPct: 10, // hard SL far away — only the trail matters
+      takeProfitPct: 0,
+    },
+    loopIntervalSeconds: 60,
+    cooldownSeconds: 0,
+    ...over,
+  })
+
+  test('single-bar trail dip is held with confirmation, persistent breach exits', ({ assert }) => {
+    // Ramp 100 -> 106 (trail arms: peak 106, trail 100.7), one -3% bar (dip to
+    // ~102.8 > trail 100.7, no breach), then a bar through the trail (99.9),
+    // then recovery above (101), then a sustained breach (99.5, 99.4).
+    const prices: number[] = []
+    for (let i = 0; i < 60; i++) prices.push(100 + (i / 60) * 6) // to 106
+    prices.push(102.8) // dip, above trail 100.7
+    prices.push(99.9)  // breach #1
+    prices.push(101.0) // recovery -> marker reset
+    prices.push(99.5)  // breach #2
+    prices.push(99.4)  // breach #2 persists
+    const samples = trailSeries(prices.length, (i) => prices[i])
+
+    const confirm = engine.run(samples, armCfg({ trailConfirmSeconds: 120 }))
+    const noConfirm = engine.run(samples, armCfg())
+    // Confirmation delays the trail exit past the recovered dip: the same
+    // single position exits later (only after the second, persistent breach).
+    // Without confirmation the dip-through-trail bar stops the position out
+    // (and the next entry trades again); with confirmation the breach never
+    // persists, so the original position survives to the end.
+    assert.isAbove(noConfirm.metrics.totalTrades, confirm.metrics.totalTrades)
+    assert.match(noConfirm.trades[0].exitReason ?? '', /stop-loss/)
+    assert.match(confirm.trades[0].exitReason ?? '', /end_of_test/)
+    const cExit = confirm.trades[0].exitTime ?? 0
+    const nExit = noConfirm.trades[0].exitTime ?? 0
+    assert.isAtLeast(cExit, nExit)
+  })
+})
+
 test.group('BacktestEngine maker fallback on coarse bars', () => {
   const coarseSeries = (n: number) =>
     Array.from({ length: n }, (_, i) => ({ t: T0 + i * 60_000, p: 100 * Math.pow(1.0003, i) }))
