@@ -4,13 +4,15 @@ import logger from '@adonisjs/core/services/logger'
 import db from '@adonisjs/lucid/services/db'
 import AlgoConfig from '#models/AlgoConfig'
 import AlgoPosition from '#models/AlgoPosition'
+import Ticker from '#models/Ticker'
 import KrakenFastEngine from '#services/KrakenFastEngine'
 import KrakenService from '#services/KrakenService'
 import KrakenWS from '#services/KrakenWebSocketService'
 import { MomentumFeed } from '#services/MomentumFeed'
-import { FastStrategy, FastStrategyConfig, fastStrategyFromConfig, volatilityMultiplier } from '#services/FastStrategy'
+import { FastStrategy, FastStrategyConfig, fastStrategyFromConfig, volatilityMultiplier, NewsContext } from '#services/FastStrategy'
 import MeilisearchService from '#services/MeilisearchService'
 import NotificationService from '#services/NotificationService'
+import NewsSentimentService from '#services/NewsSentimentService'
 
 // ─── Intraminute algo loop ────────────────────────────────────
 //
@@ -67,13 +69,26 @@ export class FastAlgoService {
   private lossStreak = 0
   private streakSinceAt = 0
   private runId = uuidv4()
+  private tickerIdCache: { map: Map<string, number>; at: number } = { map: new Map(), at: 0 }
 
-  constructor(opts: { engine?: any; ws?: any; feed?: MomentumFeed; strategy?: FastStrategy } = {}) {
+  constructor(opts: {
+    engine?: any
+    ws?: any
+    feed?: MomentumFeed
+    strategy?: FastStrategy
+    newsService?: any
+    tickerModel?: any
+  } = {}) {
     this.engine = opts.engine ?? KrakenFastEngine
     this.ws = opts.ws ?? KrakenWS
     this.feed = opts.feed ?? new MomentumFeed()
     this.strategy = opts.strategy ?? new FastStrategy()
+    this.newsService = opts.newsService ?? NewsSentimentService
+    this.tickerModel = opts.tickerModel ?? Ticker
   }
+
+  private newsService: any
+  private tickerModel: any
 
   public get running(): boolean {
     return this.loopTimer !== null
@@ -579,8 +594,15 @@ export class FastAlgoService {
       const price = this.ws.getPrice(symbol)
       if (price === null) continue
 
+      // News-sentiment context for the entry gate (null = no signal —
+      // the gate never blocks on missing news or infra errors).
+      let newsContext: NewsContext | null = null
+      if (cfg.fastNewsGateEnabled) {
+        newsContext = await this.getNewsContext(symbol, cfg)
+      }
+
       const signal = this.strategy.evaluateEntry(
-        this.feed, symbol, price, now, this.toStrategyConfig(cfg)
+        this.feed, symbol, price, now, this.toStrategyConfig(cfg), newsContext
       )
       if (!signal.shouldEnter) continue
 
@@ -827,6 +849,24 @@ export class FastAlgoService {
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
     return null
+  }
+
+  private async getNewsContext(symbol: string, cfg: AlgoConfig): Promise<NewsContext | null> {
+    const tickerId = await this.tickerIdFor(symbol)
+    if (!tickerId) return null
+    const result = await this.newsService.getSymbolSentiment(tickerId, cfg.fastNewsWindowHours)
+    return result ? { score: result.score, events: result.events } : null
+  }
+
+  private async tickerIdFor(symbol: string): Promise<number | null> {
+    if (Date.now() - this.tickerIdCache.at > 60_000) {
+      const tickers = await this.tickerModel.query().where('is_active', true)
+      this.tickerIdCache = {
+        map: new Map(tickers.map((t: any) => [t.symbol, t.id])),
+        at: Date.now(),
+      }
+    }
+    return this.tickerIdCache.map.get(symbol) ?? null
   }
 
   private async getPortfolioValue(cfg: AlgoConfig): Promise<number> {

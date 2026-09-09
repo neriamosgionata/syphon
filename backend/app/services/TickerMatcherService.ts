@@ -57,6 +57,8 @@ class TickerMatcherService {
         keywords: sentiment.keywords,
         reasoning: sentiment.reasoning,
         tickerPriceAtAnalysis: ticker.currentPrice,
+        eventKey: article.eventKey ?? null,
+        publishedAt: article.publishedAt ?? null,
       })
 
       results.push({

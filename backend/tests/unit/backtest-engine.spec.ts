@@ -40,6 +40,10 @@ function baseCfg(overrides: Partial<BacktestConfig> = {}): BacktestConfig {
       tradeStartUtc: 0,
       tradeEndUtc: 24,
       convictionSizing: false,
+      newsGateEnabled: false,
+      newsMinSentiment: 0,
+      newsMinArticles: 3,
+      newsWindowSeconds: 86400,
     },
     loopIntervalSeconds: 10,
     portfolioUsd: 10_000,
@@ -505,5 +509,63 @@ test.group('BacktestEngine maker fallback on coarse bars', () => {
     }))
     assert.isAbove(result.metrics.totalTrades, 0)
     assert.isAbove(result.metrics.totalPnl, 0)
+  })
+
+  // ── News gate replay (migration 21) ──────────────────────────
+
+  const newsGateStrategy = () => ({
+    ...baseCfg().strategy,
+    newsGateEnabled: true,
+    newsMinSentiment: 0,
+    newsMinArticles: 3,
+    newsWindowSeconds: 6 * 3600,
+  })
+
+  test('negative news events block entries through the whole run', ({ assert }) => {
+    const samples = series((i) => 100 * Math.pow(1.0001, i), 4 * 3600)
+    // Events started before the series begins (every 10 min) so the gate
+    // already sees >= minArticles events at the first decision tick.
+    const newsEvents = Array.from({ length: 28 }, (_, i) => ({
+      t: T0 - 40 * 60_000 + i * 600_000,
+      score: -0.6,
+    }))
+    const result = engine.run(samples, baseCfg({ strategy: newsGateStrategy(), newsEvents }))
+    assert.equal(result.metrics.totalTrades, 0)
+  })
+
+  test('news gate with insufficient events does not block', ({ assert }) => {
+    const samples = series((i) => 100 * Math.pow(1.0001, i), 4 * 3600)
+    const newsEvents = [{ t: T0 + 60_000, score: -0.9 }]
+    const result = engine.run(samples, baseCfg({ strategy: newsGateStrategy(), newsEvents }))
+    assert.isAbove(result.metrics.totalTrades, 1)
+  })
+
+  test('positive news never blocks entries', ({ assert }) => {
+    const samples = series((i) => 100 * Math.pow(1.0001, i), 4 * 3600)
+    const newsEvents = Array.from({ length: 24 }, (_, i) => ({
+      t: T0 + i * 600_000,
+      score: 0.7,
+    }))
+    const result = engine.run(samples, baseCfg({ strategy: newsGateStrategy(), newsEvents }))
+    assert.isAbove(result.metrics.totalTrades, 1)
+  })
+
+  test('negative news only inside the window blocks; stale news passes', ({ assert }) => {
+    const samples = series((i) => 100 * Math.pow(1.0001, i), 4 * 3600)
+    // All events older than the 6h window: at decision time they are
+    // filtered out, so the gate sees no news and never blocks.
+    const newsEvents = Array.from({ length: 24 }, (_, i) => ({
+      t: T0 - 8 * 3600_000 + i * 600_000,
+      score: -0.6,
+    }))
+    const result = engine.run(samples, baseCfg({ strategy: newsGateStrategy(), newsEvents }))
+    assert.isAbove(result.metrics.totalTrades, 1)
+  })
+
+  test('gate disabled ignores news events entirely', ({ assert }) => {
+    const samples = series((i) => 100 * Math.pow(1.0001, i), 4 * 3600)
+    const newsEvents = Array.from({ length: 24 }, (_, i) => ({ t: T0 + i * 600_000, score: -0.6 }))
+    const result = engine.run(samples, baseCfg({ newsEvents }))
+    assert.isAbove(result.metrics.totalTrades, 1)
   })
 })

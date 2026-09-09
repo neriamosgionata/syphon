@@ -17,7 +17,8 @@
 // Pure: no DB, no network, no env. Unit-testable in isolation.
 
 import { MomentumFeed } from '#services/MomentumFeed'
-import { FastStrategy, FastStrategyConfig, volatilityMultiplier } from '#services/FastStrategy'
+import { FastStrategy, FastStrategyConfig, NewsContext, volatilityMultiplier } from '#services/FastStrategy'
+import { newsWindowScore } from '#services/NewsScore'
 
 export interface BacktestSample {
   t: number
@@ -83,6 +84,17 @@ export interface BacktestConfig {
    * only — the pure strategy is unchanged.
    */
   trailConfirmSeconds?: number
+  /**
+   * Historical news events (epoch ms + sentiment in [-1,1]) replayed at
+   * the decision cadence. When the strategy's news gate is enabled, each
+   * decision sees newsWindowScore over the events known AT that time —
+   * the exact aggregation the live loop runs (NewsSentimentService).
+   * Omit = the test has no news; the gate can never block (matches live
+   * behavior on a quiet news day). WARNING: enabling the gate without
+   * providing news data silently disables the gate — parity requires the
+   * news to exist in the test.
+   */
+  newsEvents?: Array<{ t: number; score: number; weight?: number; id?: string }>
 }
 
 export interface BacktestTrade {
@@ -181,6 +193,10 @@ export class BacktestEngine {
     let streakSinceAt = 0
     let feedIndex = 0
     let prevFeedIndex = 0
+    let newsIndex = 0
+    const news = cfg.newsEvents
+      ? [...cfg.newsEvents].sort((a, b) => a.t - b.t).map((e, i) => ({ ...e, id: e.id ?? `n${i}` }))
+      : null
 
     // Slippage: market fills at price × (1 ± bps/10000). Buys slip up,
     // sells slip down — always against the trader.
@@ -243,6 +259,16 @@ export class BacktestEngine {
       }
       const price = this.feed.lastPrice(cfg.symbol)
       if (price === null) continue
+
+      // News context at THIS decision time: only events already published
+      // count, aggregated with the live loop's exact math (recency decay,
+      // window filter, distinct-event dedup).
+      let newsContext: NewsContext | null = null
+      if (news && cfg.strategy.newsGateEnabled) {
+        while (newsIndex < news.length && news[newsIndex].t <= t) newsIndex++
+        const result = newsWindowScore(news.slice(0, newsIndex), t, cfg.strategy.newsWindowSeconds)
+        newsContext = { score: result.score, events: result.events }
+      }
 
       // Intrabar extremes since the last decision — stops/targets can fill
       // mid-bar, not only at the decision close.
@@ -383,7 +409,7 @@ export class BacktestEngine {
         if (exposurePct < exposureCap && !streakBlocked) {
           const lastEntry = cooldowns.get(cfg.symbol) || 0
           if (t - lastEntry >= cfg.cooldownSeconds * 1000) {
-            const signal = this.strategy.evaluateEntry(this.feed, cfg.symbol, price, t, cfg.strategy)
+            const signal = this.strategy.evaluateEntry(this.feed, cfg.symbol, price, t, cfg.strategy, newsContext)
             if (signal.shouldEnter && signal.stopLoss !== null && signal.takeProfit !== null) {
               let sizePct = Math.min(
                 cfg.maxSinglePositionPct,

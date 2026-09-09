@@ -14,6 +14,7 @@ import MeilisearchService from '#services/MeilisearchService'
 import AlgoConfig from '#models/AlgoConfig'
 import FastAlgoService from '#services/FastAlgoService'
 import FundingCarryService from '#services/FundingCarryService'
+import TickRecorderService from '#services/TickRecorderService'
 
 async function boot() {
   try {
@@ -50,6 +51,14 @@ async function boot() {
 // Intraminute algo loop (fast trading merged into the algo system).
       // Self-contained: idles unless algo_config has fastEnabled + broker=kraken.
       FastAlgoService.start()
+
+      // Always-on 1s tick recorder: Kraken WS trades → tick_records. This
+      // accumulates the Kraken-native 1s history the fast algo backtests
+      // run on (REST OHLC has no sub-minute data). Symbols follow the algo
+      // watchlist; public stream, no API keys needed.
+      const cfg = await AlgoConfig.getConfig()
+      const recordSymbols = cfg.fastWatchlist.length > 0 ? cfg.fastWatchlist : ['BTC', 'ETH', 'SOL']
+      TickRecorderService.start(recordSymbols)
 
       // Funding-carry paper loop (delta-neutral perp premium harvest).
       // Dry-run by default — logs intents, records paper P&L. Real execution

@@ -22,6 +22,17 @@ export interface KrakenOrderUpdate {
   descr?: { pair?: string }
 }
 
+export interface KrakenWSTrade {
+  /** App symbol (BTC, not XBT). */
+  symbol: string
+  price: number
+  volume: number
+  /** Epoch seconds. */
+  time: number
+  side: 'buy' | 'sell'
+  ordertype: 'market' | 'limit'
+}
+
 function getKrakenSignature(urlPath: string, data: Record<string, any>, secret: string): string {
   const dataStr = querystring.stringify(data)
   const encoded = data.nonce + dataStr
@@ -42,7 +53,7 @@ function fromWsPair(pair: string): string {
   return base === 'XBT' ? 'BTC' : base
 }
 
-type StreamName = 'prices' | 'userData'
+type StreamName = 'prices' | 'userData' | 'trades'
 
 class KrakenWebSocketService {
   private apiKey: string = ''
@@ -58,6 +69,8 @@ class KrakenWebSocketService {
 
   private orderListeners = new Set<(update: KrakenOrderUpdate) => void>()
   private priceListeners = new Map<string, Set<(price: number) => void>>()
+  private tradeListeners = new Map<string, Set<(trade: KrakenWSTrade) => void>>()
+  private tradeSymbols = new Set<string>()
 
   private reconnectAttempts = new Map<StreamName, number>()
   private reconnectTimers = new Map<StreamName, ReturnType<typeof setTimeout>>()
@@ -132,6 +145,26 @@ class KrakenWebSocketService {
     if (!this.priceListeners.has(symbol)) this.priceListeners.set(symbol, new Set())
     this.priceListeners.get(symbol)!.add(cb)
     return () => this.priceListeners.get(symbol)?.delete(cb)
+  }
+
+  // ── Trade stream (1s-bar recording / backtest data) ─────────
+
+  /** Subscribe a symbol's public trade channel. Reconnects the trades stream. */
+  public addTradeSymbol(symbol: string): void {
+    const s = symbol.toUpperCase()
+    if (this.tradeSymbols.has(s)) return
+    this.tradeSymbols.add(s)
+    this.connectStream('trades', KRAKEN_WS_BASE)
+  }
+
+  public onTrade(symbol: string, cb: (trade: KrakenWSTrade) => void): () => void {
+    if (!this.tradeListeners.has(symbol)) this.tradeListeners.set(symbol, new Set())
+    this.tradeListeners.get(symbol)!.add(cb)
+    return () => this.tradeListeners.get(symbol)?.delete(cb)
+  }
+
+  public getTradeSymbols(): string[] {
+    return [...this.tradeSymbols]
   }
 
   // ---------------------------------------------------------------------------
@@ -236,6 +269,14 @@ class KrakenWebSocketService {
           event: 'subscribe',
           subscription: { name: 'openOrders', token: this.token },
         }))
+      } else if (name === 'trades') {
+        const pairs = [...this.tradeSymbols].map((s) => toWsPair(s))
+        if (pairs.length === 0) pairs.push('XBT/USD')
+        ws.send(JSON.stringify({
+          event: 'subscribe',
+          pair: pairs,
+          subscription: { name: 'trade' },
+        }))
       }
     } catch (err) {
       logger.warn('[KrakenWS] Subscribe to %s failed: %s', name, (err as Error).message)
@@ -269,6 +310,8 @@ class KrakenWebSocketService {
             this.connectStream('userData', KRAKEN_WS_AUTH_BASE)
           })
           .catch(() => this.scheduleReconnect('userData'))
+      } else if (name === 'trades') {
+        this.connectStream('trades', KRAKEN_WS_BASE)
       }
     }, delay)
     this.reconnectTimers.set(name, timer)
@@ -307,6 +350,30 @@ class KrakenWebSocketService {
           const update: KrakenOrderUpdate = { txid, ...o[txid] }
           for (const cb of this.orderListeners) {
             try { cb(update) } catch { /* skip bad listener */ }
+          }
+        }
+      }
+    } else if (name === 'trades') {
+      // V1 trade: [channelID, [[price, volume, time, buy/sell, market/limit, misc], ...], "trade", "XBT/USD"]
+      if (Array.isArray(msg) && msg[2] === 'trade' && msg[3] && Array.isArray(msg[1])) {
+        const symbol = fromWsPair(msg[3])
+        const listeners = this.tradeListeners.get(symbol)
+        if (!listeners) return
+        for (const row of msg[1]) {
+          const price = parseFloat(row?.[0])
+          const volume = parseFloat(row?.[1])
+          const time = parseFloat(row?.[2])
+          if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(time)) continue
+          const trade: KrakenWSTrade = {
+            symbol,
+            price,
+            volume: Number.isFinite(volume) ? volume : 0,
+            time,
+            side: row[3] === 'b' ? 'buy' : 'sell',
+            ordertype: row[4] === 'l' ? 'limit' : 'market',
+          }
+          for (const cb of listeners) {
+            try { cb(trade) } catch { /* skip bad listener */ }
           }
         }
       }

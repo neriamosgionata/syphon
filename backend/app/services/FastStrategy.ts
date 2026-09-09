@@ -163,6 +163,22 @@ export interface FastStrategyConfig {
   efficiencyExitPct?: number
   /** Scale position size with signal strength (slope/momentum vs threshold). 0 = off. */
   convictionSizing: boolean
+  /**
+   * News-sentiment entry gate (0 = off): block entries while the
+   * recency-weighted news sentiment for the symbol sits below
+   * `newsMinSentiment` AND at least `newsMinArticles` distinct events
+   * occurred in the window. The score itself is computed OUTSIDE the
+   * strategy (live: NewsSentimentService; backtest: replayed historical
+   * tone) and passed in — the strategy stays pure and replayable.
+   * No news in the window (events < newsMinArticles) never blocks.
+   */
+  newsGateEnabled: boolean
+  /** Minimum recency-weighted news sentiment to allow an entry. */
+  newsMinSentiment: number
+  /** Distinct news events required before the gate can block. */
+  newsMinArticles: number
+  /** News lookback window in seconds (same on both sides of parity). */
+  newsWindowSeconds: number
 }
 
 /**
@@ -216,6 +232,10 @@ export function fastStrategyFromConfig(
     fastEfficiencyMinPct?: number | null
     fastEfficiencyExitPct?: number | null
     fastConvictionSizing?: boolean | number | null
+    fastNewsGateEnabled?: boolean | number | null
+    fastNewsMinSentiment?: number | null
+    fastNewsMinArticles?: number | null
+    fastNewsWindowHours?: number | null
   },
   opts?: { sampleIntervalSeconds?: number }
 ): FastStrategyConfig {
@@ -263,6 +283,10 @@ export function fastStrategyFromConfig(
     efficiencyMinPct: cfg.fastEfficiencyMinPct ?? 0,
     efficiencyExitPct: cfg.fastEfficiencyExitPct ?? 0,
     convictionSizing: cfg.fastConvictionSizing === true || cfg.fastConvictionSizing === 1,
+    newsGateEnabled: cfg.fastNewsGateEnabled === true || cfg.fastNewsGateEnabled === 1,
+    newsMinSentiment: cfg.fastNewsMinSentiment ?? 0,
+    newsMinArticles: cfg.fastNewsMinArticles ?? 3,
+    newsWindowSeconds: Math.max(1, (cfg.fastNewsWindowHours ?? 24) * 3600),
   }
 }
 
@@ -306,6 +330,18 @@ export interface ExitSignal {
   scaleOut: boolean
 }
 
+/**
+ * News context computed OUTSIDE the strategy (live: NewsSentimentService;
+ * backtest: replayed historical events) and passed into the entry gate.
+ * Null = no news signal available — never blocks.
+ */
+export interface NewsContext {
+  /** Recency-weighted sentiment in [-1, 1]. Null when no news in window. */
+  score: number | null
+  /** Distinct news events in the window. */
+  events: number
+}
+
 export class FastStrategy {
   /**
    * Entry gate. `price` is the live/backtest price at decision time `now`.
@@ -316,7 +352,8 @@ export class FastStrategy {
     symbol: string,
     price: number,
     now: number,
-    cfg: FastStrategyConfig
+    cfg: FastStrategyConfig,
+    news?: NewsContext | null
   ): EntrySignal {
     // Session gate: only trade during the configured UTC hours (crypto
     // vol/volume follow time-of-day seasonality — Saef et al. 2021,
@@ -326,6 +363,25 @@ export class FastStrategy {
       return {
         shouldEnter: false,
         reason: `session: UTC ${utcHour}h outside [${cfg.tradeStartUtc}, ${cfg.tradeEndUtc})`,
+        momentumPct: null, rsi: null, ema: null, volatilityPct: null, slopePct: null,
+        stopLoss: null, takeProfit: null, stopLossPct: null,
+      }
+    }
+
+    // News-sentiment gate: stand aside while the news flow for the symbol
+    // is clearly negative. Only blocks when there IS enough news to judge
+    // (events >= newsMinArticles) — a quiet news day never blocks entries.
+    // Null news context (infra failure, no signal) also never blocks.
+    if (
+      cfg.newsGateEnabled &&
+      news &&
+      news.score !== null &&
+      news.events >= cfg.newsMinArticles &&
+      news.score < cfg.newsMinSentiment
+    ) {
+      return {
+        shouldEnter: false,
+        reason: `news sentiment ${news.score.toFixed(3)} < ${cfg.newsMinSentiment.toFixed(3)} (${news.events} events)`,
         momentumPct: null, rsi: null, ema: null, volatilityPct: null, slopePct: null,
         stopLoss: null, takeProfit: null, stopLossPct: null,
       }

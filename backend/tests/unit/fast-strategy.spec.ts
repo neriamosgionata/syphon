@@ -40,6 +40,10 @@ function baseCfg(overrides: Partial<FastStrategyConfig> = {}): FastStrategyConfi
     tradeStartUtc: 0,
     tradeEndUtc: 24,
     convictionSizing: false,
+    newsGateEnabled: false,
+    newsMinSentiment: 0,
+    newsMinArticles: 3,
+    newsWindowSeconds: 86400,
     ...overrides,
   }
 }
@@ -125,6 +129,46 @@ test.group('FastStrategy entry', () => {
       baseCfg({ volatilityWindowSamples: 60, volatilityCeilingPct: 5 })
     )
     assert.isTrue(signal.shouldEnter)
+  })
+
+  test('news gate blocks entry on negative sentiment with enough events', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => 100 + i * 0.02, 180)
+    const signal = strategy.evaluateEntry(
+      feed, 'BTC', feed.lastPrice('BTC')!, now,
+      baseCfg({ newsGateEnabled: true, newsMinSentiment: 0, newsMinArticles: 3 }),
+      { score: -0.4, events: 5 }
+    )
+    assert.isFalse(signal.shouldEnter)
+    assert.match(signal.reason!, /news sentiment/)
+  })
+
+  test('news gate does not block on insufficient events', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => 100 + i * 0.02, 180)
+    const signal = strategy.evaluateEntry(
+      feed, 'BTC', feed.lastPrice('BTC')!, now,
+      baseCfg({ newsGateEnabled: true, newsMinSentiment: 0, newsMinArticles: 3 }),
+      { score: -0.4, events: 2 }
+    )
+    assert.isTrue(signal.shouldEnter)
+  })
+
+  test('news gate does not block on neutral or positive sentiment', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => 100 + i * 0.02, 180)
+    const signal = strategy.evaluateEntry(
+      feed, 'BTC', feed.lastPrice('BTC')!, now,
+      baseCfg({ newsGateEnabled: true, newsMinSentiment: -0.2, newsMinArticles: 3 }),
+      { score: 0.1, events: 8 }
+    )
+    assert.isTrue(signal.shouldEnter)
+  })
+
+  test('news gate is off by default and never blocks without context', ({ assert }) => {
+    const { feed, now } = feedFrom((i) => 100 + i * 0.02, 180)
+    const gateOn = baseCfg({ newsGateEnabled: true, newsMinSentiment: 0, newsMinArticles: 3 })
+    assert.isTrue(strategy.evaluateEntry(feed, 'BTC', feed.lastPrice('BTC')!, now, gateOn).shouldEnter)
+    assert.isTrue(
+      strategy.evaluateEntry(feed, 'BTC', feed.lastPrice('BTC')!, now, gateOn, { score: null, events: 0 }).shouldEnter
+    )
   })
 })
 

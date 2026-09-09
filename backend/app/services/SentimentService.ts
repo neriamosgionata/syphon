@@ -25,6 +25,16 @@ const POSITIVE_LEXICON: Record<string, number> = {
   buy: 0.10, positive: 0.10, optimistic: 0.10, upside: 0.10,
   improve: 0.10, outpace: 0.10,
   high: 0.08, stable: 0.08,
+  // Crypto-native (migration 21): the algo trades crypto, and general
+  // finance lexicons miss the market's own vocabulary.
+  // Very strong
+  moon: 0.30, moonshot: 0.30, hodl: 0.30, bullrun: 0.30,
+  // Strong
+  halving: 0.25, adoption: 0.25, partnership: 0.20,
+  integration: 0.20, listing: 0.20, mainnet: 0.20,
+  etf: 0.15, approval: 0.20, institutional: 0.20, whale: 0.15,
+  accumulation: 0.15, inflow: 0.15, airdrop: 0.15, staking: 0.12,
+  treasury: 0.15, hashrate: 0.12, fomo: 0.10,
 }
 
 const NEGATIVE_LEXICON: Record<string, number> = {
@@ -38,10 +48,23 @@ const NEGATIVE_LEXICON: Record<string, number> = {
   loss: 0.15, decline: 0.15, miss: 0.15, bearish: 0.15, slump: 0.15,
   weak: 0.15, lawsuit: 0.15, investigation: 0.15, warning: 0.15,
   restructuring: 0.15, writedown: 0.15, fall: 0.12, shrink: 0.12,
+  collapse: 0.25, plummet: 0.25, tumble: 0.20,
   debt: 0.12,
   // Mild
   sell: 0.10, negative: 0.10, pessimistic: 0.10, drop: 0.10, cut: 0.10,
   risk: 0.08, concern: 0.08, volatility: 0.08, low: 0.08,
+  // Crypto-native (migration 21)
+  // Very strong
+  hack: 0.35, hacked: 0.35, exploit: 0.35, rugpull: 0.35, delisted: 0.35,
+  // Strong
+  ban: 0.25, banned: 0.25, crackdown: 0.25,
+  freeze: 0.25, frozen: 0.25, seizure: 0.25, subpoena: 0.25,
+  capitulation: 0.25, deathcross: 0.25,
+  // Medium
+  dump: 0.20, dumped: 0.20, outflow: 0.15, delist: 0.20,
+  scam: 0.30, scammer: 0.30, ponzi: 0.30, laundering: 0.25,
+  // Mild
+  fud: 0.10,
 }
 
 // Pre-compute stemmed lexicons so inflections match (surging→surge, profits→profit)
@@ -68,6 +91,17 @@ const PHRASE_POSITIVE: Record<string, number> = {
   'strong demand': 0.20, 'positive outlook': 0.20, 'market rally': 0.20,
   'insider buying': 0.20, 'buy rating': 0.20, 'strong performance': 0.20,
   'positive momentum': 0.20, 'top line growth': 0.20, 'bottom line growth': 0.20,
+  // Crypto-native phrases (migration 21)
+  'etf approved': 0.35, 'etf approval': 0.35, 'etf approvals': 0.35,
+  'etf inflows': 0.30, 'etf launch': 0.25, 'spot etf': 0.20,
+  'buy the dip': 0.25, 'accumulation phase': 0.20, 'whale accumulation': 0.25,
+  'institutional adoption': 0.30, 'institutional inflows': 0.30,
+  'new all time high': 0.30, 'new high': 0.20,
+  'halving event': 0.25, 'supply squeeze': 0.25, 'short squeeze': 0.20,
+  'upgrade approved': 0.25, 'partnership announced': 0.20,
+  'integrated with': 0.15, 'integration with': 0.15,
+  'listed on': 0.15, 'added to treasury': 0.25, 'adopted by': 0.20,
+  'positive funding': 0.15, 'inflows into': 0.20,
 }
 
 const PHRASE_NEGATIVE: Record<string, number> = {
@@ -80,6 +114,17 @@ const PHRASE_NEGATIVE: Record<string, number> = {
   'revenue decline': 0.20, 'margin compression': 0.20, 'weak demand': 0.20,
   'negative outlook': 0.20, 'revenue shortfall': 0.25, 'insider selling': 0.20,
   'sell rating': 0.20, 'negative momentum': 0.20, 'below consensus': 0.25,
+  // Crypto-native phrases (migration 21)
+  'rug pull': 0.35, 'rug pulled': 0.35, 'pump and dump': 0.35,
+  'pump and dumps': 0.35, 'flash crash': 0.30, 'liquidation cascade': 0.30,
+  'death cross': 0.25, 'bear market': 0.25,
+  'hacked for': 0.30, 'security breach': 0.25, 'stolen funds': 0.30,
+  'exchange hack': 0.35, 'exchange insolvency': 0.35, 'bank run': 0.30,
+  'money laundering': 0.30, 'sec charges': 0.30, 'sec lawsuit': 0.30,
+  'sec sues': 0.30, 'sec investigation': 0.25, 'regulatory crackdown': 0.30,
+  'banned in': 0.25, 'ban on': 0.20, 'delisted from': 0.30,
+  'sell the news': 0.20, 'capitulation event': 0.25, 'negative funding': 0.15,
+  'outflows from': 0.20, 'freeze on': 0.25, 'assets frozen': 0.30,
 }
 
 // ---------------------------------------------------------------------------

@@ -199,6 +199,19 @@ export default class AlgoConfig extends BaseModel {
   @column()
   declare fastSlippageBps: number
 
+  // News-sentiment entry gate (migration 21)
+  @column()
+  declare fastNewsGateEnabled: boolean
+
+  @column()
+  declare fastNewsMinSentiment: number
+
+  @column()
+  declare fastNewsMinArticles: number
+
+  @column()
+  declare fastNewsWindowHours: number
+
   // Safety rails + exit quality (migration 17)
   @column()
   declare fastCorrelatedExposurePct: number
@@ -310,6 +323,10 @@ export default class AlgoConfig extends BaseModel {
       fastTradeEndUtc: 24,
       fastConvictionSizing: false,
       fastSlippageBps: 0,
+      fastNewsGateEnabled: false,
+      fastNewsMinSentiment: 0,
+      fastNewsMinArticles: 3,
+      fastNewsWindowHours: 24,
       fastCorrelatedExposurePct: 0,
       fastRiskPerTradePct: 0,
       fastMaxLossStreak: 0,

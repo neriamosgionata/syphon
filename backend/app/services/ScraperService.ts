@@ -3,6 +3,7 @@ import * as cheerio from 'cheerio'
 import logger from '@adonisjs/core/services/logger'
 import ScrapeSource from '#models/ScrapeSource'
 import MeilisearchService from './MeilisearchService.js'
+import EventDedupService from './EventDedupService.js'
 import { DateTime } from 'luxon'
 
 const rssParser = new Parser({
@@ -28,49 +29,136 @@ const DEFAULT_SOURCES = [
     name: 'Google News - Business',
     slug: 'google-news-business',
     type: 'rss' as const,
+    category: 'markets',
     url: 'https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB',
   },
   {
     name: 'Google News - Finance',
     slug: 'google-news-finance',
     type: 'rss' as const,
+    category: 'markets',
     url: 'https://news.google.com/rss/search?q=stock+market+finance&hl=en-US&gl=US&ceid=US:en',
   },
   {
     name: 'Yahoo Finance RSS',
     slug: 'yahoo-finance-rss',
     type: 'rss' as const,
+    category: 'markets',
     url: 'https://finance.yahoo.com/news/rssindex',
   },
   {
     name: 'MarketWatch',
     slug: 'marketwatch',
     type: 'rss' as const,
+    category: 'markets',
     url: 'http://feeds.marketwatch.com/marketwatch/topstories/',
   },
   {
     name: 'CNBC Finance',
     slug: 'cnbc-finance',
     type: 'rss' as const,
+    category: 'markets',
     url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664',
   },
   {
     name: 'Reuters Business',
     slug: 'reuters-business',
     type: 'rss' as const,
+    category: 'markets',
     url: 'https://www.reutersagency.com/feed/?best-topics=business-finance&post_type=best',
   },
   {
     name: 'Investing.com News',
     slug: 'investing-com',
     type: 'rss' as const,
+    category: 'markets',
     url: 'https://www.investing.com/rss/news.rss',
   },
   {
     name: 'Seeking Alpha',
     slug: 'seeking-alpha',
     type: 'rss' as const,
+    category: 'markets',
     url: 'https://seekingalpha.com/market_currents.xml',
+  },
+  // Crypto-native channels — the algo trades crypto, so the crypto beat
+  // gets direct coverage instead of only generic finance feeds.
+  {
+    name: 'CoinDesk',
+    slug: 'coindesk',
+    type: 'rss' as const,
+    category: 'crypto',
+    url: 'https://www.coindesk.com/arc/outboundfeeds/rss/',
+  },
+  {
+    name: 'The Block',
+    slug: 'the-block',
+    type: 'rss' as const,
+    category: 'crypto',
+    url: 'https://www.theblock.co/rss.xml',
+  },
+  {
+    name: 'CoinTelegraph',
+    slug: 'cointelegraph',
+    type: 'rss' as const,
+    category: 'crypto',
+    url: 'https://cointelegraph.com/rss',
+  },
+  {
+    name: 'Decrypt',
+    slug: 'decrypt',
+    type: 'rss' as const,
+    category: 'crypto',
+    url: 'https://decrypt.co/feed',
+  },
+  {
+    name: 'CryptoSlate',
+    slug: 'cryptoslate',
+    type: 'rss' as const,
+    category: 'crypto',
+    url: 'https://cryptoslate.com/feed/',
+  },
+  {
+    name: 'Bitcoin Magazine',
+    slug: 'bitcoin-magazine',
+    type: 'rss' as const,
+    category: 'crypto',
+    url: 'https://bitcoinmagazine.com/feed',
+  },
+  {
+    name: 'NewsBTC',
+    slug: 'newsbtc',
+    type: 'rss' as const,
+    category: 'crypto',
+    url: 'https://www.newsbtc.com/feed/',
+  },
+  {
+    name: 'Blockworks',
+    slug: 'blockworks',
+    type: 'rss' as const,
+    category: 'crypto',
+    url: 'https://blockworks.co/feed',
+  },
+  {
+    name: 'The Defiant',
+    slug: 'the-defiant',
+    type: 'rss' as const,
+    category: 'crypto',
+    url: 'https://thedefiant.io/feed',
+  },
+  {
+    name: 'AMBCrypto',
+    slug: 'ambcrypto',
+    type: 'rss' as const,
+    category: 'crypto',
+    url: 'https://ambcrypto.com/feed/',
+  },
+  {
+    name: 'CoinGape',
+    slug: 'coingape',
+    type: 'rss' as const,
+    category: 'crypto',
+    url: 'https://coingape.com/feed/',
   },
 ]
 
@@ -174,13 +262,20 @@ class ScraperService {
       }
 
       if (!existing) {
-        await MeilisearchService.saveArticle({
+        const { id } = await MeilisearchService.saveArticle({
           ...data,
           publishedAt: data.publishedAt?.toISO() || null,
           sourceName: source.name,
           scrapeSourceId: source.id,
+          category: source.category || 'markets',
           isAnalyzed: false,
         })
+        // Event cluster: the first article carrying a story becomes its
+        // canonical id; later copies of the same headline join the cluster.
+        const eventKey = await EventDedupService.getOrCreateEvent(data.title, id)
+        if (eventKey) {
+          await MeilisearchService.updateArticle(id, { eventKey })
+        }
         saved++
       }
     }

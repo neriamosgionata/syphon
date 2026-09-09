@@ -48,3 +48,7 @@ backend/syphon.sqlite3-*
 
 # Backtest data cache (fetched from Binance)
 backend/backtests/cache/
+
+# Local dev database
+backend/syphon.sqlite3*
+syphon.sqlite3*

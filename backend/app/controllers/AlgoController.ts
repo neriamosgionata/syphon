@@ -33,6 +33,8 @@ export default class AlgoController {
       'fastMakerExecution', 'fastLimitFillSeconds', 'fastLimitOffsetPct',
       'fastMakerFeePct', 'fastVolTargetPct', 'fastVolTargetWindowSeconds',
       'fastVolTargetMaxMult',
+      'fastNewsGateEnabled', 'fastNewsMinSentiment', 'fastNewsMinArticles',
+      'fastNewsWindowHours',
     ]
 
     const numericRanges: Record<string, [number, number]> = {
@@ -82,6 +84,9 @@ export default class AlgoController {
       fastVolTargetPct: [0, 200],
       fastVolTargetWindowSeconds: [60, 14400],
       fastVolTargetMaxMult: [0.1, 5],
+      fastNewsMinSentiment: [-1, 1],
+      fastNewsMinArticles: [1, 50],
+      fastNewsWindowHours: [1, 168],
     }
 
     const stringEnums: Record<string, string[]> = {
@@ -105,6 +110,8 @@ export default class AlgoController {
       } else if (field === 'fastTrendMode') {
         value = value === true || value === 'true' || value === 1 || value === '1'
       } else if (field === 'fastMakerExecution') {
+        value = value === true || value === 'true' || value === 1 || value === '1'
+      } else if (field === 'fastNewsGateEnabled') {
         value = value === true || value === 'true' || value === 1 || value === '1'
       } else if (numericRanges[field]) {
         const num = Number(value)

@@ -133,4 +133,46 @@ test.group('SentimentService', () => {
     assert.properties(result, ['sentiment', 'sentimentScore', 'confidence', 'keywords', 'reasoning'])
     assert.include(['very_bearish', 'bearish', 'neutral', 'bullish', 'very_bullish'], result.sentiment)
   })
+
+  // ── Crypto lexicon (migration 21) ─────────────────────────────
+
+  test('crypto negative terms push sentiment down', ({ assert }) => {
+    const result = SentimentService.analyze(
+      'Exchange hacked, funds stolen in security breach, assets frozen amid rug pull fears'
+    )
+    assert.isTrue(result.sentimentScore < -0.2)
+    assert.include(['bearish', 'very_bearish'], result.sentiment)
+  })
+
+  test('crypto positive terms push sentiment up', ({ assert }) => {
+    const result = SentimentService.analyze(
+      'ETF approval drives institutional adoption as whales accumulate bitcoin amid halving'
+    )
+    assert.isTrue(result.sentimentScore > 0.2)
+    assert.include(['bullish', 'very_bullish'], result.sentiment)
+  })
+
+  test('rug pull phrase is strongly negative', ({ assert }) => {
+    const result = SentimentService.analyze('Token price collapses after rug pull on the exchange')
+    assert.isTrue(result.sentimentScore < 0)
+    assert.isTrue(result.keywords.some((k: string) => k.includes('rug pull')))
+  })
+
+  test('pump and dump phrase is negative despite pump', ({ assert }) => {
+    const result = SentimentService.analyze('Whales orchestrate a pump and dump scheme')
+    assert.isTrue(result.sentimentScore < 0)
+  })
+
+  test('death cross phrase is negative', ({ assert }) => {
+    const result = SentimentService.analyze('Bitcoin prints a death cross as capitulation begins')
+    assert.isTrue(result.sentimentScore < 0)
+  })
+
+  test('crypto keywords surface in keyword extraction', ({ assert }) => {
+    const result = SentimentService.analyze('ETF approval triggers institutional inflows and whale accumulation')
+    const keywordTexts = result.keywords.map((k: string) => k.replace(/^[+-]/, ''))
+    assert.isTrue(
+      keywordTexts.some((k: string) => ['etf', 'approval', 'institutional', 'inflow', 'accumulation', 'whale'].includes(k))
+    )
+  })
 })

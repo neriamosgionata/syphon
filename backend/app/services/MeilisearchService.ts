@@ -103,7 +103,7 @@ class MeilisearchService {
         searchableAttributes: ['reasoning', 'tickerSymbol', 'sentiment'],
         filterableAttributes: [
           'articleId', 'tickerId', 'tickerSymbol', 'sentiment',
-          'sentimentScore', 'createdAt',
+          'sentimentScore', 'createdAt', 'eventKey', 'publishedAt',
         ],
         sortableAttributes: ['createdAt', 'sentimentScore', 'relevanceScore', 'confidence'],
         pagination: { maxTotalHits: 50000 },
@@ -220,6 +220,8 @@ class MeilisearchService {
     url: string
     sourceName?: string | null
     scrapeSourceId?: number | null
+    category?: string | null
+    eventKey?: string | null
     author?: string | null
     imageUrl?: string | null
     publishedAt?: string | null
@@ -383,6 +385,10 @@ class MeilisearchService {
     keywords?: any
     reasoning?: string | null
     tickerPriceAtAnalysis?: number | null
+    /** Event cluster the source article belongs to (dedup key for news scores). */
+    eventKey?: string | null
+    /** Source article publish time (ISO) — used for recency decay. */
+    publishedAt?: string | null
   }): Promise<{ id: string }> {
     const id = `${analysis.articleId}_${analysis.tickerId}`
     const now = new Date().toISOString()

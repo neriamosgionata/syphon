@@ -19,6 +19,10 @@ export default class ScrapeSource extends BaseModel {
   @column()
   declare url: string
 
+  /** Source category: 'crypto' | 'markets' | 'macro'. */
+  @column()
+  declare category: string
+
   @column({
     prepare: (value: any) => (value ? JSON.stringify(value) : null),
     consume: (value: any) => (typeof value === 'string' ? JSON.parse(value) : value),
