@@ -12,16 +12,9 @@
 import logger from '@adonisjs/core/services/logger'
 import Ticker from '#models/Ticker'
 import IBKRService from './IBKRService.js'
+import { contractForTicker } from './ibkr_contracts.js'
+import { isSessionOpen } from './MarketSession.js'
 import type { PriceFeed } from './market_types.js'
-
-const IBKR_SEC_TYPE: Record<string, string> = {
-  crypto: 'CRYPTO',
-  stock: 'STK',
-  etf: 'STK',
-  index: 'IND',
-  fund: 'FUND',
-  future: 'FUT',
-}
 
 export class IBKRPriceFeed implements PriceFeed {
   private subscribed = new Set<string>()
@@ -76,13 +69,7 @@ export class IBKRPriceFeed implements PriceFeed {
           this.contractCache.set(symbol, null)
           return
         }
-        const secType = IBKR_SEC_TYPE[ticker.secType] || 'STK'
-        contract = {
-          symbol,
-          secType,
-          exchange: ticker.exchange || (secType === 'CRYPTO' ? 'PAXOS' : 'SMART'),
-          currency: ticker.currency || 'USD',
-        }
+        contract = contractForTicker(ticker)
         this.contractCache.set(symbol, contract)
       } catch (err) {
         logger.error('[IBKRFeed] Contract resolution failed for %s: %s', symbol, (err as Error).message)
@@ -92,6 +79,19 @@ export class IBKRPriceFeed implements PriceFeed {
     if (contract && this.subscribed.has(symbol)) {
       this.ibkr.reqMktData(symbol, contract)
     }
+  }
+
+  /**
+   * Market-session gate for the algo loop: crypto 24/7, listed instruments
+   * Mon-Fri exchange hours (US-equity fallback model). Unknown secType /
+   * unresolved ticker → open (fail-open).
+   */
+  public isSessionOpen(symbol: string): boolean {
+    const s = symbol.toUpperCase()
+    const contract = this.contractCache.get(s)
+    if (!contract) return true
+    const status = isSessionOpen(Date.now(), contract.secType === 'CRYPTO' ? 'crypto' : contract.secType)
+    return status.open
   }
 }
 

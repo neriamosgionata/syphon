@@ -15,6 +15,7 @@ import NotificationService from '#services/NotificationService'
 import NewsSentimentService from '#services/NewsSentimentService'
 import IBKRPriceFeed from '#services/IBKRPriceFeed'
 import IBKRService from '#services/IBKRService'
+import IBKRFastEngine from '#services/IBKRFastEngine'
 import type { PriceFeed, FastExecutionEngine, EquityProvider } from '#services/market_types'
 
 // ─── Intraminute algo loop ────────────────────────────────────
@@ -37,7 +38,7 @@ const MIN_LOOP_SECONDS = 5
  * Venue registry — the fast algo composes its price feed, execution engine
  * and equity provider from the algo_configs.broker field. Adding a venue is
  * a new entry here (plus its implementations); FastAlgoService stays venue-
- * free. `engine: null` = feed-only venue (IBKR until the P2 fast engine).
+ * free.
  */
 const BROKER_COMPONENTS: Record<string, {
   engine: FastExecutionEngine | null
@@ -50,7 +51,7 @@ const BROKER_COMPONENTS: Record<string, {
     equity: KrakenService,
   },
   ibkr: {
-    engine: null,
+    engine: IBKRFastEngine,
     ws: IBKRPriceFeed,
     equity: IBKRService,
   },
@@ -244,12 +245,14 @@ export class FastAlgoService {
 
     const prices: Record<string, number | null> = {}
     const momentum: Record<string, { momentumPct: number | null; rsi: number | null }> = {}
+    const sessions: Record<string, boolean> = {}
     for (const s of subscribed) {
       prices[s] = this.ws.getPrice(s)
       momentum[s] = {
         momentumPct: this.feed.momentumPct(s, cfg?.fastMomentumSeconds ?? 60),
         rsi: this.feed.rsi(s),
       }
+      if (this.ws.isSessionOpen) sessions[s] = this.ws.isSessionOpen(s)
     }
 
     return {
@@ -267,6 +270,7 @@ export class FastAlgoService {
       subscribed,
       prices,
       momentum,
+      sessions,
       strategy: cfg ? {
         trailingStopPct: cfg.fastTrailingStopPct,
         trailingActivatePct: cfg.fastTrailingActivatePct,
@@ -680,6 +684,11 @@ export class FastAlgoService {
 
       const price = this.ws.getPrice(symbol)
       if (price === null) continue
+
+      // Market-session gate: listed instruments only trade during exchange
+      // hours (crypto is 24/7; equities have sessions + holidays). Fail-open
+      // when the venue can't answer.
+      if (this.ws.isSessionOpen && !this.ws.isSessionOpen(symbol)) continue
 
       // News-sentiment context for the entry gate (null = no signal —
       // the gate never blocks on missing news or infra errors).

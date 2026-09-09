@@ -297,6 +297,7 @@ class IBKRService {
       stopPrice?: number | null
       trailAmount?: number | null
       timeInForce?: string
+      orderRef?: string | null
     } = {},
   ): Order {
     const ibOrderTypeMap: Record<OrderType, IBOrderType> = {
@@ -322,6 +323,8 @@ class IBKRService {
       tif: tifMap[opts.timeInForce || 'DAY'] || TimeInForce.DAY,
       transmit: true,
     }
+
+    if (opts.orderRef) order.orderRef = opts.orderRef
 
     if (opts.limitPrice != null && ['LMT', 'STP_LMT'].includes(orderType)) {
       order.lmtPrice = opts.limitPrice
@@ -551,6 +554,46 @@ class IBKRService {
       clientId: Number(env.get('IB_CLIENT_ID', '1')),
       nextOrderId: this.nextOrderId,
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Raw order surface (fast engine)
+  // ---------------------------------------------------------------------------
+
+  /** Allocate the next order id (connects + waits for nextValidId first). */
+  public async allocateOrderId(): Promise<number> {
+    if (!this.ib || !this.connected) {
+      const didConnect = await this.connect()
+      if (!didConnect) throw new Error('IBKR not connected')
+    }
+    const ready = await this.ensureOrderIdReady()
+    if (!ready) throw new Error('No valid order ID from TWS/Gateway')
+    return this.getNextOrderId()
+  }
+
+  /** Place a pre-built contract/order (fast engine path). */
+  public async placeRawOrder(orderId: number, contract: any, order: any): Promise<void> {
+    if (!this.ib || !this.connected) {
+      const didConnect = await this.connect()
+      if (!didConnect) throw new Error('IBKR not connected')
+    }
+    this.ib.placeOrder(orderId, contract, order)
+  }
+
+  public async cancelRawOrder(orderId: number): Promise<void> {
+    if (!this.ib || !this.connected) return
+    try {
+      this.ib.cancelOrder(orderId, '')
+    } catch (err) {
+      logger.error('[IBKR] Cancel %d failed: %s', orderId, (err as Error).message)
+    }
+  }
+
+  /** Attach an extra event listener to the live connection. */
+  public on(event: string, listener: (...args: any[]) => void): () => void {
+    if (!this.ib) throw new Error('IBKR connection not initialized')
+    this.ib.on(event as any, listener)
+    return () => this.ib!.off(event as any, listener)
   }
 
   // ---------------------------------------------------------------------------

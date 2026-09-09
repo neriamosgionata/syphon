@@ -58,6 +58,9 @@ export default class Trade extends BaseModel {
   declare externalOrderId: string | null
 
   @column()
+  declare clientOrderId: string | null
+
+  @column()
   declare status: TradeStatus
 
   @column()
