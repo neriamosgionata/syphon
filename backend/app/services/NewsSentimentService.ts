@@ -16,7 +16,7 @@
 import redis from '@adonisjs/redis/services/main'
 import logger from '@adonisjs/core/services/logger'
 import MeilisearchService from './MeilisearchService.js'
-import { newsWindowScore, NewsEvent, NewsScoreResult } from './NewsScore.js'
+import { newsWindowScore, analysesToNewsEvents, NewsScoreResult } from './NewsScore.js'
 
 const SENTIMENT_CACHE_MS = 60_000
 
@@ -34,44 +34,11 @@ export class NewsSentimentService {
   ) {}
 
   /**
-   * Collapse analyses into distinct news events. Analyses of the same
-   * story (same eventKey) merge into one event: timestamp = the earliest
-   * article publish time, score = relevance×confidence-weighted mean of
-   * the members, weight = 1 + 0.15·log2(n) (evidence bonus, capped 1.5).
-   * Analyses without an eventKey (backfill / pre-migration) each form
-   * their own event — same as before the dedup layer existed.
+   * Collapse analyses into distinct news events — shared pure logic in
+   * NewsScore.analysesToNewsEvents (also used by the quant engine).
    */
-  public analysesToEvents(analyses: any[]): NewsEvent[] {
-    const clusters = new Map<string, { t: number; weighted: number; weightSum: number; members: number }>()
-
-    for (const a of analyses) {
-      const score = Number(a.sentimentScore)
-      const relevance = Number(a.relevanceScore) || 0.1
-      const confidence = Number(a.confidence) || 0.1
-      if (!Number.isFinite(score)) continue
-
-      const t = Date.parse(a.publishedAt || a.createdAt)
-      if (!Number.isFinite(t) || t <= 0) continue
-
-      const w = relevance * confidence
-      const key = a.eventKey ? `ev:${a.eventKey}` : `an:${a.articleId}:${a.tickerId}`
-      const cluster = clusters.get(key)
-      if (cluster) {
-        cluster.weighted += score * w
-        cluster.weightSum += w
-        cluster.members++
-        if (t < cluster.t) cluster.t = t
-      } else {
-        clusters.set(key, { t, weighted: score * w, weightSum: w, members: 1 })
-      }
-    }
-
-    return [...clusters.values()].map((c, i) => ({
-      id: `${c.t}:${i}`,
-      t: c.t,
-      score: c.weightSum > 0 ? c.weighted / c.weightSum : 0,
-      weight: Math.min(1 + 0.15 * Math.log2(Math.max(1, c.members)), 1.5),
-    }))
+  public analysesToEvents(analyses: any[]) {
+    return analysesToNewsEvents(analyses)
   }
 
   /**

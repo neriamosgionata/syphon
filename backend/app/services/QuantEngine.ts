@@ -1,6 +1,7 @@
 import logger from '@adonisjs/core/services/logger'
 import Ticker from '#models/Ticker'
 import MeilisearchService from './MeilisearchService.js'
+import { newsWindowScore, analysesToNewsEvents } from './NewsScore.js'
 
 // ─── Data Types ──────────────────────────────────────────────
 
@@ -94,6 +95,8 @@ export interface TickerAnalysis {
   exchange: string | null
   currentPrice: number | null
   dataPoints: number
+  /** Fraction of the 16 composite components that had data (0-1). */
+  coverage: number
 
   // Moving averages
   sma20: number | null
@@ -755,6 +758,30 @@ interface CompositeInput {
   fiftyTwoWeekHigh: number | null
   fiftyTwoWeekLow: number | null
   regime: TradingRecommendation['regime']
+  /** Instrument class — crypto skips stock-specific components (P/E, beta, 52w). */
+  secType?: string | null
+}
+
+/**
+ * Present-component coverage (0-1). The composite divides by the weights
+ * of PRESENT components only, so scores of thin-data tickers are not
+ * comparable to full-data ones — coverage makes that explicit and lets
+ * the screener filter for it.
+ */
+export function compositeCoverage(input: CompositeInput): number {
+  const present = [
+    input.rsi !== null, input.macd !== null, input.bb !== null,
+    input.sma20 !== null && input.sma50 !== null && input.sma200 !== null,
+    input.adx !== null, input.stoch !== null,
+    input.volumeRatio !== null && input.return20d !== null,
+    input.patterns.length > 0,
+    !!input.sentiment && input.sentiment.totalArticles > 0,
+    !!input.sentiment && input.sentiment.totalArticles >= 3,
+    !!input.sentiment && input.sentiment.totalArticles > 0,
+    input.sharpe !== null, input.beta !== null, input.pe !== null,
+    input.fiftyTwoWeekHigh !== null && input.fiftyTwoWeekLow !== null,
+  ]
+  return present.filter(Boolean).length / present.length
 }
 
 function computeCompositeScore(input: CompositeInput): { score: number; breakdown: ScoreBreakdown } {
@@ -768,12 +795,26 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
   let score = 0
   let weights = 0
 
+  // Instrument-class weights: crypto has no P/E/beta-vs-SPY/52-week
+  // meaning, so those 11 weight points shift to momentum, volume and
+  // sentiment (the signals that do move crypto).
+  const isCrypto = input.secType === 'crypto'
+  const momentumWeight = isCrypto ? 11 : 8
+  const volumeWeight = isCrypto ? 6 : 4
+  const sentimentWeight = isCrypto ? 16 : 12
+  const newsVolumeWeight = isCrypto ? 5 : 3
+
   // ── Technical (65%) ──
 
-  // RSI (10%) — FIX #8: graded scoring instead of linear from center
+  // RSI (10%) — FIX #8: graded scoring instead of linear from center.
+  // Regime-aware (D): oversold in a downtrend is a falling knife, not a
+  // contrarian buy; overbought in a downtrend carries no long signal.
   if (input.rsi !== null) {
     let rsiScore: number
-    if (input.rsi <= 30) rsiScore = 50 + ((30 - input.rsi) / 30) * 50
+    const down = input.regime === 'trending_down'
+    if (down && input.rsi <= 30) rsiScore = -50 - ((30 - input.rsi) / 30) * 50
+    else if (down && input.rsi >= 70) rsiScore = 0
+    else if (input.rsi <= 30) rsiScore = 50 + ((30 - input.rsi) / 30) * 50
     else if (input.rsi >= 70) rsiScore = -50 - ((input.rsi - 70) / 30) * 50
     else if (input.rsi < 45) rsiScore = ((45 - input.rsi) / 15) * 50
     else if (input.rsi > 55) rsiScore = -((input.rsi - 55) / 15) * 50
@@ -824,10 +865,13 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
     weights += 7
   }
 
-  // Stochastic (5%) — FIX #9: graded like RSI
+  // Stochastic (5%) — FIX #9: graded like RSI, regime-aware like RSI.
   if (input.stoch) {
     let stochScore: number
-    if (input.stoch.k <= 20) stochScore = 50 + ((20 - input.stoch.k) / 20) * 50
+    const down = input.regime === 'trending_down'
+    if (down && input.stoch.k <= 20) stochScore = -50 - ((20 - input.stoch.k) / 20) * 50
+    else if (down && input.stoch.k >= 80) stochScore = 0
+    else if (input.stoch.k <= 20) stochScore = 50 + ((20 - input.stoch.k) / 20) * 50
     else if (input.stoch.k >= 80) stochScore = -50 - ((input.stoch.k - 80) / 20) * 50
     else if (input.stoch.k < 40) stochScore = ((40 - input.stoch.k) / 20) * 50
     else if (input.stoch.k > 60) stochScore = -((input.stoch.k - 60) / 20) * 50
@@ -837,15 +881,15 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
     weights += 5
   }
 
-  // Momentum (8%)
+  // Momentum (8% → 11% crypto)
   if (input.return20d !== null) {
     const momScore = Math.max(-100, Math.min(100, input.return20d * 500))
     breakdown.momentum = momScore
-    score += momScore * 8
-    weights += 8
+    score += momScore * momentumWeight
+    weights += momentumWeight
   }
 
-  // Volume confirmation (4%) — FIX #3 + #18: direction-aware with gradient
+  // Volume confirmation (4% → 6% crypto) — FIX #3 + #18: direction-aware with gradient
   if (input.volumeRatio !== null && input.return20d !== null) {
     let volScore: number
     if (input.return20d > 0) {
@@ -856,8 +900,8 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
       volScore = 0
     }
     breakdown.volume = volScore
-    score += volScore * 4
-    weights += 4
+    score += volScore * volumeWeight
+    weights += volumeWeight
   }
 
   // Patterns (4%) — FIX #4: patterns contribute to composite
@@ -876,14 +920,14 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
     }
   }
 
-  // ── Sentiment (20%) ──
+  // ── Sentiment (20% → 21% crypto) ──
 
   if (input.sentiment) {
-    // Sentiment score (12%)
+    // Sentiment score (12% → 16% crypto)
     if (input.sentiment.totalArticles > 0) {
       breakdown.sentiment = Math.max(-100, Math.min(100, input.sentiment.avgScore * 100))
-      score += breakdown.sentiment * 12
-      weights += 12
+      score += breakdown.sentiment * sentimentWeight
+      weights += sentimentWeight
 
       // Sentiment momentum (5%) — FIX #17: require minimum articles for momentum
       if (input.sentiment.totalArticles >= 3) {
@@ -892,12 +936,12 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
         weights += 5
       }
 
-      // News volume (3%) — FIX #6: bidirectional (positive if bullish coverage, negative if bearish)
+      // News volume (3% → 5% crypto) — FIX #6: bidirectional
       const volumeBase = Math.min(100, Math.log2(input.sentiment.totalArticles + 1) * 20)
       const sentimentSign = input.sentiment.avgScore >= 0 ? 1 : -1
       breakdown.newsVolume = volumeBase * sentimentSign
-      score += breakdown.newsVolume * 3
-      weights += 3
+      score += breakdown.newsVolume * newsVolumeWeight
+      weights += newsVolumeWeight
     }
   }
 
@@ -911,8 +955,8 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
     weights += 4
   }
 
-  // Beta (3%) — FIX #4: beta now contributes
-  if (input.beta !== null) {
+  // Beta (3%) — FIX #4: beta now contributes; crypto skips (no market index)
+  if (input.beta !== null && !isCrypto) {
     // Beta 1.0 = neutral, <0.8 = defensive (slight positive), >1.5 = high risk (negative in volatile regime)
     let betaScore: number
     if (input.regime === 'trending_up') {
@@ -927,16 +971,16 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
     weights += 3
   }
 
-  // P/E (4%)
-  if (input.pe !== null && input.pe > 0) {
+  // P/E (4%) — stocks/ETFs only
+  if (input.pe !== null && input.pe > 0 && !isCrypto) {
     const peScore = input.pe < 15 ? 60 : input.pe < 25 ? 20 : input.pe < 40 ? -20 : -60
     breakdown.pe = peScore
     score += peScore * 4
     weights += 4
   }
 
-  // 52-week position (4%) — FIX #7: regime-conditional
-  if (input.fiftyTwoWeekHigh && input.fiftyTwoWeekLow && input.price > 0) {
+  // 52-week position (4%) — FIX #7: regime-conditional; stocks/ETFs only
+  if (!isCrypto && input.fiftyTwoWeekHigh && input.fiftyTwoWeekLow && input.price > 0) {
     const range = input.fiftyTwoWeekHigh - input.fiftyTwoWeekLow
     if (range > 0) {
       const position = (input.price - input.fiftyTwoWeekLow) / range
@@ -968,6 +1012,140 @@ function classifySignal(score: number): TickerAnalysis['quantSignal'] {
   if (score <= -40) return 'strong_sell'
   if (score <= -15) return 'sell'
   return 'neutral'
+}
+
+// ─── Pure indicator snapshot ───────────────────────────────────
+//
+// Everything analyzeTickerData computes from a bar series, as a pure
+// function of the bars + context. The production analysis and the
+// quant:validate harness share this path — validation measures THE
+// production scoring, not a copy.
+
+interface IndicatorSnapshot {
+  closes: number[]
+  volumes: number[]
+  returns: number[]
+  price: number
+  sma20: number | null
+  sma50: number | null
+  sma200: number | null
+  ema12: number | null
+  ema26: number | null
+  rsi14: number | null
+  macd: MACDResult | null
+  stochastic: StochasticResult | null
+  adx: ADXResult | null
+  bollingerBands: BollingerResult | null
+  atr14: number | null
+  volatility20d: number | null
+  volatility60d: number | null
+  obv: number
+  obvTrend: 'rising' | 'falling' | 'flat' | null
+  volumeSma20: number | null
+  volumeRatio: number | null
+  beta: number | null
+  sharpe: number | null
+  sortino: number | null
+  maxDrawdown: number | null
+  regime: ReturnType<typeof detectRegime>
+  patterns: PatternSignal[]
+  return20d: number | null
+  compositeScore: number
+  breakdown: ScoreBreakdown
+  coverage: number
+}
+
+export function computeIndicatorSnapshot(
+  bars: Bar[],
+  opts: { spyReturns?: number[]; meta?: any; sentiment?: SentimentData; secType?: string | null }
+): IndicatorSnapshot {
+  const closes = bars.map((b) => b.close)
+  const volumes = bars.map((b) => b.volume)
+  const returns = computeReturns(closes)
+  const price = closes[closes.length - 1]
+
+  // Moving averages
+  const sma20 = sma(closes, 20)
+  const sma50 = sma(closes, 50)
+  const sma200 = sma(closes, 200)
+  const ema12Series = ema(closes, 12)
+  const ema26Series = ema(closes, 26)
+  const ema12Val = ema12Series.length > 0 ? ema12Series[ema12Series.length - 1] : null
+  const ema26Val = ema26Series.length > 0 ? ema26Series[ema26Series.length - 1] : null
+
+  // Oscillators
+  const rsi14 = computeRSI(closes, 14)
+  const macdResult = computeMACD(closes, 12, 26, 9)
+  const stochResult = computeStochastic(bars, 14, 3)
+  const adxResult = computeADX(bars, 14)
+
+  // Volatility
+  const bbResult = computeBollingerBands(closes, 20, 2)
+  const atr14 = computeATR(bars, 14)
+  const vol20d = returns.length >= 20 ? stddev(returns.slice(-20)) * Math.sqrt(252) : null
+  const vol60d = returns.length >= 60 ? stddev(returns.slice(-60)) * Math.sqrt(252) : null
+
+  // Volume
+  const obvResult = computeOBV(bars)
+  const volumeSma20 = sma(volumes, 20)
+  const currentVol = volumes[volumes.length - 1]
+  const volumeRatio = volumeSma20 && volumeSma20 > 0 ? currentVol / volumeSma20 : null
+
+  let obvTrend: 'rising' | 'falling' | 'flat' | null = null
+  if (obvResult.series.length >= 20) {
+    const recentOBV = obvResult.series.slice(-20)
+    const first5 = mean(recentOBV.slice(0, 5))
+    const last5 = mean(recentOBV.slice(-5))
+    const diff = (last5 - first5) / (Math.abs(first5) || 1)
+    obvTrend = diff > 0.05 ? 'rising' : diff < -0.05 ? 'falling' : 'flat'
+  }
+
+  // Returns & risk
+  const spyReturns = opts.spyReturns || []
+  const betaVal = computeBeta(returns, spyReturns)
+  const sharpe = computeSharpe(returns)
+  const sortino = computeSortino(returns)
+  const maxDD = computeMaxDrawdown(closes)
+
+  // Fundamentals (static metadata — point-in-time for validation purposes)
+  const meta = (opts.meta || {}) as any
+
+  // Sentiment (already computed point-in-time by the caller)
+  const sentiment = opts.sentiment || { totalArticles: 0, avgScore: 0, recentTrend: 0 }
+
+  // Regime detection
+  const regime = detectRegime(adxResult, sma50, sma200, vol20d, price)
+
+  // Patterns
+  const patterns = detectPatterns(
+    bars, closes, rsi14, macdResult, bbResult, sma50, sma200, adxResult, volumeRatio
+  )
+
+  // Unified composite score
+  const return20d = priceChange(closes, 20)
+  const compositeInput = {
+    rsi: rsi14, macd: macdResult, bb: bbResult,
+    sma20, sma50, sma200, adx: adxResult, stoch: stochResult,
+    volumeRatio, return20d, sharpe, beta: betaVal, pe: Number(meta.pe) || null, price,
+    patterns, sentiment,
+    fiftyTwoWeekHigh: Number(meta.fiftyTwoWeekHigh) || null,
+    fiftyTwoWeekLow: Number(meta.fiftyTwoWeekLow) || null,
+    regime,
+    secType: opts.secType ?? meta.secType ?? null,
+  }
+  const { score: compositeScore, breakdown } = computeCompositeScore(compositeInput)
+
+  return {
+    closes, volumes, returns, price,
+    sma20, sma50, sma200, ema12: ema12Val, ema26: ema26Val,
+    rsi14, macd: macdResult, stochastic: stochResult, adx: adxResult,
+    bollingerBands: bbResult, atr14, volatility20d: vol20d, volatility60d: vol60d,
+    obv: obvResult.obv, obvTrend, volumeSma20, volumeRatio,
+    beta: betaVal, sharpe, sortino, maxDrawdown: maxDD,
+    regime, patterns, return20d,
+    compositeScore, breakdown,
+    coverage: compositeCoverage(compositeInput),
+  }
 }
 
 // ─── Conviction & Recommendation ─────────────────────────────
@@ -1069,35 +1247,30 @@ class QuantEngineService {
     days: number,
     preloaded?: any[]
   ): Promise<SentimentData> {
+    // Sentiment is scored on a 30-day recency-decayed window (half-life
+    // 7.5d), NOT the full technical-analysis window (365d) — old news must
+    // not weigh like today's. Events are deduped by eventKey (the same
+    // story from 5 sources = one vote). Shares the live algo's math
+    // (NewsScore.newsWindowScore).
+    const sentimentWindowSeconds = Math.min(days, 30) * 86400
+    const momentumShiftSeconds = 7 * 86400
+
     const analyses =
       preloaded ?? (await MeilisearchService.getAnalysesForTicker(tickerId, new Date(Date.now() - days * 86400000).toISOString()))
-    const halfCutoff = new Date(Date.now() - (days / 2) * 86400000).toISOString()
-
     if (analyses.length === 0) {
       return { totalArticles: 0, avgScore: 0, recentTrend: 0 }
     }
 
-    let weightedSum = 0
-    let weightTotal = 0
-    for (const a of analyses) {
-      const w = (Number(a.relevanceScore) || 0.5) * (Number(a.confidence) || 0.5)
-      weightedSum += Number(a.sentimentScore) * w
-      weightTotal += w
+    const now = Date.now()
+    const events = analysesToNewsEvents(analyses)
+    const current = newsWindowScore(events, now, sentimentWindowSeconds)
+    const shifted = newsWindowScore(events, now - momentumShiftSeconds, sentimentWindowSeconds)
+
+    return {
+      totalArticles: current.events,
+      avgScore: current.score ?? 0,
+      recentTrend: current.score !== null && shifted.score !== null ? current.score - shifted.score : 0,
     }
-    const avgScore = weightTotal > 0 ? weightedSum / weightTotal : 0
-
-    // FIX #17: require at least 2 articles in each half for momentum
-    const recent = analyses.filter((a: any) => a.createdAt >= halfCutoff)
-    const older = analyses.filter((a: any) => a.createdAt < halfCutoff)
-
-    let recentTrend = 0
-    if (recent.length >= 2 && older.length >= 2) {
-      const recentAvg = recent.reduce((s: number, a: any) => s + Number(a.sentimentScore), 0) / recent.length
-      const olderAvg = older.reduce((s: number, a: any) => s + Number(a.sentimentScore), 0) / older.length
-      recentTrend = recentAvg - olderAvg
-    }
-
-    return { totalArticles: analyses.length, avgScore, recentTrend }
   }
 
   public async analyzeTicker(symbol: string, options: { days?: number } = {}): Promise<TickerAnalysis | null> {
@@ -1134,82 +1307,22 @@ class QuantEngineService {
       volume: Number(s.volume) || 0,
     }))
 
-    const closes = bars.map((b) => b.close)
-    const volumes = bars.map((b) => b.volume)
-    const returns = computeReturns(closes)
-    const price = closes[closes.length - 1]
-
-    // Moving averages
-    const sma20 = sma(closes, 20)
-    const sma50 = sma(closes, 50)
-    const sma200 = sma(closes, 200)
-    const ema12Series = ema(closes, 12)
-    const ema26Series = ema(closes, 26)
-    const ema12Val = ema12Series.length > 0 ? ema12Series[ema12Series.length - 1] : null
-    const ema26Val = ema26Series.length > 0 ? ema26Series[ema26Series.length - 1] : null
-
-    // Oscillators
-    const rsi14 = computeRSI(closes, 14)
-    const macdResult = computeMACD(closes, 12, 26, 9)
-    const stochResult = computeStochastic(bars, 14, 3)
-    const adxResult = computeADX(bars, 14)
-
-    // Volatility
-    const bbResult = computeBollingerBands(closes, 20, 2)
-    const atr14 = computeATR(bars, 14)
-    const vol20d = returns.length >= 20 ? stddev(returns.slice(-20)) * Math.sqrt(252) : null
-    const vol60d = returns.length >= 60 ? stddev(returns.slice(-60)) * Math.sqrt(252) : null
-
-    // Volume
-    const obvResult = computeOBV(bars)
-    const volumeSma20 = sma(volumes, 20)
-    const currentVol = volumes[volumes.length - 1]
-    const volumeRatio = volumeSma20 && volumeSma20 > 0 ? currentVol / volumeSma20 : null
-
-    let obvTrend: 'rising' | 'falling' | 'flat' | null = null
-    if (obvResult.series.length >= 20) {
-      const recentOBV = obvResult.series.slice(-20)
-      const first5 = mean(recentOBV.slice(0, 5))
-      const last5 = mean(recentOBV.slice(-5))
-      const diff = (last5 - first5) / (Math.abs(first5) || 1)
-      obvTrend = diff > 0.05 ? 'rising' : diff < -0.05 ? 'falling' : 'flat'
-    }
-
-    // Returns & risk
     const spyReturns = await this.getSPYReturns()
-    const betaVal = computeBeta(returns, spyReturns)
-    const sharpe = computeSharpe(returns)
-    const sortino = computeSortino(returns)
-    const maxDD = computeMaxDrawdown(closes)
-
-    // Fundamentals
     const meta = (ticker.metadata || {}) as any
     const pe = meta.pe ? Number(meta.pe) : null
     const eps = meta.eps ? Number(meta.eps) : null
     const dividendYield = meta.dividendYield ? Number(meta.dividendYield) : null
-    const fiftyTwoWeekHigh = meta.fiftyTwoWeekHigh ? Number(meta.fiftyTwoWeekHigh) : null
-    const fiftyTwoWeekLow = meta.fiftyTwoWeekLow ? Number(meta.fiftyTwoWeekLow) : null
-
-    // Sentiment
     const sentimentData = await this.getSentimentData(ticker.id, days, options.analyses)
+    const snap = computeIndicatorSnapshot(bars, { spyReturns, meta, sentiment: sentimentData, secType: ticker.secType })
 
-    // Regime detection
-    const regime = detectRegime(adxResult, sma50, sma200, vol20d, price)
-
-    // Patterns
-    const patterns = detectPatterns(
-      bars, closes, rsi14, macdResult, bbResult, sma50, sma200, adxResult, volumeRatio
-    )
-
-    // Unified composite score
-    const return20d = priceChange(closes, 20)
-    const { score: compositeScore, breakdown } = computeCompositeScore({
-      rsi: rsi14, macd: macdResult, bb: bbResult,
-      sma20, sma50, sma200, adx: adxResult, stoch: stochResult,
-      volumeRatio, return20d, sharpe, beta: betaVal, pe, price,
-      patterns, sentiment: sentimentData,
-      fiftyTwoWeekHigh, fiftyTwoWeekLow, regime,
-    })
+    const {
+      closes, price, sma20, sma50, sma200, ema12: ema12Val, ema26: ema26Val,
+      rsi14, macd: macdResult, stochastic: stochResult, adx: adxResult,
+      bollingerBands: bbResult, atr14, volatility20d: vol20d, volatility60d: vol60d,
+      obv: obvValue, obvTrend, volumeSma20, volumeRatio,
+      beta: betaVal, sharpe, sortino, maxDrawdown: maxDD,
+      regime, patterns, return20d, compositeScore, breakdown, coverage,
+    } = snap
 
     // Conviction & recommendation
     const conviction = computeConviction(breakdown, compositeScore)
@@ -1244,6 +1357,7 @@ class QuantEngineService {
       // only refreshed on the cron schedule and can be stale by up to 45 min.
       currentPrice: price > 0 ? price : ticker.currentPrice,
       dataPoints: bars.length,
+      coverage,
 
       sma20, sma50, sma200,
       ema12: ema12Val, ema26: ema26Val,
@@ -1258,7 +1372,7 @@ class QuantEngineService {
       volatility20d: vol20d,
       volatility60d: vol60d,
 
-      obv: obvResult.obv,
+obv: obvValue,
       obvTrend,
       volumeSma20,
       volumeRatio,
@@ -1287,9 +1401,10 @@ class QuantEngineService {
   }
 
   // FIX #19: batch-optimized screener — preload SPY returns and all snapshots
-  public async screener(options: { days?: number; minArticles?: number } = {}): Promise<ScreenerResult> {
+  public async screener(options: { days?: number; minArticles?: number; minCoverage?: number } = {}): Promise<ScreenerResult> {
     const days = options.days || 365
     const minArticles = options.minArticles || 0
+    const minCoverage = options.minCoverage || 0
     const tickers = await Ticker.query().where('is_active', true).orderBy('symbol')
 
     // Preload all snapshots in batch from Meilisearch
@@ -1341,6 +1456,7 @@ class QuantEngineService {
           })
           if (!analysis) continue
           if (minArticles > 0 && (analysis.sentiment?.totalArticles || 0) < minArticles) continue
+          if (minCoverage > 0 && analysis.coverage < minCoverage) continue
 
           const smaTrend: 'bullish' | 'bearish' | 'neutral' | null =
             analysis.sma50 && analysis.sma200
@@ -1364,6 +1480,7 @@ class QuantEngineService {
             sentiment_score: analysis.sentiment ? Math.round(analysis.sentiment.avgScore * 1000) / 1000 : null,
             article_count: analysis.sentiment?.totalArticles || 0,
             composite_score: analysis.compositeScore,
+            coverage: analysis.coverage,
             signal: analysis.quantSignal,
             conviction: analysis.recommendation.conviction,
             regime: analysis.recommendation.regime,

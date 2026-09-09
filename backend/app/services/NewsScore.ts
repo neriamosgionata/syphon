@@ -83,3 +83,43 @@ export function newsWindowScore(
     meanScore: Number((plainSum / eventsInWindow).toFixed(4)),
   }
 }
+/**
+ * Collapse Meilisearch analyses into distinct news events — the shared
+ * live/quantscore path. Analyses of the same story (same eventKey) merge
+ * into one event: timestamp = earliest publish, score = relevance×confidence
+ * weighted mean, weight = evidence bonus 1 + 0.15·log2(n) capped 1.5.
+ * Analyses without an eventKey (backfill / pre-migration) each form their
+ * own event.
+ */
+export function analysesToNewsEvents(analyses: any[]): NewsEvent[] {
+  const clusters = new Map<string, { t: number; weighted: number; weightSum: number; members: number }>()
+
+  for (const a of analyses) {
+    const score = Number(a.sentimentScore)
+    const relevance = Number(a.relevanceScore) || 0.1
+    const confidence = Number(a.confidence) || 0.1
+    if (!Number.isFinite(score)) continue
+
+    const t = Date.parse(a.publishedAt || a.createdAt)
+    if (!Number.isFinite(t) || t <= 0) continue
+
+    const w = relevance * confidence
+    const key = a.eventKey ? `ev:${a.eventKey}` : `an:${a.articleId}:${a.tickerId}`
+    const cluster = clusters.get(key)
+    if (cluster) {
+      cluster.weighted += score * w
+      cluster.weightSum += w
+      cluster.members++
+      if (t < cluster.t) cluster.t = t
+    } else {
+      clusters.set(key, { t, weighted: score * w, weightSum: w, members: 1 })
+    }
+  }
+
+  return [...clusters.values()].map((c, i) => ({
+    id: `${c.t}:${i}`,
+    t: c.t,
+    score: c.weightSum > 0 ? c.weighted / c.weightSum : 0,
+    weight: Math.min(1 + 0.15 * Math.log2(Math.max(1, c.members)), 1.5),
+  }))
+}
