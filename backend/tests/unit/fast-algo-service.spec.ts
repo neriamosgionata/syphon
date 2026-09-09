@@ -976,4 +976,58 @@ test.group('FastAlgoService', (group) => {
 
     await assert.doesNotReject(() => (service as any).logDecision('BTC', 1, 'enter', 'test', {}))
   })
+
+  // ── Broker composition (venue-agnostic fast line) ─────────────
+
+  test('ibkr feed-only mode samples prices but never trades', async ({ assert }) => {
+    await seedConfig({ broker: 'ibkr', fastWatchlist: ['AAPL'] })
+    const ibkrWs = makeWs({ AAPL: 200 })
+    const equity = { isConnected: true, getEquity: async () => 50000 }
+    const service = new FastAlgoService({
+      brokerRegistry: { ibkr: { engine: null, ws: ibkrWs as any, equity: equity as any } },
+    })
+
+    await (service as any).tick()
+
+    assert.equal(service.status().engineRunning, false)
+    assert.deepEqual(ibkrWs.getConnectedSymbols(), ['AAPL'])
+    assert.equal(service.status().prices['AAPL'], 200)
+    // Feed-only: prices flow, but no engine means the fast line is not active.
+    assert.equal(service.status().active, false)
+    // No engine → nothing can be placed.
+    assert.equal(service.status().cooldowns.length, 0)
+    const open = await AlgoPosition.query().where('status', 'open')
+    assert.equal(open.length, 0)
+  })
+
+  test('unknown broker no-ops with a status error-free tick', async ({ assert }) => {
+    await seedConfig({ broker: 'bogus' })
+    const service = new FastAlgoService({ brokerRegistry: {} })
+
+    await (service as any).tick()
+    assert.equal(service.status().engineRunning, false)
+    assert.isNull(service.status().lastTickError)
+  })
+
+  test('broker switch is refused while positions are open', async ({ assert }) => {
+    await seedConfig({ broker: 'kraken' })
+    const engine = makeEngine()
+    const ws = makeWs({ BTC: 100 })
+    const registry = {
+      kraken: { engine: engine as any, ws: ws as any, equity: { isConnected: true, getEquity: async () => 10000 } },
+      ibkr: { engine: null, ws: makeWs({ AAPL: 200 }) as any, equity: { isConnected: true, getEquity: async () => 10000 } },
+    }
+    const service = new FastAlgoService({ brokerRegistry: registry as any })
+
+    // First resolution attaches kraken, then a position appears.
+    await (service as any).resolveComponents({ broker: 'kraken' })
+    assert.equal((service as any).componentsKey, 'kraken')
+    await makePosition({ status: 'open' })
+
+    // Switching venues with an open position is refused: old components
+    // stay attached so the open position keeps being managed.
+    await (service as any).resolveComponents({ broker: 'ibkr' })
+    assert.equal((service as any).componentsKey, 'kraken')
+    assert.equal((service as any).components.engine, engine)
+  })
 })

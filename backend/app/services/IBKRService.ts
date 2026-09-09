@@ -552,6 +552,94 @@ class IBKRService {
       nextOrderId: this.nextOrderId,
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Real-time market data (PriceFeed backend for the fast algo)
+  // ---------------------------------------------------------------------------
+
+  private marketDataByReqId = new Map<number, string>()
+  private marketPriceListeners = new Map<string, Set<(price: number) => void>>()
+  private lastMarketPrices = new Map<string, { price: number; time: number }>()
+  private marketDataWired = false
+  private marketDataReqSeq = 1000
+
+  /**
+   * Wire tickPrice/tickSize handlers once per connection. Ticks carry a
+   * reqId; the symbol lookup comes from marketDataByReqId.
+   */
+  private wireMarketData(): void {
+    if (this.marketDataWired || !this.ib) return
+    this.marketDataWired = true
+
+    this.ib.on('tickPrice' as any, (reqId: number, tickType: number, price: number, _attribs: any) => {
+      const symbol = this.marketDataByReqId.get(reqId)
+      if (!symbol || price <= 0) return
+      // Prefer the last-trade price (tickType 4); bid (1) / ask (2) are
+      // fallbacks when the last trade is stale (-1 sent by IBKR).
+      const existing = this.lastMarketPrices.get(symbol)
+      const isLast = tickType === 4
+      const isBetter = !existing || isLast || (existing.price <= 0)
+      if (isLast || isBetter) {
+        this.lastMarketPrices.set(symbol, { price, time: Date.now() })
+        const listeners = this.marketPriceListeners.get(symbol)
+        if (listeners) {
+          for (const cb of listeners) {
+            try { cb(price) } catch { /* skip bad listener */ }
+          }
+        }
+      }
+    })
+
+    this.ib.on('tickSize' as any, (_reqId: number, _tickType: number, _size: number) => {
+      // Size alone carries no price; tickPrice follows for last trades.
+    })
+  }
+
+  /**
+   * Subscribe real-time market data for a contract. The feed resolves the
+   * contract (symbol/secType/exchange/currency) from the Ticker model.
+   */
+  public reqMktData(symbol: string, contract: any): void {
+    if (!this.ib || !this.connected) {
+      this.connect().then(() => {
+        if (this.ib && this.connected) this.reqMktData(symbol, contract)
+      })
+      return
+    }
+    this.wireMarketData()
+    const reqId = this.marketDataReqSeq++
+    this.marketDataByReqId.set(reqId, symbol)
+    try {
+      this.ib.reqMktData(reqId, contract, '', false, false, [])
+    } catch (err) {
+      logger.error('[IBKR] reqMktData failed for %s: %s', symbol, (err as Error).message)
+    }
+  }
+
+  public onMarketPrice(symbol: string, cb: (price: number) => void): () => void {
+    if (!this.marketPriceListeners.has(symbol)) this.marketPriceListeners.set(symbol, new Set())
+    this.marketPriceListeners.get(symbol)!.add(cb)
+    return () => this.marketPriceListeners.get(symbol)?.delete(cb)
+  }
+
+  /** Last tick price; null when stale (>10s — matches KrakenWS semantics). */
+  public getMarketPrice(symbol: string): number | null {
+    const cached = this.lastMarketPrices.get(symbol.toUpperCase())
+    if (!cached) return null
+    if (Date.now() - cached.time > 10_000) return null
+    return cached.price
+  }
+
+  /** Account equity (NetLiquidation) — EquityProvider implementation. */
+  public async getEquity(): Promise<number> {
+    if (!this.ib || !this.connected) {
+      const didConnect = await this.connect()
+      if (!didConnect) return 0
+    }
+    const summary = await this.getAccountSummary()
+    const netLiq = Number(summary['NetLiquidation']?.value || 0)
+    return Number.isFinite(netLiq) ? netLiq : 0
+  }
 }
 
 export default new IBKRService()

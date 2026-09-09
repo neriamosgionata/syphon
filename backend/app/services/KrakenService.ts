@@ -192,6 +192,13 @@ class KrakenService {
     return this.privateRequest('/0/private/TradeBalance', { asset })
   }
 
+  /** Account equity (equivalent balance, USD) — EquityProvider implementation. */
+  public async getEquity(): Promise<number> {
+    if (!this.isConnected) await this.connect()
+    const tb = await this.getTradeBalance()
+    return parseFloat(tb.eb || '0')
+  }
+
   public async getOpenOrders(): Promise<Record<string, KrakenOrderInfo>> {
     const result = await this.privateRequest('/0/private/OpenOrders')
     return result?.open || {}

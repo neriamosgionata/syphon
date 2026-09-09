@@ -18,6 +18,21 @@ export default class Ticker extends BaseModel {
   @column()
   declare exchange: string | null
 
+  /** Instrument class: crypto | stock | etf | index | fund | future. */
+  @column()
+  declare secType: string
+
+  @column()
+  declare currency: string
+
+  /** Minimum orderable quantity (venue lot size). Null = unknown. */
+  @column()
+  declare minQty: number | null
+
+  /** Quantity increment for orders. Null = unknown. */
+  @column()
+  declare qtyStep: number | null
+
   @column()
   declare sector: string | null
 

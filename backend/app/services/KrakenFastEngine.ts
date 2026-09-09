@@ -441,8 +441,8 @@ class KrakenFastEngine {
 
     try {
       const insertSql = this.isSqlite
-        ? 'INSERT OR IGNORE INTO tickers (symbol, name, is_active) VALUES (?, ?, 1)'
-        : 'INSERT IGNORE INTO tickers (symbol, name, is_active) VALUES (?, ?, 1)'
+        ? "INSERT OR IGNORE INTO tickers (symbol, name, is_active, sec_type, exchange, currency) VALUES (?, ?, 1, 'crypto', 'KRAKEN', 'USD')"
+        : "INSERT IGNORE INTO tickers (symbol, name, is_active, sec_type, exchange, currency) VALUES (?, ?, 1, 'crypto', 'KRAKEN', 'USD')"
       await this.database.rawQuery(insertSql, [symbol, symbol])
       const rows = await this.database.rawQuery('SELECT id FROM tickers WHERE symbol = ? LIMIT 1', [symbol])
       const tickers = this.isSqlite ? rows : rows[0]

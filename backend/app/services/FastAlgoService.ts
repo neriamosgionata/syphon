@@ -13,6 +13,9 @@ import { FastStrategy, FastStrategyConfig, fastStrategyFromConfig, volatilityMul
 import MeilisearchService from '#services/MeilisearchService'
 import NotificationService from '#services/NotificationService'
 import NewsSentimentService from '#services/NewsSentimentService'
+import IBKRPriceFeed from '#services/IBKRPriceFeed'
+import IBKRService from '#services/IBKRService'
+import type { PriceFeed, FastExecutionEngine, EquityProvider } from '#services/market_types'
 
 // ─── Intraminute algo loop ────────────────────────────────────
 //
@@ -29,6 +32,29 @@ const CONFIG_CACHE_MS = 5000
 const PORTFOLIO_CACHE_MS = 60000
 const ENGINE_START_BACKOFF_MS = 60000
 const MIN_LOOP_SECONDS = 5
+
+/**
+ * Venue registry — the fast algo composes its price feed, execution engine
+ * and equity provider from the algo_configs.broker field. Adding a venue is
+ * a new entry here (plus its implementations); FastAlgoService stays venue-
+ * free. `engine: null` = feed-only venue (IBKR until the P2 fast engine).
+ */
+const BROKER_COMPONENTS: Record<string, {
+  engine: FastExecutionEngine | null
+  ws: PriceFeed
+  equity: EquityProvider
+}> = {
+  kraken: {
+    engine: KrakenFastEngine,
+    ws: KrakenWS,
+    equity: KrakenService,
+  },
+  ibkr: {
+    engine: null,
+    ws: IBKRPriceFeed,
+    equity: IBKRService,
+  },
+}
 
 interface AlgoStats {
   totalTrades: number
@@ -70,6 +96,10 @@ export class FastAlgoService {
   private streakSinceAt = 0
   private runId = uuidv4()
   private tickerIdCache: { map: Map<string, number>; at: number } = { map: new Map(), at: 0 }
+  /** Venue components resolved from cfg.broker; 'manual' = DI fakes (tests). */
+  private components: { engine: FastExecutionEngine | null; ws: PriceFeed; equity: EquityProvider } | null = null
+  private componentsKey: string | null = null
+  private refusedSwitch: string | null = null
 
   constructor(opts: {
     engine?: any
@@ -78,6 +108,7 @@ export class FastAlgoService {
     strategy?: FastStrategy
     newsService?: any
     tickerModel?: any
+    brokerRegistry?: typeof BROKER_COMPONENTS
   } = {}) {
     this.engine = opts.engine ?? KrakenFastEngine
     this.ws = opts.ws ?? KrakenWS
@@ -85,10 +116,18 @@ export class FastAlgoService {
     this.strategy = opts.strategy ?? new FastStrategy()
     this.newsService = opts.newsService ?? NewsSentimentService
     this.tickerModel = opts.tickerModel ?? Ticker
+    this.brokerRegistry = opts.brokerRegistry ?? BROKER_COMPONENTS
+    // Explicit DI (unit tests) pins the components; the singleton resolves
+    // from the broker registry on the first tick.
+    if (opts.engine && opts.ws) {
+      this.components = { engine: opts.engine, ws: opts.ws, equity: opts.equity ?? KrakenService }
+      this.componentsKey = 'manual'
+    }
   }
 
   private newsService: any
   private tickerModel: any
+  private brokerRegistry: Record<string, { engine: FastExecutionEngine | null; ws: PriceFeed; equity: EquityProvider }>
 
   public get running(): boolean {
     return this.loopTimer !== null
@@ -215,11 +254,11 @@ export class FastAlgoService {
 
     return {
       running: this.running,
-      engineRunning: this.engine.running,
+      engineRunning: this.engine?.running ?? false,
       loopSeconds: this.loopSeconds,
       lastTickAt: this.lastTickAt,
       lastTickError: this.lastTickError,
-      active: !!(cfg && cfg.enabled && cfg.fastEnabled && cfg.broker === 'kraken'),
+      active: !!(cfg && cfg.enabled && cfg.fastEnabled && !!this.components?.engine),
       enabled: cfg?.enabled ?? false,
       fastEnabled: cfg?.fastEnabled ?? false,
       broker: cfg?.broker ?? null,
@@ -296,7 +335,18 @@ export class FastAlgoService {
       const cfg = await this.getConfig()
       this.rescheduleIfNeeded(cfg.fastIntervalSeconds)
 
-      if (!cfg.enabled || !cfg.fastEnabled || cfg.broker !== 'kraken') {
+      if (!cfg.enabled || !cfg.fastEnabled) {
+        this.lastTickAt = Date.now()
+        return
+      }
+
+      await this.resolveComponents(cfg)
+
+      // Feed-only venues (e.g. IBKR before the fast engine ships): prices
+      // keep sampling and the status endpoint reports live momentum, but
+      // nothing trades until the venue has an execution engine.
+      if (!this.components || !this.components.engine) {
+        this.syncWatchlist(cfg.fastWatchlist)
         this.lastTickAt = Date.now()
         return
       }
@@ -350,6 +400,43 @@ export class FastAlgoService {
     const cfg = await AlgoConfig.getConfig()
     this.configCache = { data: cfg, at: Date.now() }
     return cfg
+  }
+
+  /**
+   * Attach the venue components for cfg.broker. Switching venues mid-run
+   * is refused while positions are open (orders belong to one venue — a
+   * switch would orphan them). DI-pinned components ('manual') never
+   * re-resolve, so unit tests keep their fakes.
+   */
+  private async resolveComponents(cfg: AlgoConfig): Promise<void> {
+    if (this.componentsKey === cfg.broker || this.componentsKey === 'manual') return
+
+    if (this.componentsKey) {
+      const open = await AlgoPosition.query().where('status', 'open').first()
+      if (open) {
+        // Refuse: keep trading on the CURRENT venue so open positions stay
+        // managed; log once per attempted destination.
+        if (this.refusedSwitch !== cfg.broker) {
+          this.refusedSwitch = cfg.broker
+          logger.error('[FastAlgo] Cannot switch broker %s → %s while positions are open',
+            this.componentsKey, cfg.broker)
+        }
+        return
+      }
+    }
+
+    const comp = this.brokerRegistry[cfg.broker]
+    if (!comp) {
+      logger.error('[FastAlgo] Unknown broker %s — no feed/engine components', cfg.broker)
+      this.components = null
+      this.componentsKey = cfg.broker
+      return
+    }
+    this.components = { engine: comp.engine, ws: comp.ws, equity: comp.equity }
+    this.componentsKey = cfg.broker
+    this.engine = comp.engine as any
+    this.ws = comp.ws as any
+    logger.info('[FastAlgo] Broker components: %s (engine: %s)', cfg.broker, comp.engine ? 'yes' : 'feed-only')
   }
 
   private rescheduleIfNeeded(seconds: number): void {
@@ -875,9 +962,8 @@ export class FastAlgoService {
       return this.portfolioCache.value
     }
     try {
-      if (!KrakenService.isConnected) await KrakenService.connect()
-      const tb = await KrakenService.getTradeBalance()
-      const value = parseFloat(tb.eb || '0')
+      const equity = this.components?.equity ?? KrakenService
+      const value = await equity.getEquity()
       this.portfolioCache = { value, at: now }
       return value
     } catch (err) {
