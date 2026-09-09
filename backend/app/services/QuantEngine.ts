@@ -769,19 +769,79 @@ interface CompositeInput {
  * the screener filter for it.
  */
 export function compositeCoverage(input: CompositeInput): number {
-  const present = [
-    input.rsi !== null, input.macd !== null, input.bb !== null,
-    input.sma20 !== null && input.sma50 !== null && input.sma200 !== null,
-    input.adx !== null, input.stoch !== null,
-    input.volumeRatio !== null && input.return20d !== null,
-    input.patterns.length > 0,
-    !!input.sentiment && input.sentiment.totalArticles > 0,
-    !!input.sentiment && input.sentiment.totalArticles >= 3,
-    !!input.sentiment && input.sentiment.totalArticles > 0,
-    input.sharpe !== null, input.beta !== null, input.pe !== null,
-    input.fiftyTwoWeekHigh !== null && input.fiftyTwoWeekLow !== null,
-  ]
-  return present.filter(Boolean).length / present.length
+  const empty: ScoreBreakdown = {
+    rsi: 0, macd: 0, bollingerBands: 0, trend: 0, adx: 0, stochastic: 0,
+    momentum: 0, volume: 0, patterns: 0,
+    sentiment: 0, sentimentMomentum: 0, newsVolume: 0,
+    sharpe: 0, beta: 0, pe: 0, fiftyTwoWeek: 0,
+  }
+  return scoreFromBreakdown(empty, QUANT_DEFAULT_WEIGHTS, presenceFor(input)).coverage
+}
+
+// ─── Composite weights ─────────────────────────────────────────
+//
+// Default weights are the shipped heuristic. quant:sweep re-scores cached
+// validation rows under alternative weight sets and can replace these with
+// the evidence-backed ones (quant:validate showed the defaults rank
+// INVERTED at the 20d horizon — trend/momentum/sharpe carry negative IC).
+
+export interface QuantWeights {
+  rsi: number; macd: number; bollingerBands: number; trend: number; adx: number
+  stochastic: number; momentum: number; volume: number; patterns: number
+  sentiment: number; sentimentMomentum: number; newsVolume: number
+  sharpe: number; beta: number; pe: number; fiftyTwoWeek: number
+}
+
+export const QUANT_DEFAULT_WEIGHTS: QuantWeights = {
+  rsi: 10, macd: 10, bollingerBands: 7, trend: 10, adx: 7, stochastic: 5,
+  momentum: 8, volume: 4, patterns: 4,
+  sentiment: 12, sentimentMomentum: 5, newsVolume: 3,
+  sharpe: 4, beta: 3, pe: 4, fiftyTwoWeek: 4,
+}
+
+/**
+ * Crypto weights — evidence-driven from quant:validate on Kraken daily
+ * data (10 crypto symbols, 5d step, 20d forward): macd (+0.076) and
+ * momentum (+0.021) carry the only positive ICs; trend/rsi/stochastic/
+ * bollinger/sharpe are anti-signals on crypto (mean-reversion fights the
+ * momentum factor). Sentiment stays (sparse coverage, neutral IC).
+ */
+export function cryptoWeights(_w: QuantWeights): QuantWeights {
+  return {
+    rsi: 0, macd: 20, bollingerBands: 0, trend: 0, adx: 0, stochastic: 0,
+    momentum: 15, volume: 8, patterns: 0,
+    sentiment: 16, sentimentMomentum: 5, newsVolume: 5,
+    sharpe: 0, beta: 0, pe: 0, fiftyTwoWeek: 0,
+  }
+}
+
+/**
+ * Weighted composite from a breakdown. Mirrors computeCompositeScore's
+ * math: only PRESENT components count toward numerator AND denominator —
+ * a thin-data ticker scores on the same basis as a full one. Presence is
+ * the compositeCoverage list evaluated per component.
+ */
+export function scoreFromBreakdown(
+  breakdown: ScoreBreakdown,
+  weights: QuantWeights,
+  present: Record<string, boolean>
+): { score: number; coverage: number } {
+  const keys = Object.keys(weights) as Array<keyof QuantWeights>
+  let score = 0
+  let weightSum = 0
+  let presentCount = 0
+  for (const key of keys) {
+    const w = weights[key]
+    if (w <= 0) continue
+    if (present[key] === false) continue
+    presentCount++
+    score += breakdown[key] * w
+    weightSum += w
+  }
+  return {
+    score: weightSum > 0 ? Math.round(score / weightSum) : 0,
+    coverage: presentCount / keys.length,
+  }
 }
 
 function computeCompositeScore(input: CompositeInput): { score: number; breakdown: ScoreBreakdown } {
@@ -792,23 +852,18 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
     sharpe: 0, beta: 0, pe: 0, fiftyTwoWeek: 0,
   }
 
-  let score = 0
-  let weights = 0
-
   // Instrument-class weights: crypto has no P/E/beta-vs-SPY/52-week
-  // meaning, so those 11 weight points shift to momentum, volume and
+  // meaning, so those weight points shift to momentum, volume and
   // sentiment (the signals that do move crypto).
-  const isCrypto = input.secType === 'crypto'
-  const momentumWeight = isCrypto ? 11 : 8
-  const volumeWeight = isCrypto ? 6 : 4
-  const sentimentWeight = isCrypto ? 16 : 12
-  const newsVolumeWeight = isCrypto ? 5 : 3
+  const w = input.secType === 'crypto'
+    ? cryptoWeights(QUANT_DEFAULT_WEIGHTS)
+    : QUANT_DEFAULT_WEIGHTS
 
-  // ── Technical (65%) ──
+  // ── Technical ──
 
-  // RSI (10%) — FIX #8: graded scoring instead of linear from center.
-  // Regime-aware (D): oversold in a downtrend is a falling knife, not a
-  // contrarian buy; overbought in a downtrend carries no long signal.
+  // RSI — graded scoring instead of linear from center. Regime-aware:
+  // oversold in a downtrend is a falling knife, not a contrarian buy;
+  // overbought in a downtrend carries no long signal.
   if (input.rsi !== null) {
     let rsiScore: number
     const down = input.regime === 'trending_down'
@@ -820,28 +875,20 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
     else if (input.rsi > 55) rsiScore = -((input.rsi - 55) / 15) * 50
     else rsiScore = 0 // 45-55 is dead zone (neutral)
     breakdown.rsi = Math.max(-100, Math.min(100, rsiScore))
-    score += breakdown.rsi * 10
-    weights += 10
   }
 
-  // MACD (10%) — FIX #1: price-normalized histogram
+  // MACD — price-normalized histogram
   if (input.macd && input.price > 0) {
     const normalizedHist = (input.macd.histogram / input.price) * 100
-    const macdScore = Math.max(-100, Math.min(100, normalizedHist * 200))
-    breakdown.macd = macdScore
-    score += macdScore * 10
-    weights += 10
+    breakdown.macd = Math.max(-100, Math.min(100, normalizedHist * 200))
   }
 
-  // Bollinger %B (7%)
+  // Bollinger %B
   if (input.bb) {
-    const bbScore = Math.max(-100, Math.min(100, (0.5 - input.bb.percentB) * 200))
-    breakdown.bollingerBands = bbScore
-    score += bbScore * 7
-    weights += 7
+    breakdown.bollingerBands = Math.max(-100, Math.min(100, (0.5 - input.bb.percentB) * 200))
   }
 
-  // Trend alignment (10%)
+  // Trend alignment
   if (input.sma20 && input.sma50 && input.sma200 && input.price > 0) {
     let trendScore = 0
     if (input.price > input.sma20) trendScore += 33
@@ -851,21 +898,16 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
     if (input.sma50 > input.sma200) trendScore += 34
     else trendScore -= 34
     breakdown.trend = trendScore
-    score += trendScore * 10
-    weights += 10
   }
 
-  // ADX directional (7%)
+  // ADX directional
   if (input.adx && input.adx.adx > 20) {
-    const diScore = input.adx.plusDI > input.adx.minusDI
+    breakdown.adx = input.adx.plusDI > input.adx.minusDI
       ? Math.min(100, (input.adx.plusDI - input.adx.minusDI) * 3)
       : Math.max(-100, (input.adx.plusDI - input.adx.minusDI) * 3)
-    breakdown.adx = diScore
-    score += diScore * 7
-    weights += 7
   }
 
-  // Stochastic (5%) — FIX #9: graded like RSI, regime-aware like RSI.
+  // Stochastic — graded like RSI, regime-aware like RSI
   if (input.stoch) {
     let stochScore: number
     const down = input.regime === 'trending_down'
@@ -877,19 +919,14 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
     else if (input.stoch.k > 60) stochScore = -((input.stoch.k - 60) / 20) * 50
     else stochScore = 0
     breakdown.stochastic = Math.max(-100, Math.min(100, stochScore))
-    score += breakdown.stochastic * 5
-    weights += 5
   }
 
-  // Momentum (8% → 11% crypto)
+  // Momentum
   if (input.return20d !== null) {
-    const momScore = Math.max(-100, Math.min(100, input.return20d * 500))
-    breakdown.momentum = momScore
-    score += momScore * momentumWeight
-    weights += momentumWeight
+    breakdown.momentum = Math.max(-100, Math.min(100, input.return20d * 500))
   }
 
-  // Volume confirmation (4% → 6% crypto) — FIX #3 + #18: direction-aware with gradient
+  // Volume confirmation — direction-aware with gradient
   if (input.volumeRatio !== null && input.return20d !== null) {
     let volScore: number
     if (input.return20d > 0) {
@@ -900,11 +937,9 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
       volScore = 0
     }
     breakdown.volume = volScore
-    score += volScore * volumeWeight
-    weights += volumeWeight
   }
 
-  // Patterns (4%) — FIX #4: patterns contribute to composite
+  // Patterns
   if (input.patterns.length > 0) {
     let patternScore = 0
     let patternWeight = 0
@@ -915,49 +950,34 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
     }
     if (patternWeight > 0) {
       breakdown.patterns = Math.max(-100, Math.min(100, patternScore / patternWeight))
-      score += breakdown.patterns * 4
-      weights += 4
     }
   }
 
-  // ── Sentiment (20% → 21% crypto) ──
+  // ── Sentiment ──
 
   if (input.sentiment) {
-    // Sentiment score (12% → 16% crypto)
     if (input.sentiment.totalArticles > 0) {
       breakdown.sentiment = Math.max(-100, Math.min(100, input.sentiment.avgScore * 100))
-      score += breakdown.sentiment * sentimentWeight
-      weights += sentimentWeight
 
-      // Sentiment momentum (5%) — FIX #17: require minimum articles for momentum
+      // Sentiment momentum — require minimum articles
       if (input.sentiment.totalArticles >= 3) {
         breakdown.sentimentMomentum = Math.max(-100, Math.min(100, input.sentiment.recentTrend * 200))
-        score += breakdown.sentimentMomentum * 5
-        weights += 5
       }
 
-      // News volume (3% → 5% crypto) — FIX #6: bidirectional
+      // News volume — bidirectional
       const volumeBase = Math.min(100, Math.log2(input.sentiment.totalArticles + 1) * 20)
       const sentimentSign = input.sentiment.avgScore >= 0 ? 1 : -1
       breakdown.newsVolume = volumeBase * sentimentSign
-      score += breakdown.newsVolume * newsVolumeWeight
-      weights += newsVolumeWeight
     }
   }
 
-  // ── Risk/Fundamentals (15%) ──
+  // ── Risk/Fundamentals (stocks/ETFs only — crypto weights are 0) ──
 
-  // Sharpe (4%)
   if (input.sharpe !== null) {
-    const sharpeScore = Math.max(-100, Math.min(100, input.sharpe * 40))
-    breakdown.sharpe = sharpeScore
-    score += sharpeScore * 4
-    weights += 4
+    breakdown.sharpe = Math.max(-100, Math.min(100, input.sharpe * 40))
   }
 
-  // Beta (3%) — FIX #4: beta now contributes; crypto skips (no market index)
-  if (input.beta !== null && !isCrypto) {
-    // Beta 1.0 = neutral, <0.8 = defensive (slight positive), >1.5 = high risk (negative in volatile regime)
+  if (input.beta !== null) {
     let betaScore: number
     if (input.regime === 'trending_up') {
       betaScore = input.beta > 1.2 ? 20 : input.beta < 0.8 ? -20 : 0
@@ -967,42 +987,56 @@ function computeCompositeScore(input: CompositeInput): { score: number; breakdow
       betaScore = 0
     }
     breakdown.beta = betaScore
-    score += betaScore * 3
-    weights += 3
   }
 
-  // P/E (4%) — stocks/ETFs only
-  if (input.pe !== null && input.pe > 0 && !isCrypto) {
+  if (input.pe !== null && input.pe > 0) {
     const peScore = input.pe < 15 ? 60 : input.pe < 25 ? 20 : input.pe < 40 ? -20 : -60
     breakdown.pe = peScore
-    score += peScore * 4
-    weights += 4
   }
 
-  // 52-week position (4%) — FIX #7: regime-conditional; stocks/ETFs only
-  if (!isCrypto && input.fiftyTwoWeekHigh && input.fiftyTwoWeekLow && input.price > 0) {
+  if (input.fiftyTwoWeekHigh && input.fiftyTwoWeekLow && input.price > 0) {
     const range = input.fiftyTwoWeekHigh - input.fiftyTwoWeekLow
     if (range > 0) {
       const position = (input.price - input.fiftyTwoWeekLow) / range
       let posScore: number
       if (input.regime === 'trending_up') {
-        // In uptrend, near high is fine (momentum), near low is concerning
         posScore = position > 0.8 ? 10 : position < 0.3 ? -30 : 0
       } else {
-        // Default: near low = buy opportunity, near high = caution
         if (position <= 0.3) posScore = 50 + ((0.3 - position) / 0.3) * 50
         else if (position >= 0.7) posScore = -((position - 0.7) / 0.3) * 60
         else posScore = 0
       }
       breakdown.fiftyTwoWeek = Math.max(-100, Math.min(100, posScore))
-      score += breakdown.fiftyTwoWeek * 4
-      weights += 4
     }
   }
 
+  const { score } = scoreFromBreakdown(breakdown, w, presenceFor(input))
+  return { score, breakdown }
+}
+
+/**
+ * Which composite components had data at this point in time — the presence
+ * mask used by scoreFromBreakdown (missing = excluded from numerator AND
+ * denominator, so thin-data tickers stay comparable).
+ */
+function presenceFor(input: CompositeInput): Record<string, boolean> {
   return {
-    score: weights > 0 ? Math.round(score / weights) : 0,
-    breakdown,
+    rsi: input.rsi !== null,
+    macd: input.macd !== null,
+    bollingerBands: input.bb !== null,
+    trend: input.sma20 !== null && input.sma50 !== null && input.sma200 !== null,
+    adx: input.adx !== null,
+    stochastic: input.stoch !== null,
+    momentum: input.return20d !== null,
+    volume: input.volumeRatio !== null && input.return20d !== null,
+    patterns: input.patterns.length > 0,
+    sentiment: !!input.sentiment && input.sentiment.totalArticles > 0,
+    sentimentMomentum: !!input.sentiment && input.sentiment.totalArticles >= 3,
+    newsVolume: !!input.sentiment && input.sentiment.totalArticles > 0,
+    sharpe: input.sharpe !== null,
+    beta: input.beta !== null,
+    pe: input.pe !== null && input.pe > 0,
+    fiftyTwoWeek: input.fiftyTwoWeekHigh !== null && input.fiftyTwoWeekLow !== null,
   }
 }
 
@@ -1053,6 +1087,8 @@ interface IndicatorSnapshot {
   compositeScore: number
   breakdown: ScoreBreakdown
   coverage: number
+  /** Component presence mask (used by quant:sweep re-scoring). */
+  present: Record<string, boolean>
 }
 
 export function computeIndicatorSnapshot(
@@ -1145,6 +1181,7 @@ export function computeIndicatorSnapshot(
     regime, patterns, return20d,
     compositeScore, breakdown,
     coverage: compositeCoverage(compositeInput),
+    present: presenceFor(compositeInput),
   }
 }
 

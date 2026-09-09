@@ -26,6 +26,8 @@ export interface ValidationRow {
   composite: number
   forwardRet: number | null
   components: Record<string, number>
+  /** Which components had data — required to re-score under other weights. */
+  present: Record<string, boolean>
 }
 
 export interface TickerValidationResult {
@@ -148,6 +150,7 @@ export function validateTicker(opts: ValidateTickerOpts): TickerValidationResult
       ticker: opts.symbol,
       composite: snap.compositeScore,
       forwardRet,
+      present: snap.present,
       components: Object.fromEntries(
         COMPONENT_KEYS.map((k) => [k, snap.breakdown[k as keyof typeof snap.breakdown] ?? 0])
       ),
