@@ -1,72 +1,30 @@
 import { BaseCommand } from '@adonisjs/core/ace'
-import * as fs from 'node:fs'
-import * as path from 'node:path'
-import db from '@adonisjs/lucid/services/db'
 import AlgoConfig from '#models/AlgoConfig'
-import { BacktestEngine, BacktestSample } from '#services/BacktestEngine'
+import { BacktestEngine } from '#services/BacktestEngine'
 import { fastStrategyFromConfig } from '#services/FastStrategy'
-import KrakenDataService from '#services/KrakenDataService'
+import { loadBacktestSamples } from '#services/backtest_data'
 import { clamp } from '#app/utils/backtest_flags'
 
-// Kraken-only backtest runner. Data sources:
-//   --interval=1s  -> tick_records (live recorder + kraken:backfill)
-//   --interval>=1m -> Kraken OHLC cache (auto-fetched when missing)
+// Venue-agnostic backtest runner. Data comes from the live algo broker by
+// default (--source auto); --source=kraken|ibkr|recorded overrides.
+//   1s kraken → tick_records (live recorder + kraken:backfill)
+//   ≥1m kraken → OHLC cache; ibkr → historical-bars cache (1s and up)
 // Strategy config comes from the live algo_configs row (same mapping the
 // live loop uses) with optional --config JSON overrides on the fast* keys.
 
-const CACHE_DIR = path.join(import.meta.dirname, '..', 'backtests', 'cache', 'kraken')
 const INTERVALS_SECONDS = [1, 60, 300, 900, 1800, 3600, 14400, 86400]
-
-async function loadSamples(
-  symbol: string,
-  intervalSeconds: number,
-  hours: number,
-  freshCache: boolean
-): Promise<{ samples: BacktestSample[]; fromCache: boolean }> {
-  if (intervalSeconds === 1) {
-    const start = Date.now() - hours * 3600_000
-    const rows = await db.from('tick_records')
-      .where('symbol', symbol)
-      .where('ts', '>=', start)
-      .orderBy('ts', 'asc')
-    const samples = rows.map((r) => ({
-      t: Number(r.ts),
-      p: Number(r.close),
-      h: Number(r.high),
-      l: Number(r.low),
-      v: Number(r.volume),
-    }))
-    return { samples, fromCache: false }
-  }
-
-  const intervalMin = intervalSeconds / 60
-  const file = path.join(CACHE_DIR, `${symbol}_${intervalMin}m_${hours}h.json`)
-  if (!freshCache && fs.existsSync(file)) {
-    const cached = JSON.parse(fs.readFileSync(file, 'utf8'))
-    return { samples: cached.samples, fromCache: true }
-  }
-
-  const targetStart = Date.now() - hours * 3600_000
-  const candles = await KrakenDataService.walkOHLC(symbol, intervalMin, targetStart)
-  if (candles.length === 0) throw new Error(`No OHLC data for ${symbol} ${intervalMin}m`)
-  fs.mkdirSync(CACHE_DIR, { recursive: true })
-  const samples = candles
-    .filter((c) => c.time * 1000 >= targetStart)
-    .map((c) => ({ t: c.time * 1000, p: c.close, h: c.high, l: c.low, v: c.volume }))
-  fs.writeFileSync(file, JSON.stringify({ symbol, intervalMin, fetchedAt: new Date().toISOString(), samples }))
-  return { samples, fromCache: true }
-}
 
 export default class Backtest extends BaseCommand {
   static commandName = 'backtest'
   static description = 'Run a Kraken backtest of the live fast-algo strategy (1s tick_records or OHLC cache)'
   static options = { startApp: true }
 
-  static flags = [
+static flags = [
     { flagName: 'symbol', name: 'symbol', type: 'string', description: 'Ticker symbol (default BTC)' },
     { flagName: 'interval', name: 'interval', type: 'number', description: 'Bar seconds: 1|60|300|900|1800|3600|14400|86400 (default 1)' },
     { flagName: 'hours', name: 'hours', type: 'number', description: 'Backtest window in hours (default 24)' },
-    { flagName: 'fresh', name: 'fresh', type: 'boolean', description: 'Re-fetch OHLC instead of using the cache' },
+    { flagName: 'source', name: 'source', type: 'string', description: 'auto|kraken|ibkr|recorded (default auto = live broker)' },
+    { flagName: 'fresh', name: 'fresh', type: 'boolean', description: 'Re-fetch data instead of using the cache' },
     { flagName: 'trades', name: 'trades', type: 'boolean', description: 'List every trade' },
     { flagName: 'config', name: 'config', type: 'string', description: 'JSON overrides on the live algo config (fast* keys)' },
   ]
@@ -77,9 +35,14 @@ export default class Backtest extends BaseCommand {
     const hours = Number(this.parsed.flags.hours ?? 24)
     const fresh = Boolean(this.parsed.flags.fresh)
     const listTrades = Boolean(this.parsed.flags.trades)
+    const sourceRaw = String(this.parsed.flags.source || 'auto')
 
     if (!INTERVALS_SECONDS.includes(intervalSeconds)) {
       this.logger.error('Invalid --interval=%d — choose one of %s', intervalSeconds, INTERVALS_SECONDS.join(', '))
+      return
+    }
+    if (!['auto', 'kraken', 'ibkr', 'recorded'].includes(sourceRaw)) {
+      this.logger.error('Invalid --source=%s — choose auto|kraken|ibkr|recorded', sourceRaw)
       return
     }
 
@@ -97,7 +60,14 @@ export default class Backtest extends BaseCommand {
     }
 
     const strategy = fastStrategyFromConfig(rawCfg, { sampleIntervalSeconds: intervalSeconds })
-    const { samples, fromCache } = await loadSamples(symbol, intervalSeconds, hours, fresh)
+    const { samples, label } = await loadBacktestSamples({
+      symbol,
+      intervalSeconds,
+      hours,
+      source: sourceRaw as any,
+      broker: rawCfg.broker || 'kraken',
+      fresh,
+    })
 
     const engine = new BacktestEngine()
     const result = engine.run(samples, {
@@ -119,7 +89,7 @@ export default class Backtest extends BaseCommand {
 
     const m = result.metrics
     this.logger.info('')
-    this.logger.info(`═══ Backtest ${symbol} ${intervalSeconds}s bars / ${hours}h (${fromCache ? 'OHLC cache' : 'tick_records'}) ═══`)
+    this.logger.info(`═══ Backtest ${symbol} ${intervalSeconds}s bars / ${hours}h (${label}) ═══`)
     this.logger.info(`Window: ${new Date(result.startTime).toISOString()} → ${new Date(result.endTime).toISOString()} (${result.samples} samples)`)
     this.logger.info(`Strategy: ${result.strategyReturnPct.toFixed(2)}%   Buy&hold: ${result.buyHoldReturnPct.toFixed(2)}%   $${result.startUsd} → $${Math.round(result.endUsd)}`)
     this.logger.info(`Trades: ${m.totalTrades}   Win rate: ${(m.winRate * 100).toFixed(0)}%   PF: ${m.profitFactor === Infinity ? '∞' : m.profitFactor.toFixed(2)}   Max DD: ${m.maxDrawdownPct.toFixed(2)}%   Avg hold: ${m.avgHoldingSeconds === null ? '—' : `${Math.round(m.avgHoldingSeconds / 60)}m`}`)

@@ -597,6 +597,69 @@ class IBKRService {
   }
 
   // ---------------------------------------------------------------------------
+  // Historical data (backtest cache provider)
+  // ---------------------------------------------------------------------------
+
+  private historicalReqSeq = 2000
+
+  /**
+   * Fetch one historical-bars window. `barSize`: '1 secs'|'1 min'|...,
+   * `duration`: '3600 S'|'1 D'|'5 D'|...; `endDateTime` '' = now (or
+   * 'YYYYMMDD HH:MM:SS' to page back). formatDate=1 → bar time = epoch
+   * seconds. TRADES with regular trading hours only (matches the session
+   * gate — pre/post-market data would pollute backtests).
+   */
+  public async getHistoricalBars(opts: {
+    contract: any
+    barSize: string
+    duration: string
+    endDateTime?: string
+  }): Promise<Array<{ time: number; open: number; high: number; low: number; close: number; volume: number }>> {
+    if (!this.ib || !this.connected) {
+      const didConnect = await this.connect()
+      if (!didConnect) throw new Error('IBKR not connected')
+    }
+    const reqId = this.historicalReqSeq++
+    return new Promise((resolve, reject) => {
+      const bars: Array<{ time: number; open: number; high: number; low: number; close: number; volume: number }> = []
+
+      const onBar = (id: number, time: string, open: number, high: number, low: number, close: number, volume: number) => {
+        if (id !== reqId) return
+        const t = Number(time)
+        if (Number.isFinite(t) && t > 0) {
+          bars.push({ time: t, open, high, low, close, volume })
+        }
+      }
+      const onEnd = (id: number) => {
+        if (id !== reqId) return
+        cleanup()
+        resolve(bars)
+      }
+      const cleanup = () => {
+        this.ib!.off(EventName.historicalData, onBar)
+        this.ib!.off(EventName.historicalDataEnd, onEnd)
+        clearTimeout(timer)
+      }
+      const timer = setTimeout(() => {
+        cleanup()
+        reject(new Error(`Historical data request ${reqId} timed out`))
+      }, 30_000)
+
+      this.ib!.on(EventName.historicalData, onBar)
+      this.ib!.on(EventName.historicalDataEnd, onEnd)
+      try {
+        this.ib!.reqHistoricalData(
+          reqId, opts.contract, opts.endDateTime || '', opts.duration,
+          opts.barSize as any, 'TRADES', 1, 1, false,
+        )
+      } catch (err) {
+        cleanup()
+        reject(err)
+      }
+    })
+  }
+
+  // ---------------------------------------------------------------------------
   // Real-time market data (PriceFeed backend for the fast algo)
   // ---------------------------------------------------------------------------
 

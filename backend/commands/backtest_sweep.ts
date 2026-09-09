@@ -1,19 +1,15 @@
 import { BaseCommand } from '@adonisjs/core/ace'
-import * as fs from 'node:fs'
-import * as path from 'node:path'
-import db from '@adonisjs/lucid/services/db'
 import AlgoConfig from '#models/AlgoConfig'
-import { BacktestEngine, BacktestSample } from '#services/BacktestEngine'
+import { BacktestEngine } from '#services/BacktestEngine'
 import { fastStrategyFromConfig, FastStrategyConfig } from '#services/FastStrategy'
-import KrakenDataService from '#services/KrakenDataService'
+import { loadBacktestSamples } from '#services/backtest_data'
 import { clamp } from '#app/utils/backtest_flags'
 
 // One-at-a-time parameter sweep around the live config (+ presets), ranked
 // by profit factor with a min-trades filter. PF ranking is multiple-testing
 // biased — the t-stat column is the honest signal measure; treat grid
-// winners as candidates, not verdicts.
-
-const CACHE_DIR = path.join(import.meta.dirname, '..', 'backtests', 'cache', 'kraken')
+// winners as candidates, not verdicts. Data source follows the backtest
+// command (--source auto|kraken|ibkr|recorded).
 
 const GRID_MULTIPLIERS = [0.5, 0.75, 1.25, 1.5]
 
@@ -67,11 +63,12 @@ export default class BacktestSweep extends BaseCommand {
   static description = 'One-at-a-time parameter sweep around the live algo config (Kraken data)'
   static options = { startApp: true }
 
-  static flags = [
+static flags = [
     { flagName: 'symbol', name: 'symbol', type: 'string', description: 'Ticker symbol (default BTC)' },
     { flagName: 'interval', name: 'interval', type: 'number', description: 'Bar seconds: 1|60|... (default 1)' },
     { flagName: 'hours', name: 'hours', type: 'number', description: 'Window in hours (default 24)' },
-    { flagName: 'fresh', name: 'fresh', type: 'boolean', description: 'Re-fetch OHLC instead of using the cache' },
+    { flagName: 'source', name: 'source', type: 'string', description: 'auto|kraken|ibkr|recorded (default auto = live broker)' },
+    { flagName: 'fresh', name: 'fresh', type: 'boolean', description: 'Re-fetch data instead of using the cache' },
     { flagName: 'minTrades', name: 'minTrades', type: 'number', description: 'Minimum trades to rank a config (default 5)' },
     { flagName: 'top', name: 'top', type: 'number', description: 'How many results to show (default 15)' },
   ]
@@ -83,32 +80,25 @@ export default class BacktestSweep extends BaseCommand {
     const fresh = Boolean(this.parsed.flags.fresh)
     const minTrades = Number(this.parsed.flags.minTrades ?? 5)
     const topN = Number(this.parsed.flags.top ?? 15)
+    const sourceRaw = String(this.parsed.flags.source || 'auto')
 
-    // Data load (shared with backtest).
-    let samples: BacktestSample[]
-    if (intervalSeconds === 1) {
-      const start = Date.now() - hours * 3600_000
-      const rows = await db.from('tick_records')
-        .where('symbol', symbol).where('ts', '>=', start).orderBy('ts', 'asc')
-      samples = rows.map((r) => ({ t: Number(r.ts), p: Number(r.close), h: Number(r.high), l: Number(r.low), v: Number(r.volume) }))
-    } else {
-      const intervalMin = intervalSeconds / 60
-      const file = path.join(CACHE_DIR, `${symbol}_${intervalMin}m_${hours}h.json`)
-      if (!fresh && fs.existsSync(file)) {
-        samples = JSON.parse(fs.readFileSync(file, 'utf8')).samples
-      } else {
-        const candles = await KrakenDataService.walkOHLC(symbol, intervalMin, Date.now() - hours * 3600_000)
-        fs.mkdirSync(CACHE_DIR, { recursive: true })
-        samples = candles
-          .filter((c) => c.time * 1000 >= Date.now() - hours * 3600_000)
-          .map((c) => ({ t: c.time * 1000, p: c.close, h: c.high, l: c.low, v: c.volume }))
-        fs.writeFileSync(file, JSON.stringify({ symbol, intervalMin, fetchedAt: new Date().toISOString(), samples }))
-      }
+    if (!['auto', 'kraken', 'ibkr', 'recorded'].includes(sourceRaw)) {
+      this.logger.error('Invalid --source=%s — choose auto|kraken|ibkr|recorded', sourceRaw)
+      return
     }
 
     const config = await AlgoConfig.getConfig()
     const baseRaw: Record<string, any> = { ...config.$attributes }
     const loopSeconds = clamp(baseRaw.fastIntervalSeconds || 10, 5, 300)
+
+    const { samples } = await loadBacktestSamples({
+      symbol,
+      intervalSeconds,
+      hours,
+      source: sourceRaw as any,
+      broker: baseRaw.broker || 'kraken',
+      fresh,
+    })
 
     const engine = new BacktestEngine()
     const runCfg = (raw: Record<string, any>) => ({
