@@ -17,6 +17,7 @@ Real-time financial intelligence platform that scrapes news, runs NLP sentiment 
 - [Data Storage](#data-storage)
 - [QuantEngine](#quantengine)
 - [Algo Trading Engine](#algo-trading-engine)
+- [Income Lines (Derivative-Free)](#income-lines-derivative-free)
 - [Neural Network (Training Service)](#neural-network-training-service)
 - [Seeded Tickers](#seeded-tickers)
 - [Development](#development)
@@ -811,3 +812,82 @@ The training service is intended to run on a separate machine with more resource
 | Redis | 6379 |
 | Meilisearch | 7700 |
 | Training API | 8000 |
+
+---
+
+## Income Lines (Derivative-Free)
+
+Two derivative-free income lines run alongside the trading engine. Both are
+safe-by-default and neither places a trend order anywhere in the codebase.
+
+### Yield floor (Kraken Earn)
+
+Automates Kraken Earn: discovers strategies, allocates with a 25% liquid
+buffer, reconciles reward payouts from Kraken's ledger, and reports realized
+yield in native units.
+
+- **Observe by default.** With `YIELD_LIVE` unset, the tick performs every
+  step except the mutating call. Going live requires a fresh passing
+  `yield:preflight` (recorded, 1-hour TTL) — a live tick without one is
+  refused.
+- **Intent-first.** Every mutating operation is recorded append-only before
+  the request; ambiguous outcomes are never resubmitted, and one operation per
+  strategy can be in flight.
+- **Honest returns.** Kraken Earn headlines overstate net yield: flexible
+  strategies stake at most half the balance and charge 30% commission
+  (≈0.35× headline); bonded pays a tiered 25%→0% commission but locks funds
+   2-28 days. Rewards are paid in-kind and taxed as income at receipt in Italy
+  (33% from 2026). `yield:report` exports raw reward rows (time, asset, amount,
+  type, refid); EUR fair-value valuation and tax treatment are not applied.
+- **Counterparty exposure.** Allocated balances sit at Kraken with no deposit
+  insurance — allocation caps and the liquid buffer exist for that reason.
+
+```bash
+bun ace.js yield:preflight        # audit local/venue/environment; records a pass
+bun ace.js yield:tick             # one tick (cron: hourly) — observe unless YIELD_LIVE=true
+bun ace.js yield:status           # allocations, pending ops, rewards, alerts, staleness
+bun ace.js yield:deallocate --asset=ETH --amount=0.5 --reason="…"
+bun ace.js yield:report --from=2026-01-01 --out=rewards.csv
+bun ace.js alerts:ack --source=yield
+```
+
+### Trend evaluation (paper only)
+
+Records closed Kraken 5m/1h/1d bars forward into `bar_records` and replays the
+frozen daily-trend config through the same `BacktestEngine` the backtests use.
+No order path, no position table, no venue call.
+
+- **Evidence, not income.** The frozen config's in-sample record (+21.0% 2024,
+  +4.3% 2025, +10.1% 2026-to-date composite) is cadence-sensitive and its
+  t-stats are ~1.0-1.4 — suggestive, not proven. The evaluation runs a
+  six-month paper contract before any capital decision.
+- **Tripwires are latching:** two consecutive negative months or >15% drawdown
+  halts the evaluation and alerts until `trend:resume --reason`.
+- **Provenance is explicit:** Kraken-recorded bars gate the evaluation and
+  certification; retired Binance 1m caches are labeled research-only.
+
+```bash
+bun ace.js trend:status
+bun ace.js trend:certify --symbol=BTC --source=research --hours=2160
+bun ace.js trend:certify --symbol=BTC --source=bar_records   # after bars accumulate
+bun ace.js trend:report
+bun ace.js trend:resume --reason="…"                          # after a tripwire
+```
+
+### Scheduling & surface
+
+- One trigger per line, external crontab, durable locks + heartbeats in the
+  `control` table:
+  ```cron
+  0 * * * * cd /path/to/syphon/backend && bun ace.js yield:tick >> backtests/yield.log 2>&1
+  ```
+- The trend recorder/evaluator run inside the web process (5-minute cadence)
+  and skip when the bar store has not advanced.
+- Read-only, loopback-only HTTP: `GET /api/yield/status`,
+  `GET /api/yield/alerts`, `GET /api/trend/status`; the frontend exposes them
+  on the **Income** page. Every mutation is CLI-only.
+- Environment: `KRAKEN_EARN_KEY`, `KRAKEN_EARN_SECRET`, `YIELD_LIVE`,
+  `YIELD_ALLOWLIST`, `YIELD_BUFFER_PCT`, `YIELD_MIN_ALLOCATION_USD`,
+  `YIELD_APY_FLOOR_PCT`, `YIELD_APY_CEILING_PCT`, `YIELD_MAX_PER_ASSET_USD`,
+  `YIELD_MAX_TOTAL_USD`. Full activation, rollback, and trip conditions live
+  in `docs/runbooks/income-lines.md`.
