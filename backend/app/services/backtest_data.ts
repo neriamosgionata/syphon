@@ -15,7 +15,7 @@ import KrakenDataService from '#services/KrakenDataService'
 import IBKRDataService from '#services/IBKRDataService'
 import type { BacktestSample } from '#services/BacktestEngine'
 
-export type BacktestSource = 'auto' | 'kraken' | 'ibkr' | 'recorded'
+export type BacktestSource = 'auto' | 'kraken' | 'ibkr' | 'recorded' | 'bar_records'
 
 const CACHE_ROOT = path.join(import.meta.dirname, '..', '..', 'backtests', 'cache')
 
@@ -27,6 +27,27 @@ async function fromTickRecords(symbol: string, hours: number): Promise<BacktestS
   const start = Date.now() - hours * 3600_000
   const rows = await db.from('tick_records')
     .where('symbol', symbol)
+    .where('ts', '>=', start)
+    .orderBy('ts', 'asc')
+  return rows.map((r) => ({
+    t: Number(r.ts),
+    p: Number(r.close),
+    h: Number(r.high),
+    l: Number(r.low),
+    v: Number(r.volume),
+  }))
+}
+
+/**
+ * Recorded multi-interval bars (bar_records, intervals >= 60s). Exact
+ * interval match, ascending, same sample shape as the cache sources — the
+ * trend evaluator and backtests read one code path.
+ */
+async function fromBarRecords(symbol: string, intervalSeconds: number, hours: number): Promise<BacktestSample[]> {
+  const start = Date.now() - hours * 3600_000
+  const rows = await db.from('bar_records')
+    .where('symbol', symbol)
+    .where('interval_seconds', intervalSeconds)
     .where('ts', '>=', start)
     .orderBy('ts', 'asc')
   return rows.map((r) => ({
@@ -86,6 +107,12 @@ export async function loadBacktestSamples(opts: {
 
   if (source === 'recorded' || (source === 'kraken' && opts.intervalSeconds === 1)) {
     return { samples: await fromTickRecords(opts.symbol, opts.hours), label: 'tick_records' }
+  }
+  if (source === 'bar_records') {
+    return {
+      samples: await fromBarRecords(opts.symbol, opts.intervalSeconds, opts.hours),
+      label: `bar_records ${opts.symbol} ${opts.intervalSeconds}s/${opts.hours}h`,
+    }
   }
   if (source === 'ibkr') {
     return { samples: await fromIBKR(opts.symbol, intervalMin, opts.hours, !!opts.fresh), label: 'IBKR cache' }
