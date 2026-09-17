@@ -113,26 +113,25 @@ function bool(value: unknown): boolean {
 }
 
 /** The venue returns either a keyed map or an array depending on endpoint/doc revision. */
-function bagEntries(result: any, keys: string[]): any[] {
-  for (const key of keys) {
-    const bag = result?.[key]
-    if (Array.isArray(bag)) return bag
-    if (bag && typeof bag === 'object') {
-      return Object.entries(bag).map(([id, value]) => ({ id, ...(value as any) }))
-    }
-  }
-  if (Array.isArray(result)) return result
-  if (result && typeof result === 'object') {
-    return Object.entries(result).map(([id, value]) => ({ id, ...(value as any) }))
+function toEntries(bag: any): any[] {
+  if (Array.isArray(bag)) return bag
+  if (bag && typeof bag === 'object') {
+    return Object.entries(bag).map(([id, value]) => ({ id, ...(value as any) }))
   }
   return []
 }
 
-function parseStrategy(raw: any): EarnStrategy | null {
-  const strategyId = str(raw.strategy_id ?? raw.strategyId ?? raw.id)
-  if (!strategyId) return null
+function bagEntries(result: any, keys: string[]): any[] {
+  for (const key of keys) {
+    const bag = result?.[key]
+    if (Array.isArray(bag) || (bag && typeof bag === 'object')) return toEntries(bag)
+  }
+  return toEntries(result)
+}
+
+/** Fields shared by Strategies and Allocations rows. */
+function parseCommon(raw: any) {
   return {
-    strategyId,
     asset: str(raw.asset) ?? '',
     lockType: str(raw.lock_type ?? raw.lockType) ?? 'instant',
     canAllocate: bool(raw.can_allocate ?? raw.canAllocate),
@@ -145,6 +144,12 @@ function parseStrategy(raw: any): EarnStrategy | null {
     ),
     unbondingSeconds: num(raw.unbonding_seconds ?? raw.unbondingSeconds ?? raw.lock_duration_seconds),
   }
+}
+
+function parseStrategy(raw: any): EarnStrategy | null {
+  const strategyId = str(raw.strategy_id ?? raw.strategyId ?? raw.id)
+  if (!strategyId) return null
+  return { strategyId, ...parseCommon(raw) }
 }
 
 function parseAllocation(raw: any): EarnAllocation | null {
@@ -152,22 +157,12 @@ function parseAllocation(raw: any): EarnAllocation | null {
   if (!strategyId) return null
   return {
     strategyId,
-    asset: str(raw.asset) ?? '',
-    lockType: str(raw.lock_type ?? raw.lockType) ?? 'instant',
-    canAllocate: bool(raw.can_allocate ?? raw.canAllocate),
-    autoCompound: str(raw.auto_compound ?? raw.autoCompound),
+    ...parseCommon(raw),
     allocatedNative: num(raw.allocated ?? raw.allocated_native ?? raw.balance) ?? 0,
     pendingNative: num(raw.pending ?? raw.pending_native) ?? 0,
     unbondingNative: num(raw.unbonding ?? raw.unbonding_native) ?? 0,
     exitQueueNative: num(raw.exit_queue ?? raw.exit_queue_native) ?? 0,
     totalRewardedNative: num(raw.total_rewarded ?? raw.total_rewarded_native ?? raw.total_rewarded_amount) ?? 0,
-    minAllocationUsd: num(raw.user_min_allocation ?? raw.min_allocation ?? raw.userMinAllocation),
-    userCapUsd: num(raw.user_cap ?? raw.userCap),
-    apyLow: num(raw.apr_estimate?.low ?? raw.apy_low ?? raw.apyLow ?? raw.apy_estimate?.low ?? raw.apy?.low),
-    apyHigh: num(
-      raw.apr_estimate?.high ?? raw.apy_high ?? raw.apyHigh ?? raw.apy_estimate?.high ?? raw.apy?.high
-    ),
-    unbondingSeconds: num(raw.unbonding_seconds ?? raw.unbondingSeconds ?? raw.lock_duration_seconds),
   }
 }
 

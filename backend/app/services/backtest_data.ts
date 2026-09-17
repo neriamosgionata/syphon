@@ -23,19 +23,27 @@ export function cacheFile(source: 'kraken' | 'ibkr', symbol: string, intervalMin
   return path.join(CACHE_ROOT, source, `${symbol}_${intervalMinutes}m_${hours}h.json`)
 }
 
+function rowToSample(row: any): BacktestSample {
+  return {
+    t: Number(row.ts),
+    p: Number(row.close),
+    h: Number(row.high),
+    l: Number(row.low),
+    v: Number(row.volume),
+  }
+}
+
+function candleToSample(candle: { time: number; close: number; high: number; low: number; volume: number }): BacktestSample {
+  return { t: candle.time * 1000, p: candle.close, h: candle.high, l: candle.low, v: candle.volume }
+}
+
 async function fromTickRecords(symbol: string, hours: number): Promise<BacktestSample[]> {
   const start = Date.now() - hours * 3600_000
   const rows = await db.from('tick_records')
     .where('symbol', symbol)
     .where('ts', '>=', start)
     .orderBy('ts', 'asc')
-  return rows.map((r) => ({
-    t: Number(r.ts),
-    p: Number(r.close),
-    h: Number(r.high),
-    l: Number(r.low),
-    v: Number(r.volume),
-  }))
+  return rows.map(rowToSample)
 }
 
 /**
@@ -50,13 +58,7 @@ async function fromBarRecords(symbol: string, intervalSeconds: number, hours: nu
     .where('interval_seconds', intervalSeconds)
     .where('ts', '>=', start)
     .orderBy('ts', 'asc')
-  return rows.map((r) => ({
-    t: Number(r.ts),
-    p: Number(r.close),
-    h: Number(r.high),
-    l: Number(r.low),
-    v: Number(r.volume),
-  }))
+  return rows.map(rowToSample)
 }
 
 async function fromKrakenOHLC(symbol: string, intervalMinutes: number, hours: number, fresh: boolean): Promise<BacktestSample[]> {
@@ -70,7 +72,7 @@ async function fromKrakenOHLC(symbol: string, intervalMinutes: number, hours: nu
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const samples = candles
     .filter((c) => c.time * 1000 >= targetStart)
-    .map((c) => ({ t: c.time * 1000, p: c.close, h: c.high, l: c.low, v: c.volume }))
+    .map(candleToSample)
   fs.writeFileSync(file, JSON.stringify({ symbol, intervalMinutes, fetchedAt: new Date().toISOString(), samples }))
   return samples
 }
@@ -86,7 +88,7 @@ async function fromIBKR(symbol: string, intervalMinutes: number, hours: number, 
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const samples = candles
     .filter((c) => c.time * 1000 >= targetStart)
-    .map((c) => ({ t: c.time * 1000, p: c.close, h: c.high, l: c.low, v: c.volume }))
+    .map(candleToSample)
   fs.writeFileSync(file, JSON.stringify({ symbol, intervalMinutes, fetchedAt: new Date().toISOString(), samples }))
   return samples
 }

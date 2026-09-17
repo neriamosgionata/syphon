@@ -7,13 +7,17 @@
 
 const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost']
 
+export function isLoopbackHost(host: string): boolean {
+  return LOOPBACK_HOSTS.includes(host)
+}
+
 export interface IncomeLineState {
   yieldLive: boolean
   trendLive: boolean
 }
 
 export function assertIncomeBindSafe(host: string, lines: IncomeLineState): void {
-  if (LOOPBACK_HOSTS.includes(host)) return
+  if (isLoopbackHost(host)) return
 
   const enabled: string[] = []
   if (lines.yieldLive) enabled.push('yield-live')

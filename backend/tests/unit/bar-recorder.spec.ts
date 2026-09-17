@@ -140,7 +140,7 @@ test.group('BarRecorderService', (group) => {
         throw new Error('kraken down')
       },
     }
-    const service = new BarRecorderService(failing, () => base + INTERVAL_MS + 1000, ['BTC'])
+    const service = new BarRecorderService(failing, () => base + 2 * INTERVAL_MS + 1000, ['BTC'])
 
     const results = await service.recordAll()
     assert.isFalse(results['BTC:300'].ok)

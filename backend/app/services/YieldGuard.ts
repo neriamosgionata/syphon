@@ -35,12 +35,12 @@ export function yieldConfigFromEnv(): YieldGuardConfig {
     .filter(Boolean)
   return {
     allowlist,
-    bufferPct: Number(env.get('YIELD_BUFFER_PCT', 25)),
-    minAllocationUsd: Number(env.get('YIELD_MIN_ALLOCATION_USD', 10)),
-    apyFloorPct: Number(env.get('YIELD_APY_FLOOR_PCT', 0.5)),
-    apyCeilingPct: Number(env.get('YIELD_APY_CEILING_PCT', 50)),
-    maxPerAssetUsd: Number(env.get('YIELD_MAX_PER_ASSET_USD', 1000)),
-    maxTotalUsd: Number(env.get('YIELD_MAX_TOTAL_USD', 3000)),
+    bufferPct: env.get('YIELD_BUFFER_PCT', 25),
+    minAllocationUsd: env.get('YIELD_MIN_ALLOCATION_USD', 10),
+    apyFloorPct: env.get('YIELD_APY_FLOOR_PCT', 0.5),
+    apyCeilingPct: env.get('YIELD_APY_CEILING_PCT', 50),
+    maxPerAssetUsd: env.get('YIELD_MAX_PER_ASSET_USD', 1000),
+    maxTotalUsd: env.get('YIELD_MAX_TOTAL_USD', 3000),
   }
 }
 

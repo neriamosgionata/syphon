@@ -70,7 +70,7 @@ async function boot() {
       // Slow trend paper evaluator: replays the recorded bars through the
       // same BacktestEngine the backtests use and latches the product's own
       // tripwires. Paper only — no order path exists.
-      TrendEvalService.start()
+      TrendEvalService.start(recordSymbols)
 
       // Funding-carry paper loop (delta-neutral perp premium harvest).
       // Dry-run by default — logs intents, records paper P&L. Real execution

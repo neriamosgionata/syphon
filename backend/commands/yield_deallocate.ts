@@ -3,7 +3,7 @@ import logger from '@adonisjs/core/services/logger'
 import YieldAllocation from '#models/YieldAllocation'
 import KrakenEarnClient from '#services/KrakenEarnClient'
 import KrakenYieldService from '#services/KrakenYieldService'
-import { normalizeKrakenAsset } from '#services/YieldPolicy'
+import { balanceNativeFor } from '#services/YieldPolicy'
 
 // CLI-only liquidity escape hatch: deallocates through the same intent
 // machinery (never double-submitted) and verifies the restored balance.
@@ -21,11 +21,7 @@ export default class YieldDeallocate extends BaseCommand {
 
   private async balanceFor(asset: string): Promise<number | null> {
     try {
-      const balances = await KrakenEarnClient.getBalance()
-      for (const [code, value] of Object.entries(balances)) {
-        if (normalizeKrakenAsset(code) === asset.toUpperCase()) return Number(value) || 0
-      }
-      return null
+      return balanceNativeFor(await KrakenEarnClient.getBalance(), asset)
     } catch {
       return null
     }

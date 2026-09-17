@@ -8,6 +8,7 @@
 import fs from 'node:fs'
 import { execSync } from 'node:child_process'
 import db from '@adonisjs/lucid/services/db'
+import env from '#start/env'
 import KrakenEarnClient, { KrakenEarnError } from '#services/KrakenEarnClient'
 import type { EarnAllocation, EarnStrategy } from '#services/KrakenEarnClient'
 import type { EarnSurface } from '#services/KrakenYieldService'
@@ -15,15 +16,16 @@ import YieldAllocation from '#models/YieldAllocation'
 import OperationIntent from '#models/OperationIntent'
 import OperationAlert from '#models/OperationAlert'
 import ControlRecord from '#models/ControlRecord'
-import { normalizeKrakenAsset, planYieldAction } from '#services/YieldPolicy'
+import { balanceNativeFor, planYieldAction } from '#services/YieldPolicy'
+import { isLoopbackHost } from '#services/income_bind_guard'
 import { validateYieldConfig, yieldConfigFromEnv, type YieldGuardConfig } from '#services/YieldGuard'
 
 export const PREFLIGHT_CONTROL_NAME = 'yield:preflight'
 export const DEFAULT_PREFLIGHT_TTL_MS = 60 * 60 * 1000
 export const ONE_TICK_MS = 60 * 60 * 1000
 
-const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost']
 const KEY_MATERIAL_PATTERNS = [/KRAKEN_EARN_KEY\s*=/, /KRAKEN_EARN_SECRET\s*=/, /API-Sign/]
+const LOG_TAIL_BYTES = 256 * 1024
 
 export interface PreflightCheck {
   layer: 'local' | 'venue' | 'environment'
@@ -59,15 +61,12 @@ export async function recordPreflightPass(
   result: PreflightResult,
   now = Date.now()
 ): Promise<void> {
-  await ControlRecord.ensure(PREFLIGHT_CONTROL_NAME)
-  await db
-    .from('control')
-    .where('name', PREFLIGHT_CONTROL_NAME)
-    .update({
-      state: result.passed ? 'passed' : 'failed',
-      heartbeat_at: now,
-      detail: JSON.stringify({ passed: result.passed, failed: result.failed, at: now }),
-    })
+  await ControlRecord.setState(
+    PREFLIGHT_CONTROL_NAME,
+    result.passed ? 'passed' : 'failed',
+    { passed: result.passed, failed: result.failed, at: now },
+    { heartbeatAt: now }
+  )
 }
 
 function readCrontab(): string | null {
@@ -78,9 +77,20 @@ function readCrontab(): string | null {
   }
 }
 
-function defaultLogFile(): string | null {
-  const candidate = `${process.cwd()}/logs/syphon.log`
-  return fs.existsSync(candidate) ? candidate : null
+function readLogTail(file: string, bytes: number): string | null {
+  let fd: number | null = null
+  try {
+    fd = fs.openSync(file, 'r')
+    const size = fs.fstatSync(fd).size
+    const start = Math.max(0, size - bytes)
+    const buffer = Buffer.alloc(size - start)
+    fs.readSync(fd, buffer, 0, buffer.length, start)
+    return buffer.toString('utf8')
+  } catch {
+    return null
+  } finally {
+    if (fd !== null) fs.closeSync(fd)
+  }
 }
 
 export async function runPreflight(opts: PreflightOptions = {}): Promise<PreflightResult> {
@@ -148,8 +158,9 @@ export async function runPreflight(opts: PreflightOptions = {}): Promise<Preflig
       push('venue', 'allocations-readable', false, `Allocations refused (${code})`)
     }
 
+    let balances: Record<string, string> = {}
     try {
-      await earn.getBalance()
+      balances = await earn.getBalance()
       push('venue', 'funds-readable', true)
     } catch (error) {
       const code = error instanceof KrakenEarnError ? error.code : 'unknown'
@@ -188,14 +199,10 @@ export async function runPreflight(opts: PreflightOptions = {}): Promise<Preflig
     // Capacity report: decisions must be computable (a price failure is a
     // real problem; "nothing to allocate right now" is not).
     const priceFn = opts.price ?? (async () => null)
-    const balances = await earn.getBalance().catch(() => ({}) as Record<string, string>)
     let priceFailures = 0
     let capacity = 0
     for (const strategy of eligible) {
-      let native = 0
-      for (const [code, value] of Object.entries(balances)) {
-        if (normalizeKrakenAsset(code) === strategy.asset.toUpperCase()) native = Number(value) || 0
-      }
+      const native = balanceNativeFor(balances, strategy.asset) ?? 0
       const decision = planYieldAction(
         {
           strategy: {
@@ -223,11 +230,11 @@ export async function runPreflight(opts: PreflightOptions = {}): Promise<Preflig
   }
 
   // ── Environment ───────────────────────────────────────────────
-  const host = opts.host ?? (process.env.HOST || '')
-  push('environment', 'loopback-bind', LOOPBACK_HOSTS.includes(host), `HOST=${host || '(unset)'}`)
+  const host = opts.host ?? env.get('HOST', '')
+  push('environment', 'loopback-bind', isLoopbackHost(host), `HOST=${host || '(unset)'}`)
 
   const envFile = opts.envFilePath ?? `${process.cwd()}/.env`
-  if (fs.existsSync(envFile)) {
+  try {
     const mode = fs.statSync(envFile).mode & 0o777
     push(
       'environment',
@@ -235,7 +242,7 @@ export async function runPreflight(opts: PreflightOptions = {}): Promise<Preflig
       (mode & 0o077) === 0,
       (mode & 0o077) === 0 ? undefined : `.env mode ${mode.toString(8)} is group/world accessible`
     )
-  } else {
+  } catch {
     push('environment', 'secret-file-permissions', true, '.env not present')
   }
 
@@ -269,13 +276,13 @@ export async function runPreflight(opts: PreflightOptions = {}): Promise<Preflig
     opts.fastAlgoSessionActive ? 'an active fast-algo Kraken session shares signing state' : undefined
   )
 
-  const logFile = opts.logFile === undefined ? defaultLogFile() : opts.logFile
-  if (logFile && fs.existsSync(logFile)) {
-    const tail = fs.readFileSync(logFile, 'utf8').slice(-256 * 1024)
+  const logFile = opts.logFile === undefined ? `${process.cwd()}/logs/syphon.log` : opts.logFile
+  const tail = logFile ? readLogTail(logFile, LOG_TAIL_BYTES) : null
+  if (tail === null) {
+    push('environment', 'no-key-material-in-logs', true, 'no local log file to scan')
+  } else {
     const leaking = KEY_MATERIAL_PATTERNS.some((pattern) => pattern.test(tail))
     push('environment', 'no-key-material-in-logs', !leaking, leaking ? 'log tail contains key material patterns' : undefined)
-  } else {
-    push('environment', 'no-key-material-in-logs', true, 'no local log file to scan')
   }
 
   const failed = checks.filter((check) => !check.ok).map((check) => check.name)

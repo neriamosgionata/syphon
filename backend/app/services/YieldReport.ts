@@ -40,7 +40,7 @@ export async function buildYieldStatus(now = Date.now()): Promise<YieldStatus> {
   return {
     lastTick: {
       at: lastTick?.heartbeatAt ?? null,
-      stale: await ControlRecord.isStale('yield:tick', now, 2 * ONE_TICK_MS),
+      stale: ControlRecord.isRowStale(lastTick, now, 2 * ONE_TICK_MS),
       detail: lastTick?.detail ?? null,
     },
     preflight: {

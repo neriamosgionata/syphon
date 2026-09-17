@@ -14,7 +14,7 @@ import OperationAlert from '#models/OperationAlert'
 import ControlRecord from '#models/ControlRecord'
 import { BacktestEngine, type BacktestResult, type BacktestSample } from '#services/BacktestEngine'
 import { loadBacktestSamples } from '#services/backtest_data'
-import BarRecorderService, { type BarCoverage } from '#services/BarRecorderService'
+import BarRecorderService, { DEFAULT_BAR_SYMBOLS, type BarCoverage } from '#services/BarRecorderService'
 import {
   FROZEN_LOOKBACK_SAMPLES,
   TREND_INTERVAL_SECONDS,
@@ -46,6 +46,8 @@ export interface TrendEvalOptions {
 
 export interface EvaluateOptions {
   coverageGap?: boolean
+  /** Config row already loaded by the caller (avoids a second SELECT). */
+  config?: TrendConfig
 }
 
 class TrendEvalService {
@@ -65,7 +67,7 @@ class TrendEvalService {
   private lastRunAt: number | null = null
 
   constructor(opts: TrendEvalOptions = {}) {
-    this.symbols = opts.symbols ?? ['BTC', 'ETH', 'SOL']
+    this.symbols = opts.symbols ?? DEFAULT_BAR_SYMBOLS
     this.now = opts.now ?? Date.now
     this.hours = opts.hours ?? TREND_MAX_HOURS
     this.loadSamples =
@@ -92,8 +94,9 @@ class TrendEvalService {
     return this.timer !== null
   }
 
-  public start(): void {
+  public start(symbols?: string[]): void {
     if (this.timer) return
+    if (symbols && symbols.length > 0) this.symbols = symbols
     void this.tick()
     this.timer = setInterval(() => {
       void this.tick()
@@ -155,6 +158,7 @@ class TrendEvalService {
           const samples = await this.loadSamples(symbol, this.hours)
           const evaluation = await this.evaluateSamples(symbol, samples, {
             coverageGap: coverage.gaps.length > 0,
+            config,
           })
           results.push({
             symbol,
@@ -165,8 +169,9 @@ class TrendEvalService {
           })
         }
 
+        const pruned = await this.pruneProvisional(now)
         this.lastRunAt = this.now()
-        await ControlRecord.heartbeat(TREND_LOCK_NAME, 'trend-eval', this.lastRunAt, { results })
+        await ControlRecord.heartbeat(TREND_LOCK_NAME, 'trend-eval', this.lastRunAt, { results, pruned })
         return { status: 'ok', results }
       } finally {
         await ControlRecord.release(TREND_LOCK_NAME, 'trend-eval')
@@ -186,7 +191,7 @@ class TrendEvalService {
     samples: BacktestSample[],
     opts: EvaluateOptions = {}
   ): Promise<TrendEvaluation> {
-    const config = await this.configRow()
+    const config = opts.config ?? (await this.configRow())
     const strategy = strategyConfigFromTrendConfig(config)
     const engine = engineConfigFromTrendConfig(config)
     validateTrendEngineConfig(engine)
@@ -224,11 +229,7 @@ class TrendEvalService {
         monthly,
       })
       if (verdict.tripped) {
-        await ControlRecord.ensure(TREND_TRIP_CONTROL_NAME)
-        await db
-          .from('control')
-          .where('name', TREND_TRIP_CONTROL_NAME)
-          .update({ state: 'halted', detail: JSON.stringify({ reasons: verdict.reasons, at: this.now() }) })
+        await ControlRecord.setState(TREND_TRIP_CONTROL_NAME, 'halted', { reasons: verdict.reasons, at: this.now() })
         await OperationAlert.raise({
           source: 'trend',
           severity: 'critical',
@@ -245,11 +246,7 @@ class TrendEvalService {
   /** Explicit, reasoned resume after a latched tripwire. */
   public async resume(reason: string, now = Date.now()): Promise<void> {
     if (!reason || !reason.trim()) throw new Error('resume requires a reason')
-    await ControlRecord.ensure(TREND_TRIP_CONTROL_NAME)
-    await db
-      .from('control')
-      .where('name', TREND_TRIP_CONTROL_NAME)
-      .update({ state: 'ok', detail: JSON.stringify({ resumeReason: reason, at: now }) })
+    await ControlRecord.setState(TREND_TRIP_CONTROL_NAME, 'ok', { resumeReason: reason, at: now })
     await OperationAlert.raise({
       source: 'trend',
       severity: 'info',
@@ -257,6 +254,17 @@ class TrendEvalService {
       message: `trend evaluation resumed: ${reason}`,
       now,
     })
+  }
+
+  /** Provisional rows are not evidence: prune them after 30 days. */
+  private async pruneProvisional(now: number): Promise<number> {
+    const cutoff = now - 30 * 86_400_000
+    const deleted = await db
+      .from('trend_evaluations')
+      .where('state', 'provisional')
+      .where('window_end', '<', cutoff)
+      .del()
+    return Number(deleted) || 0
   }
 
   public async status(now = Date.now()): Promise<Record<string, any>> {
@@ -274,7 +282,7 @@ class TrendEvalService {
       },
       lastTick: {
         at: lastTick?.heartbeatAt ?? null,
-        stale: await ControlRecord.isStale(TREND_LOCK_NAME, now, 2 * TREND_EVAL_INTERVAL_MS),
+        stale: ControlRecord.isRowStale(lastTick, now, 2 * TREND_EVAL_INTERVAL_MS),
         detail: lastTick?.detail ?? null,
       },
       evaluations: evaluations.map((evaluation) => ({

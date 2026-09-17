@@ -244,8 +244,13 @@ export function loadResearchSamples(
   hours = 0
 ): BacktestSample[] {
   const file = researchCacheFile(symbol)
-  if (!fs.existsSync(file)) throw new Error(`research cache not found: ${file}`)
-  const raw = JSON.parse(fs.readFileSync(file, 'utf8'))
+  let raw: any
+  try {
+    raw = JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`research cache not readable: ${file} (${reason})`)
+  }
   const samples: BacktestSample[] = Array.isArray(raw) ? raw : (raw.samples ?? [])
   return resampleSamples(filterRecentSamples(samples, hours), 60, targetSeconds)
 }

@@ -26,6 +26,9 @@ export const RETENTION_DAYS = 400
 /** Fetch 1h/1d bars on every Nth pass (every 60 min of 5m passes). */
 const OPPORTUNISTIC_EVERY_PASSES = 12
 
+/** Retention prune cadence: every Nth pass (keeps the range delete off most ticks). */
+const PRUNE_EVERY_PASSES = 12
+
 interface BarDataProvider {
   getOHLC(
     symbol: string,
@@ -135,7 +138,7 @@ class BarRecorderService {
         }
       }
 
-      await this.prune()
+      await this.pruneIfDue()
       this.lastRunAt = this.now()
       return results
     } finally {
@@ -155,6 +158,10 @@ class BarRecorderService {
     const now = this.now()
 
     const newestStored = await this.newestTs(upper, intervalSeconds)
+
+    // No closed bar can exist before two intervals past the newest stored one.
+    if (newestStored !== null && now < newestStored + 2 * intervalMs) return 0
+
     const boundary = fetchBoundary(newestStored, intervalMs, now)
     const sinceSeconds = boundary > 0 ? Math.floor(boundary / 1000) : undefined
 
@@ -194,6 +201,11 @@ class BarRecorderService {
     return Number(deleted) || 0
   }
 
+  /** Prune on a slow cadence: the delete is a range scan with little to do. */
+  private async pruneIfDue(): Promise<void> {
+    if (this.passCount % PRUNE_EVERY_PASSES === 1) await this.prune()
+  }
+
   private async newestTs(symbol: string, intervalSeconds: number): Promise<number | null> {
     const row = await db
       .from('bar_records')
@@ -205,38 +217,38 @@ class BarRecorderService {
     return row?.ts === null || row?.ts === undefined ? null : Number(row.ts)
   }
 
-  /** Oldest/newest/gaps/health for one series. */
+  /** Oldest/newest/gaps/health for one series, computed without row materialization. */
   public async coverage(symbol: string, intervalSeconds: number): Promise<BarCoverage> {
     const upper = symbol.toUpperCase()
-    const rows = await db
-      .from('bar_records')
-      .where('symbol', upper)
-      .where('interval_seconds', intervalSeconds)
-      .orderBy('ts', 'asc')
-      .select('ts')
-
     const intervalMs = intervalSeconds * 1000
-    const gaps: BarGap[] = []
-    let oldest: number | null = null
-    let newest: number | null = null
 
-    for (let i = 0; i < rows.length; i++) {
-      const ts = Number(rows[i].ts)
-      if (oldest === null) oldest = ts
-      if (i > 0) {
-        const previous = Number(rows[i - 1].ts)
-        const missing = (ts - previous) / intervalMs - 1
-        if (missing > 0) {
-          gaps.push({
-            from: previous + intervalMs,
-            to: ts,
-            missingBars: missing,
-            unrecoverable: ts - previous > KRAKEN_WINDOW_BARS * intervalMs,
-          })
-        }
+    const totals = await this.scalarRow(
+      'SELECT MIN(ts) AS oldest, MAX(ts) AS newest, COUNT(*) AS bars FROM bar_records WHERE symbol = ? AND interval_seconds = ?',
+      [upper, intervalSeconds]
+    )
+    const oldest = totals?.oldest === null || totals?.oldest === undefined ? null : Number(totals.oldest)
+    const newest = totals?.newest === null || totals?.newest === undefined ? null : Number(totals.newest)
+    const bars = Number(totals?.bars ?? 0)
+
+    // Only gap boundaries come back from SQL, never the whole series.
+    const gapRows = await this.rows(
+      `SELECT ts, prev_ts FROM (
+         SELECT ts, LAG(ts) OVER (ORDER BY ts) AS prev_ts
+         FROM bar_records WHERE symbol = ? AND interval_seconds = ?
+       ) WHERE prev_ts IS NOT NULL AND ts - prev_ts > ?`,
+      [upper, intervalSeconds, intervalMs]
+    )
+
+    const gaps: BarGap[] = gapRows.map((row) => {
+      const ts = Number(row.ts)
+      const previous = Number(row.prev_ts)
+      return {
+        from: previous + intervalMs,
+        to: ts,
+        missingBars: (ts - previous) / intervalMs - 1,
+        unrecoverable: ts - previous > KRAKEN_WINDOW_BARS * intervalMs,
       }
-      newest = ts
-    }
+    })
 
     const unrecoverableGaps = gaps.filter((gap) => gap.unrecoverable).length
     const lastError = this.lastErrors.get(`${upper}:${intervalSeconds}`) ?? null
@@ -247,13 +259,24 @@ class BarRecorderService {
       intervalSeconds,
       oldest,
       newest,
-      bars: rows.length,
+      bars,
       gaps,
       unrecoverableGaps,
       staleMs,
       lastError,
-      healthy: rows.length > 0 && unrecoverableGaps === 0 && lastError === null,
+      healthy: bars > 0 && unrecoverableGaps === 0 && lastError === null,
     }
+  }
+
+  private async rows(sql: string, bindings: any[]): Promise<any[]> {
+    const result: any = await db.rawQuery(sql, bindings)
+    const rows = Array.isArray(result?.[0]) ? result[0] : result
+    return Array.isArray(rows) ? rows : []
+  }
+
+  private async scalarRow(sql: string, bindings: any[]): Promise<any | null> {
+    const rows = await this.rows(sql, bindings)
+    return rows[0] ?? null
   }
 
   public status(): Record<string, any> {

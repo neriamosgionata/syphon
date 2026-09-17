@@ -17,12 +17,12 @@ import KrakenEarnClient, {
   type EarnStrategy,
 } from '#services/KrakenEarnClient'
 import KrakenService from '#services/KrakenService'
-import YieldAccounting, { isRewardLedgerType } from '#services/YieldAccounting'
+import YieldAccounting, { isRewardRow } from '#services/YieldAccounting'
 import YieldAllocation from '#models/YieldAllocation'
 import OperationIntent from '#models/OperationIntent'
 import OperationAlert from '#models/OperationAlert'
 import ControlRecord from '#models/ControlRecord'
-import { normalizeKrakenAsset, planYieldAction, type PolicySkip, type YieldAction } from '#services/YieldPolicy'
+import { balanceNativeFor, planYieldAction, round, type PolicySkip, type YieldAction } from '#services/YieldPolicy'
 import { applyCaps, validateYieldConfig, yieldConfigFromEnv, type YieldGuardConfig } from '#services/YieldGuard'
 import {
   DEFAULT_PREFLIGHT_TTL_MS,
@@ -73,11 +73,6 @@ export interface YieldTickResult {
   adopted?: any[]
 }
 
-function round(value: number, decimals = 12): number {
-  const factor = 10 ** decimals
-  return Math.round(value * factor) / factor
-}
-
 export async function tickerPrice(asset: string): Promise<number | null> {
   try {
     const result = await KrakenService.getTicker(KrakenService.buildPair(asset))
@@ -88,9 +83,6 @@ export async function tickerPrice(asset: string): Promise<number | null> {
     return null
   }
 }
-
-/** Kraken balance codes: XXBT/XETH/ZUSD legacy prefixes; XBT means BTC. */
-export { normalizeKrakenAsset }
 
 class KrakenYieldService {
   private earn: EarnSurface
@@ -202,7 +194,7 @@ class KrakenYieldService {
 
     const rewardsIngested = await this.ingestRewards(now)
     await this.reconcileRewards(allocations)
-    const adopted = await this.adoptIntents(now, allocations)
+    const adoption = await this.adoptIntents(now, allocations)
 
     const prices = new Map<string, number | null>()
     const priceFor = async (asset: string): Promise<number | null> => {
@@ -210,14 +202,13 @@ class KrakenYieldService {
       return prices.get(asset) ?? null
     }
 
-    const nonTerminal = await OperationIntent.query().whereIn('status', ['pending', 'submitted'])
-    const pendingStrategies = new Set(nonTerminal.map((intent) => intent.strategyId))
+    const pendingStrategies = adoption.pendingStrategies
 
     const planned: YieldAction[] = []
     const skips: PolicySkip[] = []
     for (const strategy of strategies) {
       const allocation = byStrategy.get(strategy.strategyId)
-      const totalNative = this.balanceFor(balances, strategy.asset)
+      const totalNative = balanceNativeFor(balances, strategy.asset) ?? 0
       const decision = planYieldAction(
         {
           strategy: {
@@ -256,7 +247,7 @@ class KrakenYieldService {
     }
     const capped = applyCaps(planned, cfg, capState)
 
-    const executed = live ? await this.executePlan(capped.actions) : []
+    const executed = live ? await this.executePlan(capped.actions, pendingStrategies) : []
 
     await ControlRecord.heartbeat(LOCK_NAME, this.owner, now, {
       live,
@@ -265,7 +256,7 @@ class KrakenYieldService {
       executed: executed.length,
       skips: [...skips, ...capped.skips],
       rewardsIngested,
-      adopted,
+      adopted: adoption.adopted,
     })
 
     return {
@@ -275,7 +266,7 @@ class KrakenYieldService {
       skips: [...skips, ...capped.skips],
       executed,
       rewardsIngested,
-      adopted,
+      adopted: adoption.adopted,
     }
   }
 
@@ -285,9 +276,7 @@ class KrakenYieldService {
       const { entries } = await this.earn.getLedgers({
         start: Math.floor(now / 1000) - REWARD_LOOKBACK_SECONDS,
       })
-      const rewards = entries.filter(
-        (entry) => isRewardLedgerType(entry.ledgerType) || entry.subtype === 'reward'
-      )
+      const rewards = entries.filter(isRewardRow)
       return await this.accounting.ingestRewards(rewards, null)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -321,9 +310,13 @@ class KrakenYieldService {
    * They are never resubmitted: a strategy with a non-terminal intent is
    * skipped by the planner.
    */
-  private async adoptIntents(now: number, allocations: EarnAllocation[]): Promise<any[]> {
+  private async adoptIntents(
+    now: number,
+    allocations: EarnAllocation[]
+  ): Promise<{ adopted: any[]; pendingStrategies: Set<string> }> {
     const rows = await OperationIntent.query().whereIn('status', ['pending', 'submitted'])
     const adopted: any[] = []
+    const resolved = new Set<number>()
 
     for (const intent of rows) {
       const age = now - intent.createdAt
@@ -334,6 +327,7 @@ class KrakenYieldService {
           intent.status = terminal
           intent.terminalAt = now
           await intent.save()
+          resolved.add(intent.id)
           if (terminal === 'failed') {
             await this.alert('critical', 'allocation-failed', `operation ${intent.id} reported failure by the venue`)
           }
@@ -361,6 +355,7 @@ class KrakenYieldService {
         intent.status = 'success'
         intent.terminalAt = now
         await intent.save()
+        resolved.add(intent.id)
         adopted.push({ intentId: intent.id, status: 'adopted' })
         continue
       }
@@ -375,17 +370,16 @@ class KrakenYieldService {
       }
     }
 
-    return adopted
+    const pendingStrategies = new Set(
+      rows.filter((intent) => !resolved.has(intent.id)).map((intent) => intent.strategyId)
+    )
+    return { adopted, pendingStrategies }
   }
 
-  private async executePlan(actions: YieldAction[]): Promise<any[]> {
+  private async executePlan(actions: YieldAction[], pendingStrategies: Set<string>): Promise<any[]> {
     const results: any[] = []
     for (const action of actions) {
-      const existing = await OperationIntent.query()
-        .where('strategy_id', action.strategyId)
-        .whereIn('status', ['pending', 'submitted'])
-        .first()
-      if (existing) {
+      if (pendingStrategies.has(action.strategyId)) {
         results.push({ strategyId: action.strategyId, skipped: 'pending-operation' })
         continue
       }
@@ -501,16 +495,6 @@ class KrakenYieldService {
     } catch {
       return null
     }
-  }
-
-  private balanceFor(balances: Record<string, string>, asset: string): number {
-    for (const [code, value] of Object.entries(balances)) {
-      if (normalizeKrakenAsset(code) === asset) {
-        const parsed = Number(value)
-        return Number.isFinite(parsed) ? parsed : 0
-      }
-    }
-    return 0
   }
 
   private async alert(severity: string, code: string, message: string): Promise<void> {

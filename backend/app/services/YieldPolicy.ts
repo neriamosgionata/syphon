@@ -80,6 +80,19 @@ export function normalizeKrakenAsset(code: string): string {
   return out === 'XBT' ? 'BTC' : out
 }
 
+/** Native balance for a normalized asset symbol; null when the asset is absent. */
+export function balanceNativeFor(balances: Record<string, string>, asset: string): number | null {
+  for (const [code, value] of Object.entries(balances)) {
+    if (normalizeKrakenAsset(code) === asset.toUpperCase()) {
+      const parsed = Number(value)
+      return Number.isFinite(parsed) ? parsed : 0
+    }
+  }
+  return null
+}
+
+export { round }
+
 function skip(input: PolicyInput, reason: YieldSkipReason, detail?: string): PolicyDecision {
   return {
     action: null,

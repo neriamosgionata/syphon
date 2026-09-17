@@ -101,7 +101,7 @@ class KrakenService {
 
     try {
       // Validate by fetching balance
-      await this.privateRequest('/0/private/Balance', {})
+      await this.signedRequest('/0/private/Balance', {})
       this._connected = true
       logger.info('[Kraken] Connected successfully')
       return true
@@ -168,10 +168,6 @@ class KrakenService {
     return json.result
   }
 
-  private async privateRequest(path: string, params: Record<string, any> = {}): Promise<any> {
-    return this.signedRequest(path, params)
-  }
-
   private async futuresRequest(method: string, path: string, params: Record<string, any> = {}): Promise<any> {
     const postData = method === 'POST' ? querystring.stringify(params) : ''
     const nonce = this.nextFuturesNonce()
@@ -204,11 +200,11 @@ class KrakenService {
   // ---------------------------------------------------------------------------
 
   public async getBalance(): Promise<Record<string, string>> {
-    return this.privateRequest('/0/private/Balance')
+    return this.signedRequest('/0/private/Balance')
   }
 
   public async getTradeBalance(asset: string = 'ZUSD'): Promise<Record<string, string>> {
-    return this.privateRequest('/0/private/TradeBalance', { asset })
+    return this.signedRequest('/0/private/TradeBalance', { asset })
   }
 
   /** Account equity (equivalent balance, USD) — EquityProvider implementation. */
@@ -219,16 +215,16 @@ class KrakenService {
   }
 
   public async getOpenOrders(): Promise<Record<string, KrakenOrderInfo>> {
-    const result = await this.privateRequest('/0/private/OpenOrders')
+    const result = await this.signedRequest('/0/private/OpenOrders')
     return result?.open || {}
   }
 
   public async queryOrder(txid: string): Promise<Record<string, KrakenOrderInfo>> {
-    return this.privateRequest('/0/private/QueryOrders', { txid })
+    return this.signedRequest('/0/private/QueryOrders', { txid })
   }
 
   public async getOpenPositions(): Promise<Record<string, any>> {
-    return this.privateRequest('/0/private/OpenPositions')
+    return this.signedRequest('/0/private/OpenPositions')
   }
 
   public async getTicker(pair: string): Promise<any> {
@@ -296,7 +292,7 @@ class KrakenService {
         params.timeinforce = trade.timeInForce
       }
 
-      const result = await this.privateRequest('/0/private/AddOrder', params)
+      const result = await this.signedRequest('/0/private/AddOrder', params)
 
       const txid = result?.txid?.[0]
       trade.externalOrderId = txid || null
@@ -333,7 +329,7 @@ class KrakenService {
         return trade
       }
 
-      await this.privateRequest('/0/private/CancelOrder', { txid })
+      await this.signedRequest('/0/private/CancelOrder', { txid })
       trade.status = 'cancelled'
       trade.cancelledAt = DateTime.now()
       await trade.save()

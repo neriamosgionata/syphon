@@ -59,7 +59,7 @@ function round(value: number, decimals = 12): number {
   return Math.round(value * factor) / factor
 }
 
-function isRewardRow(row: YieldReward): boolean {
+export function isRewardRow(row: { ledgerType: string; subtype?: string | null }): boolean {
   return isRewardLedgerType(row.ledgerType) || row.subtype === 'reward'
 }
 

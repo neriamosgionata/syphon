@@ -71,10 +71,30 @@ export default class ControlRecord extends BaseModel {
       .update({ owner: null, lease_expires_at: null })
   }
 
+  /** Set the row's latch state (and optional detail/heartbeat) in one place. */
+  public static async setState(
+    name: string,
+    state: string,
+    detail: Record<string, any> | null = null,
+    options: { heartbeatAt?: number } = {}
+  ): Promise<void> {
+    await ControlRecord.ensure(name)
+    const patch: Record<string, any> = {
+      state,
+      detail: detail === null ? null : JSON.stringify(detail),
+    }
+    if (options.heartbeatAt !== undefined) patch.heartbeat_at = options.heartbeatAt
+    await db.from('control').where('name', name).update(patch)
+  }
+
   /** True when the row has no heartbeat or its heartbeat is older than maxAgeMs. */
-  public static async isStale(name: string, now = Date.now(), maxAgeMs = 2 * 60 * 60 * 1000): Promise<boolean> {
-    const row = await ControlRecord.get(name)
+  public static isRowStale(row: ControlRecord | null, now: number, maxAgeMs: number): boolean {
     if (!row || row.heartbeatAt === null || row.heartbeatAt === undefined) return true
     return now - row.heartbeatAt > maxAgeMs
+  }
+
+  /** True when the row has no heartbeat or its heartbeat is older than maxAgeMs. */
+  public static async isStale(name: string, now = Date.now(), maxAgeMs = 2 * 60 * 60 * 1000): Promise<boolean> {
+    return ControlRecord.isRowStale(await ControlRecord.get(name), now, maxAgeMs)
   }
 }
