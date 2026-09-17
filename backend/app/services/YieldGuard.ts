@@ -4,6 +4,7 @@
 // that is invalid or exceeds a ceiling refuses the whole tick before any
 // venue call; per-asset and total USD caps trim the plan.
 
+import env from '#start/env'
 import type { PolicySkip, YieldAction, YieldPolicyConfig } from './YieldPolicy.js'
 
 export const HARD_CEILINGS = {
@@ -13,13 +14,34 @@ export const HARD_CEILINGS = {
   maxBufferPct: 90,
   maxMinAllocationUsd: 10_000,
   maxApyFloorPct: 50,
+  maxApyCeilingPct: 500,
 } as const
 
 export interface YieldGuardConfig extends YieldPolicyConfig {
+  /** Upper APY band bound (%). Preflight refuses live when an eligible strategy's low estimate exceeds it. */
+  apyCeilingPct: number
   /** Hard per-asset allocation cap in USD. */
   maxPerAssetUsd: number
   /** Hard total allocation cap in USD. */
   maxTotalUsd: number
+}
+
+/** Operator configuration from the environment, with safe defaults. */
+export function yieldConfigFromEnv(): YieldGuardConfig {
+  const allowlist = env
+    .get('YIELD_ALLOWLIST', 'BTC,ETH,SOL')
+    .split(',')
+    .map((asset) => asset.trim().toUpperCase())
+    .filter(Boolean)
+  return {
+    allowlist,
+    bufferPct: Number(env.get('YIELD_BUFFER_PCT', 25)),
+    minAllocationUsd: Number(env.get('YIELD_MIN_ALLOCATION_USD', 10)),
+    apyFloorPct: Number(env.get('YIELD_APY_FLOOR_PCT', 0.5)),
+    apyCeilingPct: Number(env.get('YIELD_APY_CEILING_PCT', 50)),
+    maxPerAssetUsd: Number(env.get('YIELD_MAX_PER_ASSET_USD', 1000)),
+    maxTotalUsd: Number(env.get('YIELD_MAX_TOTAL_USD', 3000)),
+  }
 }
 
 export class YieldConfigError extends Error {
@@ -49,6 +71,9 @@ export function validateYieldConfig(cfg: YieldGuardConfig): void {
   }
   if (!finite(cfg.apyFloorPct) || cfg.apyFloorPct < 0 || cfg.apyFloorPct > HARD_CEILINGS.maxApyFloorPct) {
     throw new YieldConfigError(`apyFloorPct out of range (0-${HARD_CEILINGS.maxApyFloorPct})`)
+  }
+  if (!finite(cfg.apyCeilingPct) || cfg.apyCeilingPct < cfg.apyFloorPct || cfg.apyCeilingPct > HARD_CEILINGS.maxApyCeilingPct) {
+    throw new YieldConfigError(`apyCeilingPct out of range (${cfg.apyFloorPct}-${HARD_CEILINGS.maxApyCeilingPct})`)
   }
   if (!finite(cfg.maxPerAssetUsd) || cfg.maxPerAssetUsd <= 0 || cfg.maxPerAssetUsd > HARD_CEILINGS.maxPerAssetUsd) {
     throw new YieldConfigError(`maxPerAssetUsd out of range (0-${HARD_CEILINGS.maxPerAssetUsd})`)

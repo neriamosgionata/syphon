@@ -63,6 +63,7 @@ export default await Env.create(new URL('../', import.meta.url), {
   YIELD_BUFFER_PCT: Env.schema.number.optional(),
   YIELD_MIN_ALLOCATION_USD: Env.schema.number.optional(),
   YIELD_APY_FLOOR_PCT: Env.schema.number.optional(),
+  YIELD_APY_CEILING_PCT: Env.schema.number.optional(),
   YIELD_MAX_PER_ASSET_USD: Env.schema.number.optional(),
   YIELD_MAX_TOTAL_USD: Env.schema.number.optional(),
   KRAKEN_FUTURES_KEY: Env.schema.string.optional(),

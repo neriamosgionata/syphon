@@ -22,8 +22,13 @@ import YieldAllocation from '#models/YieldAllocation'
 import OperationIntent from '#models/OperationIntent'
 import OperationAlert from '#models/OperationAlert'
 import ControlRecord from '#models/ControlRecord'
-import { planYieldAction, type PolicySkip, type YieldAction } from '#services/YieldPolicy'
-import { applyCaps, validateYieldConfig, type YieldGuardConfig } from '#services/YieldGuard'
+import { normalizeKrakenAsset, planYieldAction, type PolicySkip, type YieldAction } from '#services/YieldPolicy'
+import { applyCaps, validateYieldConfig, yieldConfigFromEnv, type YieldGuardConfig } from '#services/YieldGuard'
+import {
+  DEFAULT_PREFLIGHT_TTL_MS,
+  PREFLIGHT_CONTROL_NAME,
+  isPreflightFresh,
+} from '#services/YieldPreflight'
 
 const LOCK_NAME = 'yield:tick'
 const REWARD_LOOKBACK_SECONDS = 7 * 86_400
@@ -53,6 +58,7 @@ export interface YieldServiceOptions {
   lockTtlMs?: number
   staleIntentMs?: number
   config?: () => YieldGuardConfig
+  preflightTtlMs?: number
   owner?: string
 }
 
@@ -72,23 +78,7 @@ function round(value: number, decimals = 12): number {
   return Math.round(value * factor) / factor
 }
 
-function configFromEnv(): YieldGuardConfig {
-  const allowlist = env
-    .get('YIELD_ALLOWLIST', 'BTC,ETH,SOL')
-    .split(',')
-    .map((asset) => asset.trim().toUpperCase())
-    .filter(Boolean)
-  return {
-    allowlist,
-    bufferPct: Number(env.get('YIELD_BUFFER_PCT', 25)),
-    minAllocationUsd: Number(env.get('YIELD_MIN_ALLOCATION_USD', 10)),
-    apyFloorPct: Number(env.get('YIELD_APY_FLOOR_PCT', 0.5)),
-    maxPerAssetUsd: Number(env.get('YIELD_MAX_PER_ASSET_USD', 1000)),
-    maxTotalUsd: Number(env.get('YIELD_MAX_TOTAL_USD', 3000)),
-  }
-}
-
-async function tickerPrice(asset: string): Promise<number | null> {
+export async function tickerPrice(asset: string): Promise<number | null> {
   try {
     const result = await KrakenService.getTicker(KrakenService.buildPair(asset))
     const row: any = result ? Object.values(result)[0] : null
@@ -100,11 +90,7 @@ async function tickerPrice(asset: string): Promise<number | null> {
 }
 
 /** Kraken balance codes: XXBT/XETH/ZUSD legacy prefixes; XBT means BTC. */
-export function normalizeKrakenAsset(code: string): string {
-  let out = code
-  if (out.length === 4 && (out.startsWith('X') || out.startsWith('Z'))) out = out.slice(1)
-  return out === 'XBT' ? 'BTC' : out
-}
+export { normalizeKrakenAsset }
 
 class KrakenYieldService {
   private earn: EarnSurface
@@ -119,6 +105,7 @@ class KrakenYieldService {
   private staleIntentMs: number
   private config: () => YieldGuardConfig
   private owner: string
+  private preflightTtlMs: number
 
   constructor(opts: YieldServiceOptions = {}) {
     this.earn = opts.earn ?? (KrakenEarnClient as EarnSurface)
@@ -131,8 +118,9 @@ class KrakenYieldService {
     this.pollTimeoutMs = opts.pollTimeoutMs ?? 30_000
     this.lockTtlMs = opts.lockTtlMs ?? 30 * 60 * 1000
     this.staleIntentMs = opts.staleIntentMs ?? 2 * 60 * 60 * 1000
-    this.config = opts.config ?? configFromEnv
+    this.config = opts.config ?? yieldConfigFromEnv
     this.owner = opts.owner ?? `yield-tick-${process.pid}`
+    this.preflightTtlMs = opts.preflightTtlMs ?? DEFAULT_PREFLIGHT_TTL_MS
   }
 
   public async tick(): Promise<YieldTickResult> {
@@ -162,6 +150,15 @@ class KrakenYieldService {
   private async runTick(cfg: YieldGuardConfig): Promise<YieldTickResult> {
     const now = this.now()
     const live = this.live()
+
+    // Live mutating calls require a fresh, recorded preflight pass (R4).
+    if (live) {
+      const preflight = await ControlRecord.get(PREFLIGHT_CONTROL_NAME)
+      if (!isPreflightFresh(preflight, now, this.preflightTtlMs)) {
+        await this.alert('critical', 'preflight-required', 'live tick refused: no fresh passing preflight')
+        return { status: 'refused', reason: 'preflight-required' }
+      }
+    }
 
     const strategies = await this.earn.getStrategies()
     const allocations = await this.earn.getAllocations()

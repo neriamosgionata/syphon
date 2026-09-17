@@ -1,3 +1,4 @@
+import db from '@adonisjs/lucid/services/db'
 import { BaseModel, column } from '@adonisjs/lucid/orm'
 
 /**
@@ -49,5 +50,14 @@ export default class OperationAlert extends BaseModel {
     const query = OperationAlert.query().whereNull('acknowledged_at').orderBy('created_at', 'asc')
     if (source) query.where('source', source)
     return query
+  }
+
+  /** CLI-only acknowledgment path; clears alerts from the unacknowledged set. */
+  public static async acknowledge(opts: { id?: number; source?: string }, now = Date.now()): Promise<number> {
+    const query = db.from('operation_alerts').whereNull('acknowledged_at')
+    if (opts.id !== undefined) query.where('id', opts.id)
+    if (opts.source) query.where('source', opts.source)
+    const updated = await query.update({ acknowledged_at: now })
+    return Number(updated) || 0
   }
 }

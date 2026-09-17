@@ -73,6 +73,13 @@ function round(value: number, decimals = 12): number {
   return Math.round(value * factor) / factor
 }
 
+/** Kraken balance codes: XXBT/XETH/ZUSD legacy prefixes; XBT means BTC. */
+export function normalizeKrakenAsset(code: string): string {
+  let out = code
+  if (out.length === 4 && (out.startsWith('X') || out.startsWith('Z'))) out = out.slice(1)
+  return out === 'XBT' ? 'BTC' : out
+}
+
 function skip(input: PolicyInput, reason: YieldSkipReason, detail?: string): PolicyDecision {
   return {
     action: null,

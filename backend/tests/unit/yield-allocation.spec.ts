@@ -7,6 +7,7 @@ import OperationAlert from '../../app/models/OperationAlert.js'
 import ControlRecord from '../../app/models/ControlRecord.js'
 import YieldAllocation from '../../app/models/YieldAllocation.js'
 import YieldReward from '../../app/models/YieldReward.js'
+import { recordPreflightPass } from '../../app/services/YieldPreflight.js'
 
 // Yield tick: observe-first, intent-first, one-in-flight-per-strategy,
 // fail-closed ceilings, durable lock, persisted skip reasons, and adoption
@@ -20,8 +21,14 @@ const BASE_CFG = {
   bufferPct: 25,
   minAllocationUsd: 10,
   apyFloorPct: 0.5,
+  apyCeilingPct: 5,
   maxPerAssetUsd: 10_000,
   maxTotalUsd: 20_000,
+}
+
+/** Live ticks are refused without a fresh recorded preflight pass. */
+async function passPreflight() {
+  await recordPreflightPass({ passed: true, checks: [], failed: [] }, BASE_NOW)
 }
 
 function strategy(overrides: Record<string, any> = {}) {
@@ -180,6 +187,7 @@ test.group('KrakenYieldService', (group) => {
   test('a pending operation blocks a second allocation and is never resubmitted', async ({ assert }) => {
     const { earn, state } = fakeEarn({ statuses: ['pending', 'pending'] })
     const service = makeService(earn, { live: true })
+    await passPreflight()
 
     const first = await service.tick()
     assert.equal(state.allocateCalls.length, 1)
@@ -198,6 +206,7 @@ test.group('KrakenYieldService', (group) => {
   test('a venue failure alerts and is not retried within the tick', async ({ assert }) => {
     const { earn, state } = fakeEarn({ statuses: ['error'] })
     const service = makeService(earn, { live: true })
+    await passPreflight()
 
     const result = await service.tick()
     assert.equal(state.allocateCalls.length, 1)
@@ -214,6 +223,7 @@ test.group('KrakenYieldService', (group) => {
       allocateError: new KrakenEarnError('transport', 'fetch failed'),
     })
     const service = makeService(earn, { live: true })
+    await passPreflight()
 
     await service.tick()
     assert.equal(state.allocateCalls.length, 1)
@@ -242,6 +252,7 @@ test.group('KrakenYieldService', (group) => {
     })
 
     const service = makeService(earn, { live: true })
+    await passPreflight()
     const result = await service.tick()
 
     assert.lengthOf(state.allocateCalls, 0, 'crash residue must not be resubmitted')
@@ -267,6 +278,7 @@ test.group('KrakenYieldService', (group) => {
   test('per-asset and total caps drop planned allocations', async ({ assert }) => {
     const { earn, state } = fakeEarn()
     const service = makeService(earn, { live: true, cfg: { maxPerAssetUsd: 50 } })
+    await passPreflight()
 
     const result = await service.tick()
 
@@ -284,6 +296,7 @@ test.group('KrakenYieldService', (group) => {
     assert.equal(state.getStrategiesCalls, 0)
 
     await ControlRecord.release('yield:tick', 'other-owner')
+    await passPreflight()
     await makeService(earn, { live: true }).tick()
 
     assert.isFalse(await ControlRecord.isStale('yield:tick', BASE_NOW + 1000, 3600_000))
@@ -293,6 +306,7 @@ test.group('KrakenYieldService', (group) => {
   test('intents are append-only and every venue mutation has one', async ({ assert }) => {
     const { earn, state } = fakeEarn({ statuses: ['success'] })
     const service = makeService(earn, { live: true })
+    await passPreflight()
 
     await service.tick()
 
@@ -322,6 +336,7 @@ test.group('KrakenYieldService', (group) => {
       balances: { XETH: '1', SOL: '5' },
     })
     const service = makeService(earn, { live: true })
+    await passPreflight()
 
     const result = await service.tick()
 
