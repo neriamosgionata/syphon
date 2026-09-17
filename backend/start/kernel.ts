@@ -25,3 +25,11 @@ server.use([
 router.use([
   () => import('@adonisjs/core/bodyparser_middleware'),
 ])
+
+/**
+ * Named middleware: applied per-route. `loopbackOnly` gates the income
+ * endpoints — they are read-only and must not be reachable remotely.
+ */
+export const middleware = router.named({
+  loopbackOnly: () => import('#middleware/loopback_only_middleware'),
+})

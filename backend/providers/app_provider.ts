@@ -1,3 +1,4 @@
+import env from '#start/env'
 import type { ApplicationService } from '@adonisjs/core/types'
 import { BaseModel, SnakeCaseNamingStrategy } from '@adonisjs/lucid/orm'
 import { SimplePaginator } from '@adonisjs/lucid/database'
@@ -13,7 +14,8 @@ import { SimplePaginator } from '@adonisjs/lucid/database'
 ;(SimplePaginator as any).namingStrategy = new SnakeCaseNamingStrategy()
 
 /**
- * Application provider. The `shutdown` hook tears down the BullMQ workers
+ * Application provider. `boot` fails closed when a mutating income line is
+ * enabled on a non-loopback bind; `shutdown` tears down the BullMQ workers
  * and queues so the process can exit cleanly.
  */
 export default class AppProvider {
@@ -21,7 +23,15 @@ export default class AppProvider {
 
   register() {}
 
-  async boot() {}
+  async boot() {
+    const { assertIncomeBindSafe } = await import('#services/income_bind_guard')
+    assertIncomeBindSafe(env.get('HOST', ''), {
+      yieldLive: env.get('YIELD_LIVE', false) === true,
+      // The trend evaluation is paper-only (no order path exists): it is
+      // never a mutating line under the current wiring.
+      trendLive: false,
+    })
+  }
 
   async ready() {}
 

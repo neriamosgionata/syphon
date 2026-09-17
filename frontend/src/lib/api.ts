@@ -167,6 +167,11 @@ export const api = {
     request<any>('/training/backfill', { method: 'POST', body: JSON.stringify(params || {}) }),
   trainingBackfillStatus: () => request<any>('/training/backfill/status'),
 
+  // Income lines (read-only, loopback-only)
+  yieldStatus: () => request<any>('/yield/status'),
+  yieldAlerts: () => request<any>('/yield/alerts'),
+  trendStatus: () => request<any>('/trend/status'),
+
   // Metrics
   metrics: () => request<any>('/metrics'),
 

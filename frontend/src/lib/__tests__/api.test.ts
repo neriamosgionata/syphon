@@ -336,3 +336,26 @@ describe('API client', () => {
     });
   });
 });
+
+describe('income lines', () => {
+  it('calls GET /api/yield/status', async () => {
+    mockFetch.mockResolvedValue(mockResponse({ allocations: [], lastTick: { stale: true } }));
+    const result = await api.yieldStatus();
+    expect(mockFetch).toHaveBeenCalledWith('/api/yield/status', expect.anything());
+    expect(result.allocations).toEqual([]);
+  });
+
+  it('calls GET /api/yield/alerts', async () => {
+    mockFetch.mockResolvedValue(mockResponse({ alerts: [{ code: 'tripwire' }] }));
+    const result = await api.yieldAlerts();
+    expect(mockFetch).toHaveBeenCalledWith('/api/yield/alerts', expect.anything());
+    expect(result.alerts[0].code).toBe('tripwire');
+  });
+
+  it('calls GET /api/trend/status', async () => {
+    mockFetch.mockResolvedValue(mockResponse({ trip: { state: 'ok' }, evaluations: [] }));
+    const result = await api.trendStatus();
+    expect(mockFetch).toHaveBeenCalledWith('/api/trend/status', expect.anything());
+    expect(result.trip.state).toBe('ok');
+  });
+});
