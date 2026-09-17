@@ -131,26 +131,45 @@ class KrakenService {
     return json.result
   }
 
-  private async privateRequest(path: string, params: Record<string, any> = {}): Promise<any> {
+  /**
+   * Public signed-request seam: signs a private API call with the supplied
+   * credentials (defaulting to the spot key). The Earn line passes its own
+   * dedicated credentials so the two lines never share signing state.
+   */
+  public async signedRequest(
+    path: string,
+    params: Record<string, any> = {},
+    credentials?: { key: string; secret: string }
+  ): Promise<any> {
+    const key = credentials?.key ?? this.apiKey
+    const secret = credentials?.secret ?? this.apiSecret
     const nonce = this.nextNonce()
     const body = { nonce, ...params }
-    const signature = getKrakenSignature(path, body, this.apiSecret)
+    const signature = getKrakenSignature(path, body, secret)
 
     const res = await fetch(`${KRAKEN_BASE}${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'API-Key': this.apiKey,
+        'API-Key': key,
         'API-Sign': signature,
       },
       body: querystring.stringify(body),
     })
+
+    if (!res.ok) {
+      throw new Error(`Kraken HTTP ${res.status}`)
+    }
 
     const json: any = await res.json()
     if (json.error && json.error.length > 0) {
       throw new Error(json.error.join('; '))
     }
     return json.result
+  }
+
+  private async privateRequest(path: string, params: Record<string, any> = {}): Promise<any> {
+    return this.signedRequest(path, params)
   }
 
   private async futuresRequest(method: string, path: string, params: Record<string, any> = {}): Promise<any> {
@@ -588,4 +607,5 @@ class KrakenService {
   }
 }
 
+export { KrakenService }
 export default new KrakenService()

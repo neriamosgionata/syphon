@@ -52,6 +52,10 @@ export default await Env.create(new URL('../', import.meta.url), {
   // Kraken
   KRAKEN_API_KEY: Env.schema.string.optional(),
   KRAKEN_API_SECRET: Env.schema.string.optional(),
+  // Dedicated Earn credentials (Earn Funds + Query Funds only) — never the
+  // spot trading key. The Earn client refuses to sign without them.
+  KRAKEN_EARN_KEY: Env.schema.string.optional(),
+  KRAKEN_EARN_SECRET: Env.schema.string.optional(),
   KRAKEN_FUTURES_KEY: Env.schema.string.optional(),
   KRAKEN_FUTURES_SECRET: Env.schema.string.optional(),
 
