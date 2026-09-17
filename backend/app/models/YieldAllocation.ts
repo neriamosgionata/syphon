@@ -19,7 +19,7 @@ export default class YieldAllocation extends BaseModel {
   @column()
   declare lockType: string
 
-  @column()
+  @column({ consume: (value: unknown) => Boolean(value) })
   declare canAllocate: boolean
 
   @column()
