@@ -34,6 +34,7 @@ export default class YieldDeallocate extends BaseCommand {
 
     if (!asset || !Number.isFinite(amount) || amount <= 0 || !reason) {
       logger.error('--asset, --amount (> 0), and --reason are required')
+      this.exitCode = 1
       return
     }
 
@@ -43,6 +44,7 @@ export default class YieldDeallocate extends BaseCommand {
       .first()
     if (!row) {
       logger.error(`No allocation row for ${asset}`)
+      this.exitCode = 1
       return
     }
 

@@ -26,10 +26,10 @@ export function cacheFile(source: 'kraken' | 'ibkr', symbol: string, intervalMin
 function rowToSample(row: any): BacktestSample {
   return {
     t: Number(row.ts),
-    p: Number(row.close),
-    h: Number(row.high),
-    l: Number(row.low),
-    v: Number(row.volume),
+    p: row.close,
+    h: row.high,
+    l: row.low,
+    v: row.volume,
   }
 }
 

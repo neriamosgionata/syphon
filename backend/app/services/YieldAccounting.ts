@@ -1,6 +1,7 @@
 import logger from '@adonisjs/core/services/logger'
 import YieldAllocation from '#models/YieldAllocation'
 import YieldReward from '#models/YieldReward'
+import { round } from '#services/YieldPolicy'
 
 // Yield accounting owns the payout record: Kraken's ledger is the source of
 // truth, local rows are a projection of it, and reconciliation compares
@@ -52,11 +53,6 @@ export interface ReallocationCandidate {
   asset: string
   amount: number
   rewards: number
-}
-
-function round(value: number, decimals = 12): number {
-  const factor = 10 ** decimals
-  return Math.round(value * factor) / factor
 }
 
 export function isRewardRow(row: { ledgerType: string; subtype?: string | null }): boolean {

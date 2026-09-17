@@ -30,6 +30,7 @@ export default class TrendCertify extends BaseCommand {
 
     if (!['bar_records', 'kraken', 'research'].includes(source)) {
       this.logger.error(`Invalid --source=${source} — choose bar_records|kraken|research`)
+      this.exitCode = 1
       return
     }
 

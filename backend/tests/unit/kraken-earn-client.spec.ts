@@ -367,3 +367,84 @@ test.group('KrakenEarnClient parsing', () => {
     }
   })
 })
+
+test.group('KrakenService signedRequest', () => {
+  test('signs with supplied credentials and throws on a non-ok HTTP response', async ({ assert }) => {
+    let captured: any = null
+    ;(globalThis as any).fetch = async (_url: string, init: any) => {
+      captured = init
+      return { ok: false, status: 503, json: async () => ({ error: [] }) }
+    }
+
+    try {
+      const service = new KrakenService()
+      const error = await captureError(() =>
+        service.signedRequest('/0/private/Balance', {}, { key: 'earn-key', secret: EARN_SECRET })
+      )
+
+      assert.match(String(error?.message), /Kraken HTTP 503/)
+      assert.equal(captured.headers['API-Key'], 'earn-key')
+      assert.isNotEmpty(captured.headers['API-Sign'])
+    } finally {
+      ;(globalThis as any).fetch = originalFetch
+    }
+  })
+
+  test('vendor error arrays still throw after the refactor', async ({ assert }) => {
+    ;(globalThis as any).fetch = async () => jsonResponse({ result: null, error: ['EAPI:Invalid key'] })
+
+    try {
+      const service = new KrakenService()
+      const error = await captureError(() =>
+        service.signedRequest('/0/private/Balance', {}, { key: 'earn-key', secret: EARN_SECRET })
+      )
+      assert.match(String(error?.message), /EAPI:Invalid key/)
+    } finally {
+      ;(globalThis as any).fetch = originalFetch
+    }
+  })
+})
+
+test.group('KrakenEarnClient operation status', () => {
+  test('parses status payloads with field aliases', async ({ assert }) => {
+    ;(globalThis as any).fetch = async () =>
+      jsonResponse({
+        result: { refid: 'OP-9', status: 'settled', strategy_id: 'ES1', amount: '2.5' },
+        error: [],
+      })
+
+    try {
+      const client = new KrakenEarnClient({
+        key: EARN_KEY,
+        secret: EARN_SECRET,
+        service: new KrakenService(),
+        logger: silentLogger().logger,
+      })
+      const status = await client.getAllocateStatus('OP-9')
+      assert.equal(status.refid, 'OP-9')
+      assert.equal(status.status, 'settled')
+      assert.equal(status.strategyId, 'ES1')
+      assert.closeTo(status.amount!, 2.5, 1e-12)
+    } finally {
+      ;(globalThis as any).fetch = originalFetch
+    }
+  })
+
+  test('unknown status values fall back to unknown', async ({ assert }) => {
+    ;(globalThis as any).fetch = async () => jsonResponse({ result: {}, error: [] })
+
+    try {
+      const client = new KrakenEarnClient({
+        key: EARN_KEY,
+        secret: EARN_SECRET,
+        service: new KrakenService(),
+        logger: silentLogger().logger,
+      })
+      const status = await client.getDeallocateStatus('OP-10')
+      assert.equal(status.status, 'unknown')
+      assert.isNull(status.amount)
+    } finally {
+      ;(globalThis as any).fetch = originalFetch
+    }
+  })
+})

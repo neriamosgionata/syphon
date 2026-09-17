@@ -13,6 +13,7 @@ export default class YieldTick extends BaseCommand {
       `Yield tick: ${result.status} (${result.live ? 'live' : 'observe'})` +
         (result.reason ? ` — ${result.reason}` : '')
     )
+    if (result.status === 'failed' || result.status === 'refused') this.exitCode = 1
 
     for (const skip of result.skips ?? []) {
       this.logger.info(`  skip ${skip.asset} ${skip.strategyId}: ${skip.reason}${skip.detail ? ` (${skip.detail})` : ''}`)

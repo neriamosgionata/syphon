@@ -294,4 +294,42 @@ test.group('YieldPreflight', (group) => {
     assert.isTrue(lines.some((line) => line.includes('R2')))
     assert.notMatch(csv, /KRAKEN_(EARN_)?(KEY|SECRET)/)
   })
+
+  test('preflight fails on trigger multiplicity, an active signer, a leaking log, and venue failures', async ({ assert }) => {
+    await markTickHeartbeat()
+    const { earn } = fakeEarn()
+
+    const twoTriggers = await runPreflight(
+      preflightOptions(earn, { crontabText: '0 * * * * bun ace.js yield:tick\n30 * * * * bun ace.js yield:tick' })
+    )
+    assert.include(twoTriggers.failed, 'single-yield-trigger')
+
+    const signer = await runPreflight(preflightOptions(earn, { fastAlgoSessionActive: true }))
+    assert.include(signer.failed, 'single-signer')
+
+    const logFile = path.join(os.tmpdir(), `syphon-leak-${process.pid}.log`)
+    fs.writeFileSync(logFile, 'API-Sign abcdef\n')
+    try {
+      const leaked = await runPreflight(preflightOptions(earn, { logFile }))
+      assert.include(leaked.failed, 'no-key-material-in-logs')
+    } finally {
+      fs.rmSync(logFile, { force: true })
+    }
+
+    const denied = {
+      ...earn,
+      getAllocations: async () => {
+        throw new KrakenEarnError('venue', 'nope')
+      },
+      getBalance: async () => {
+        throw new KrakenEarnError('venue', 'nope')
+      },
+    }
+    const venue = await runPreflight(preflightOptions(denied))
+    assert.include(venue.failed, 'allocations-readable')
+    assert.include(venue.failed, 'funds-readable')
+
+    const unpriced = await runPreflight(preflightOptions(earn, { price: async () => null }))
+    assert.include(unpriced.failed, 'price-source-works')
+  })
 })

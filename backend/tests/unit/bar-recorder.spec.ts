@@ -187,4 +187,20 @@ test.group('BarRecorderService', (group) => {
       [inWindowTs, recentTs]
     )
   })
+
+  test('a concurrent pass is skipped and start/stop toggle the recorder', async ({ assert }) => {
+    const service = new BarRecorderService(providerReturning([]), () => Date.now(), ['BTC'])
+
+    const first = service.recordAll()
+    const second = await service.recordAll()
+    assert.deepEqual(second, { skipped: 'in-flight' })
+    await first
+
+    service.start()
+    assert.isTrue(service.running)
+    service.start()
+    assert.isTrue(service.running)
+    service.stop()
+    assert.isFalse(service.running)
+  })
 })

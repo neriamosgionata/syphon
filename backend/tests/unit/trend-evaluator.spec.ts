@@ -283,4 +283,39 @@ test.group('TrendEvalService', (group) => {
 
     assert.notMatch(sources, /placeOrder|cancelOrder|KrakenFastEngine|KrakenEarnClient|KrakenService|IBKRFastEngine/)
   })
+
+  test('stale provisional rows are pruned and concurrent passes are skipped', async ({ assert }) => {
+    await ensureFrozenTrendConfig()
+    await TrendEvaluation.create({
+      symbol: 'BTC',
+      intervalSeconds: 300,
+      windowStart: BASE_NOW - 90 * 86_400_000,
+      windowEnd: BASE_NOW - 40 * 86_400_000,
+      bars: 100,
+      equity: 10000,
+      netReturnPct: 0,
+      maxDrawdownPct: 0,
+      profitFactor: null,
+      greenMonths: null,
+      tradeCount: 0,
+      state: 'provisional',
+      provisional: true,
+      coverageOk: false,
+      configHash: null,
+      configSnapshot: null,
+      monthly: null,
+      quarterly: null,
+    } as any)
+
+    const service = makeService()
+    const first = service.tick()
+    const second = await service.tick()
+    assert.deepEqual(second, { status: 'skipped', reason: 'in-flight' })
+
+    const result = await first
+    assert.equal(result.status, 'ok')
+    const heartbeat = await ControlRecord.get('trend:eval')
+    assert.equal(heartbeat?.detail?.pruned, 1)
+    assert.lengthOf(await TrendEvaluation.query().where('state', 'provisional'), 0)
+  })
 })

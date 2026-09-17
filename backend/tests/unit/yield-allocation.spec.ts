@@ -2,6 +2,8 @@ import { test } from '@japa/runner'
 import { KrakenYieldService } from '../../app/services/KrakenYieldService.js'
 import { YieldAccounting } from '../../app/services/YieldAccounting.js'
 import { KrakenEarnError } from '../../app/services/KrakenEarnClient.js'
+import { planYieldAction } from '../../app/services/YieldPolicy.js'
+import { applyCaps, validateYieldConfig } from '../../app/services/YieldGuard.js'
 import OperationIntent from '../../app/models/OperationIntent.js'
 import OperationAlert from '../../app/models/OperationAlert.js'
 import ControlRecord from '../../app/models/ControlRecord.js'
@@ -78,6 +80,7 @@ function fakeEarn(overrides: Record<string, any> = {}) {
     getStrategiesCalls: 0,
     refid: 0,
     allocateError: null,
+    ledgerError: null,
     statuses: [],
     ledgerEntries: [],
     ...overrides,
@@ -90,7 +93,10 @@ function fakeEarn(overrides: Record<string, any> = {}) {
     },
     getAllocations: async () => state.allocations,
     getBalance: async () => state.balances,
-    getLedgers: async () => ({ entries: state.ledgerEntries, count: state.ledgerEntries.length }),
+    getLedgers: async () => {
+      if (state.ledgerError) throw state.ledgerError
+      return { entries: state.ledgerEntries, count: state.ledgerEntries.length }
+    },
     allocate: async (strategyId: string, amount: number) => {
       state.allocateCalls.push({ strategyId, amount })
       if (state.allocateError) throw state.allocateError
@@ -347,5 +353,110 @@ test.group('KrakenYieldService', (group) => {
     const intent = await OperationIntent.firstOrFail()
     assert.closeTo(intent.amountNative!, 0.75, 1e-12)
     assert.closeTo(intent.amountUsd!, 75, 1e-9)
+  })
+
+  test('policy skip branches and cap arithmetic are exhaustive', ({ assert }) => {
+    const cfg = { ...BASE_CFG }
+    const base = {
+      strategy: {
+        strategyId: 's1',
+        asset: 'ETH',
+        lockType: 'instant',
+        canAllocate: true,
+        allocatedNative: 0,
+        minAllocationUsd: 0,
+        userCapUsd: 1000,
+        apyLow: 0.03,
+      },
+      freeNative: 1,
+      totalNative: 1,
+      priceUsd: 100,
+      hasPendingIntent: false,
+    }
+
+    assert.equal(
+      planYieldAction({ ...base, strategy: { ...base.strategy, asset: 'DOGE' } }, cfg).skip?.reason,
+      'not-allowlisted'
+    )
+    assert.equal(
+      planYieldAction({ ...base, strategy: { ...base.strategy, canAllocate: false } }, cfg).skip?.reason,
+      'not-allocatable'
+    )
+    assert.equal(
+      planYieldAction({ ...base, strategy: { ...base.strategy, apyLow: 0.001 } }, cfg).skip?.reason,
+      'apy-below-floor'
+    )
+    assert.equal(planYieldAction({ ...base, priceUsd: null }, cfg).skip?.reason, 'no-price')
+    assert.equal(
+      planYieldAction({ ...base, strategy: { ...base.strategy, userCapUsd: 0 } }, cfg).skip?.reason,
+      'cap-reached'
+    )
+
+    const action = {
+      strategyId: 's1',
+      asset: 'ETH',
+      lockType: 'instant',
+      amountNative: 1,
+      amountUsd: 100,
+      priceUsd: 100,
+    }
+    const totalCapped = applyCaps([action], { ...cfg, maxTotalUsd: 50 }, {
+      totalAllocatedUsd: 0,
+      allocatedUsdByAsset: {},
+    })
+    assert.lengthOf(totalCapped.actions, 0)
+    assert.equal(totalCapped.skips[0].detail, 'total cap')
+
+    const assetCapped = applyCaps([action], { ...cfg, maxPerAssetUsd: 50 }, {
+      totalAllocatedUsd: 0,
+      allocatedUsdByAsset: {},
+    })
+    assert.equal(assetCapped.skips[0].detail, 'per-asset cap')
+
+    assert.throws(() => validateYieldConfig({ ...cfg, allowlist: [] }))
+    assert.throws(() => validateYieldConfig({ ...cfg, bufferPct: 1 }))
+    assert.throws(() => validateYieldConfig({ ...cfg, minAllocationUsd: -1 }))
+    assert.throws(() => validateYieldConfig({ ...cfg, apyFloorPct: 99 }))
+    assert.throws(() => validateYieldConfig({ ...cfg, apyCeilingPct: 0.1 }))
+    assert.throws(() => validateYieldConfig({ ...cfg, maxPerAssetUsd: 200_000 }))
+    assert.throws(() => validateYieldConfig({ ...cfg, maxTotalUsd: 1 }))
+  })
+
+  test('deallocate runs through the intent machinery to a terminal state', async ({ assert }) => {
+    const { earn } = fakeEarn()
+    await YieldAllocation.create({ ...allocation(), allocatedNative: 2 } as any)
+    const service = makeService(earn, { live: false })
+
+    const result = await service.deallocate('ES-ETH-1', 0.5)
+
+    assert.equal(result.status, 'success')
+    const intent = await OperationIntent.firstOrFail()
+    assert.equal(intent.type, 'deallocate')
+    assert.equal(intent.status, 'success')
+    assert.isNotNull(intent.terminalAt)
+  })
+
+  test('an expired lease is adoptable and a non-owner release is a no-op', async ({ assert }) => {
+    await ControlRecord.ensure('yield:test-lease')
+    assert.isTrue(await ControlRecord.tryAcquire('yield:test-lease', 'owner-a', 1000, BASE_NOW))
+    assert.isFalse(await ControlRecord.tryAcquire('yield:test-lease', 'owner-b', 1000, BASE_NOW + 500))
+    assert.isTrue(await ControlRecord.tryAcquire('yield:test-lease', 'owner-b', 1000, BASE_NOW + 2000))
+
+    await ControlRecord.release('yield:test-lease', 'owner-a')
+    const row = await ControlRecord.get('yield:test-lease')
+    assert.equal(row?.owner, 'owner-b')
+  })
+
+  test('a ledger failure is fail-open and a vanished strategy alerts', async ({ assert }) => {
+    const { earn } = fakeEarn({ ledgerError: new Error('ledger down') })
+    await YieldAllocation.create({ ...allocation(), strategyId: 'GHOST', asset: 'GHOST' } as any)
+
+    const result = await makeService(earn, { live: false }).tick()
+
+    assert.equal(result.status, 'ok')
+    assert.equal(result.rewardsIngested, 0)
+    const codes = (await OperationAlert.all()).map((alert) => alert.code)
+    assert.include(codes, 'ledger-failed')
+    assert.include(codes, 'strategy-missing')
   })
 })
