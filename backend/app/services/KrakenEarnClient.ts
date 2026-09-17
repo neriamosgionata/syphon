@@ -247,6 +247,17 @@ export class KrakenEarnClient {
       .filter((row): row is EarnAllocation => row !== null)
   }
 
+  /** Account balances (Query Funds). Raw venue codes — the caller normalizes. */
+  public async getBalance(): Promise<Record<string, string>> {
+    const result = await this.signed('/0/private/Balance')
+    if (!result || typeof result !== 'object') return {}
+    const out: Record<string, string> = {}
+    for (const [code, value] of Object.entries(result as Record<string, unknown>)) {
+      out[code] = String(value)
+    }
+    return out
+  }
+
   public async allocate(strategyId: string, amount: number): Promise<{ refid: string | null }> {
     const result = await this.signed('/0/private/Earn/Allocate', {
       strategy_id: strategyId,

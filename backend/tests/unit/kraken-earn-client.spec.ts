@@ -317,6 +317,23 @@ test.group('KrakenEarnClient parsing', () => {
     }
   })
 
+  test('parses balances into raw venue codes', async ({ assert }) => {
+    ;(globalThis as any).fetch = async () => jsonResponse({ result: { XXBT: '1.5', ZUSD: '250.00' }, error: [] })
+
+    try {
+      const client = new KrakenEarnClient({
+        key: EARN_KEY,
+        secret: EARN_SECRET,
+        service: new KrakenService(),
+        logger: silentLogger().logger,
+      })
+      const balances = await client.getBalance()
+      assert.deepEqual(balances, { XXBT: '1.5', ZUSD: '250.00' })
+    } finally {
+      ;(globalThis as any).fetch = originalFetch
+    }
+  })
+
   test('parses ledger rewards and converts venue seconds to epoch ms', async ({ assert }) => {
     ;(globalThis as any).fetch = async () =>
       jsonResponse({

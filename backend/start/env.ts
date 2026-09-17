@@ -56,6 +56,15 @@ export default await Env.create(new URL('../', import.meta.url), {
   // spot trading key. The Earn client refuses to sign without them.
   KRAKEN_EARN_KEY: Env.schema.string.optional(),
   KRAKEN_EARN_SECRET: Env.schema.string.optional(),
+
+  // Yield line (Kraken Earn). YIELD_LIVE unset = observe only.
+  YIELD_LIVE: Env.schema.boolean.optional(),
+  YIELD_ALLOWLIST: Env.schema.string.optional(),
+  YIELD_BUFFER_PCT: Env.schema.number.optional(),
+  YIELD_MIN_ALLOCATION_USD: Env.schema.number.optional(),
+  YIELD_APY_FLOOR_PCT: Env.schema.number.optional(),
+  YIELD_MAX_PER_ASSET_USD: Env.schema.number.optional(),
+  YIELD_MAX_TOTAL_USD: Env.schema.number.optional(),
   KRAKEN_FUTURES_KEY: Env.schema.string.optional(),
   KRAKEN_FUTURES_SECRET: Env.schema.string.optional(),
 
