@@ -459,4 +459,17 @@ test.group('KrakenYieldService', (group) => {
     assert.include(codes, 'ledger-failed')
     assert.include(codes, 'strategy-missing')
   })
+
+  test('unbonding horizon and APY drift alert during the tick', async ({ assert }) => {
+    const { earn } = fakeEarn({
+      strategies: [strategy({ apyLow: 0.001, unbondingSeconds: 60 })],
+      allocations: [allocation({ unbondingNative: 1, unbondingSeconds: 60, apyLow: 0.001 })],
+    })
+
+    await makeService(earn, { live: false }).tick()
+
+    const codes = (await OperationAlert.all()).map((alert) => alert.code)
+    assert.include(codes, 'unbonding-expiring')
+    assert.include(codes, 'apy-out-of-band')
+  })
 })

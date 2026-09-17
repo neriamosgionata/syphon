@@ -181,13 +181,39 @@ class KrakenYieldService {
       )
     }
 
-    // A strategy that disappears while funds are allocated must alert.
+    // A strategy that disappears while funds are allocated must alert; so
+    // must an unbonding horizon closing in and an APY outside the band.
     for (const row of await YieldAllocation.all()) {
       if (!strategies.some((strategy) => strategy.strategyId === row.strategyId)) {
         await this.alertOnce(
           'warning',
           'strategy-missing',
           `strategy ${row.strategyId} (${row.asset}) absent from the venue response`
+        )
+      }
+
+      if (row.unbondingNative > 0 && row.unbondingSeconds && row.lastRefreshedAt) {
+        const expiresAt = row.lastRefreshedAt + row.unbondingSeconds * 1000
+        const remaining = expiresAt - now
+        if (remaining <= 24 * 3600_000) {
+          await this.alertOnce(
+            'info',
+            'unbonding-expiring',
+            `${row.asset} unbonding completes within 24h — verify the restored balance`
+          )
+        }
+      }
+
+      const outsideBand =
+        row.canAllocate &&
+        row.lockType !== 'flex' &&
+        row.apyLow !== null &&
+        (row.apyLow * 100 < cfg.apyFloorPct || row.apyLow * 100 > cfg.apyCeilingPct)
+      if (outsideBand) {
+        await this.alertOnce(
+          'warning',
+          'apy-out-of-band',
+          `strategy ${row.strategyId} APY outside ${cfg.apyFloorPct}-${cfg.apyCeilingPct}% — new allocations for ${row.asset} are held`
         )
       }
     }
