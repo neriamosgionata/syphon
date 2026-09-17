@@ -44,3 +44,14 @@ export function resampleSamples(
 
   return [...buckets.values()].sort((a, b) => a.t - b.t)
 }
+
+/** Keep only samples inside the trailing `hours` window (hours <= 0 = all). */
+export function filterRecentSamples(
+  samples: BacktestSample[],
+  hours: number,
+  now: number = Date.now()
+): BacktestSample[] {
+  if (!hours || hours <= 0) return samples
+  const start = now - hours * 3600_000
+  return samples.filter((sample) => sample.t >= start)
+}

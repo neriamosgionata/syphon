@@ -12,7 +12,7 @@ import TrendConfig from '#models/TrendConfig'
 import TrendEvaluation from '#models/TrendEvaluation'
 import { BacktestEngine, type BacktestResult, type BacktestSample } from '#services/BacktestEngine'
 import type { FastStrategyConfig } from '#services/FastStrategy'
-import { resampleSamples } from '#app/utils/bar_resample'
+import { filterRecentSamples, resampleSamples } from '#app/utils/bar_resample'
 import { greenMonthCount, sliceEquityCurve } from '#services/trend_metrics'
 
 export const TREND_INTERVAL_SECONDS = 300
@@ -238,12 +238,16 @@ export function researchCacheFile(symbol: string): string {
  * Retired Binance 1m research caches, resampled to the frozen cadence.
  * Research-only provenance: never gates the live-paper evaluation (R13).
  */
-export function loadResearchSamples(symbol: string, targetSeconds = TREND_INTERVAL_SECONDS): BacktestSample[] {
+export function loadResearchSamples(
+  symbol: string,
+  targetSeconds = TREND_INTERVAL_SECONDS,
+  hours = 0
+): BacktestSample[] {
   const file = researchCacheFile(symbol)
   if (!fs.existsSync(file)) throw new Error(`research cache not found: ${file}`)
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'))
   const samples: BacktestSample[] = Array.isArray(raw) ? raw : (raw.samples ?? [])
-  return resampleSamples(samples, 60, targetSeconds)
+  return resampleSamples(filterRecentSamples(samples, hours), 60, targetSeconds)
 }
 
 export type TrendProvenance = 'bar_records' | 'kraken' | 'research'

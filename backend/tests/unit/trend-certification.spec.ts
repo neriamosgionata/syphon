@@ -1,7 +1,7 @@
 import { test } from '@japa/runner'
 import TrendConfig from '../../app/models/TrendConfig.js'
 import TrendEvaluation from '../../app/models/TrendEvaluation.js'
-import { resampleSamples } from '../../app/utils/bar_resample.js'
+import { filterRecentSamples, resampleSamples } from '../../app/utils/bar_resample.js'
 import {
   greenMonthCount,
   sliceEquityCurve,
@@ -67,6 +67,18 @@ test.group('bar resampling', () => {
   test('rejects invalid target cadences', ({ assert }) => {
     assert.throws(() => resampleSamples([], 300, 60))
     assert.throws(() => resampleSamples([], 60, 90))
+  })
+
+  test('windows samples to the trailing hours', ({ assert }) => {
+    const now = Date.UTC(2026, 0, 10)
+    const samples: BacktestSample[] = [
+      { t: now - 72 * 3600_000, p: 1 },
+      { t: now - 24 * 3600_000, p: 2 },
+      { t: now, p: 3 },
+    ]
+    assert.lengthOf(filterRecentSamples(samples, 0), 3)
+    assert.lengthOf(filterRecentSamples(samples, 48, now), 2)
+    assert.deepEqual(filterRecentSamples(samples, 48, now).map((s) => s.p), [2, 3])
   })
 })
 

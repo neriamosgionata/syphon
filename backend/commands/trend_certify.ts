@@ -36,8 +36,9 @@ export default class TrendCertify extends BaseCommand {
     let samples
     let sourceLabel: string
     if (source === 'research') {
-      samples = loadResearchSamples(symbol)
-      sourceLabel = 'Binance 1m research cache resampled to 5m (research-only)'
+      const researchHours = Number(this.parsed.flags.hours ?? 0)
+      samples = loadResearchSamples(symbol, undefined, researchHours)
+      sourceLabel = `Binance 1m research cache resampled to 5m (research-only${researchHours > 0 ? `, last ${researchHours}h` : ''})`
     } else {
       const hours = Number(this.parsed.flags.hours ?? (source === 'bar_records' ? 24 * 400 : 24 * 3))
       const loaded = await loadBacktestSamples({
