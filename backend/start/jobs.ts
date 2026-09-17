@@ -16,6 +16,7 @@ import FastAlgoService from '#services/FastAlgoService'
 import FundingCarryService from '#services/FundingCarryService'
 import TickRecorderService from '#services/TickRecorderService'
 import BarRecorderService from '#services/BarRecorderService'
+import TrendEvalService from '#services/TrendEvalService'
 
 async function boot() {
   try {
@@ -65,6 +66,11 @@ async function boot() {
       // candles per interval, so the slow-trend evaluation's 5m/1h/1d series
       // must be recorded forward into bar_records.
       BarRecorderService.start(recordSymbols)
+
+      // Slow trend paper evaluator: replays the recorded bars through the
+      // same BacktestEngine the backtests use and latches the product's own
+      // tripwires. Paper only — no order path exists.
+      TrendEvalService.start()
 
       // Funding-carry paper loop (delta-neutral perp premium harvest).
       // Dry-run by default — logs intents, records paper P&L. Real execution

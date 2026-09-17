@@ -179,6 +179,47 @@ export function engineConfigFromTrendConfig(row: TrendConfig): TrendEngineConfig
   }
 }
 
+/** Hard exposure/position ceilings enforced in code before any run (R17). */
+export const TREND_HARD_CEILINGS = {
+  maxPositions: 5,
+  maxExposurePct: 1,
+  maxSinglePositionPct: 1,
+  maxPortfolioUsd: 1_000_000,
+  maxLoopIntervalSeconds: 3600,
+} as const
+
+export class TrendConfigError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'TrendConfigError'
+  }
+}
+
+export function validateTrendEngineConfig(engine: TrendEngineConfig): void {
+  if (!Number.isFinite(engine.maxPositions) || engine.maxPositions < 1 || engine.maxPositions > TREND_HARD_CEILINGS.maxPositions) {
+    throw new TrendConfigError(`maxPositions out of range (1-${TREND_HARD_CEILINGS.maxPositions})`)
+  }
+  if (!Number.isFinite(engine.maxExposurePct) || engine.maxExposurePct <= 0 || engine.maxExposurePct > TREND_HARD_CEILINGS.maxExposurePct) {
+    throw new TrendConfigError(`maxExposurePct out of range (0-${TREND_HARD_CEILINGS.maxExposurePct})`)
+  }
+  if (
+    !Number.isFinite(engine.maxSinglePositionPct) ||
+    engine.maxSinglePositionPct <= 0 ||
+    engine.maxSinglePositionPct > TREND_HARD_CEILINGS.maxSinglePositionPct
+  ) {
+    throw new TrendConfigError(`maxSinglePositionPct out of range (0-${TREND_HARD_CEILINGS.maxSinglePositionPct})`)
+  }
+  if (!Number.isFinite(engine.portfolioUsd) || engine.portfolioUsd <= 0 || engine.portfolioUsd > TREND_HARD_CEILINGS.maxPortfolioUsd) {
+    throw new TrendConfigError(`portfolioUsd out of range (0-${TREND_HARD_CEILINGS.maxPortfolioUsd})`)
+  }
+  if (!Number.isFinite(engine.loopIntervalSeconds) || engine.loopIntervalSeconds < 1 || engine.loopIntervalSeconds > TREND_HARD_CEILINGS.maxLoopIntervalSeconds) {
+    throw new TrendConfigError(`loopIntervalSeconds out of range (1-${TREND_HARD_CEILINGS.maxLoopIntervalSeconds})`)
+  }
+  if (!Number.isFinite(engine.feePct) || engine.feePct < 0 || !Number.isFinite(engine.slippageBps) || engine.slippageBps < 0) {
+    throw new TrendConfigError('feePct/slippageBps must be non-negative')
+  }
+}
+
 /** Create the single frozen row when absent; never overwrite operator edits. */
 export async function ensureFrozenTrendConfig(): Promise<TrendConfig> {
   const existing = await TrendConfig.query().where('name', 'frozen').first()
