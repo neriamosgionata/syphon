@@ -35,6 +35,8 @@ export default class AlgoController {
       'fastVolTargetMaxMult',
       'fastNewsGateEnabled', 'fastNewsMinSentiment', 'fastNewsMinArticles',
       'fastNewsWindowHours',
+      'fastJevGateEnabled', 'fastJevMinConfidence', 'fastJevMinEdgePct',
+      'fastJevTimeoutMs', 'fastJevShadowOnly',
     ]
 
     const numericRanges: Record<string, [number, number]> = {
@@ -87,6 +89,9 @@ export default class AlgoController {
       fastNewsMinSentiment: [-1, 1],
       fastNewsMinArticles: [1, 50],
       fastNewsWindowHours: [1, 168],
+      fastJevMinConfidence: [0, 1],
+      fastJevMinEdgePct: [0, 1],
+      fastJevTimeoutMs: [500, 10000],
     }
 
     const stringEnums: Record<string, string[]> = {
@@ -112,6 +117,10 @@ export default class AlgoController {
       } else if (field === 'fastMakerExecution') {
         value = value === true || value === 'true' || value === 1 || value === '1'
       } else if (field === 'fastNewsGateEnabled') {
+        value = value === true || value === 'true' || value === 1 || value === '1'
+      } else if (field === 'fastJevGateEnabled') {
+        value = value === true || value === 'true' || value === 1 || value === '1'
+      } else if (field === 'fastJevShadowOnly') {
         value = value === true || value === 'true' || value === 1 || value === '1'
       } else if (numericRanges[field]) {
         const num = Number(value)

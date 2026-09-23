@@ -212,6 +212,22 @@ export default class AlgoConfig extends BaseModel {
   @column()
   declare fastNewsWindowHours: number
 
+  // Jev advisory overlay (migration 28)
+  @column()
+  declare fastJevGateEnabled: boolean
+
+  @column()
+  declare fastJevMinConfidence: number
+
+  @column()
+  declare fastJevMinEdgePct: number
+
+  @column()
+  declare fastJevTimeoutMs: number
+
+  @column()
+  declare fastJevShadowOnly: boolean
+
   // Safety rails + exit quality (migration 17)
   @column()
   declare fastCorrelatedExposurePct: number
@@ -327,6 +343,11 @@ export default class AlgoConfig extends BaseModel {
       fastNewsMinSentiment: 0,
       fastNewsMinArticles: 3,
       fastNewsWindowHours: 24,
+      fastJevGateEnabled: false,
+      fastJevMinConfidence: 0.5,
+      fastJevMinEdgePct: 0.15,
+      fastJevTimeoutMs: 2000,
+      fastJevShadowOnly: true,
       fastCorrelatedExposurePct: 0,
       fastRiskPerTradePct: 0,
       fastMaxLossStreak: 0,
