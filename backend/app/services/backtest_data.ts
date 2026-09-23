@@ -13,7 +13,7 @@ import * as path from 'node:path'
 import db from '@adonisjs/lucid/services/db'
 import KrakenDataService from '#services/KrakenDataService'
 import IBKRDataService from '#services/IBKRDataService'
-import type { BacktestSample } from '#services/BacktestEngine'
+import type { BacktestSample, JevReplayEvent } from '#services/BacktestEngine'
 
 export type BacktestSource = 'auto' | 'kraken' | 'ibkr' | 'recorded' | 'bar_records'
 
@@ -100,8 +100,7 @@ export async function loadBacktestSamples(opts: {
   source: BacktestSource
   broker: string
   fresh?: boolean
-}): Promise<{ samples: BacktestSample[]; label: string }> {
-  const intervalMin = opts.intervalSeconds / 60
+}): Promise<{ samples: BacktestSample[]; label: string }> {  const intervalMin = opts.intervalSeconds / 60
   const source: BacktestSource =
     opts.source === 'auto'
       ? opts.broker === 'ibkr' ? 'ibkr' : 'kraken'
@@ -120,4 +119,39 @@ export async function loadBacktestSamples(opts: {
     return { samples: await fromIBKR(opts.symbol, intervalMin, opts.hours, !!opts.fresh), label: 'IBKR cache' }
   }
   return { samples: await fromKrakenOHLC(opts.symbol, intervalMin, opts.hours, !!opts.fresh), label: 'Kraken OHLC cache' }
+}
+
+/**
+ * Recorded Jev scores for a symbol over [startMs, endMs], ascending.
+ * Fixture rows never certify — they are excluded so offline development
+ * data cannot leak into a promotion window.
+ */
+export async function loadJevEvents(symbol: string, startMs: number, endMs: number): Promise<JevReplayEvent[]> {
+  const rows = await db.from('ml_scores')
+    .where('symbol', symbol)
+    .where('decided_at', '>=', startMs)
+    .where('decided_at', '<=', endMs)
+    .where('fixture', false)
+    .orderBy('decided_at', 'asc')
+  return rows.map((row: any) => ({
+    t: Number(row.decided_at),
+    pUp: row.p_up === null || row.p_up === undefined ? null : Number(row.p_up),
+    pDown: row.p_down === null || row.p_down === undefined ? null : Number(row.p_down),
+    confidence: row.confidence === null || row.confidence === undefined ? null : Number(row.confidence),
+    model: String(row.model),
+    questionHash: String(row.question_hash ?? ''),
+    promptVersion: String(row.prompt_version ?? 'v1'),
+    stale: !!row.stale,
+    enforced: true,
+  }))
+}
+
+/**
+ * Retention enforcement for the append-only score store (security
+ * remediation): delete rows older than the cutoff, returning the count.
+ * Scheduling lives with the rollout/ops units; the certifier refuses
+ * windows that outlive retention instead of silently running scoreless.
+ */
+export async function pruneMlScores(cutoffMs: number): Promise<number> {
+  return db.from('ml_scores').where('decided_at', '<', cutoffMs).del()
 }

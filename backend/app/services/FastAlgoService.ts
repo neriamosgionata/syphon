@@ -1040,6 +1040,7 @@ export class FastAlgoService {
       const tickerId = await this.tickerIdFor(symbol)
       const headlines = await this.getJevHeadlines(tickerId)
       const timeoutMs = cfg.fastJevTimeoutMs && cfg.fastJevTimeoutMs > 0 ? cfg.fastJevTimeoutMs : 2000
+      const started = Date.now()
       const ctx = await this.withTimeout(
         this.jevService.getDecision({
           symbol,
@@ -1056,6 +1057,12 @@ export class FastAlgoService {
         timeoutMs
       )
       if (!ctx) return null
+      // Record every enforced live score for honest replay (U4). Fixture
+      // contexts never certify — they are skipped. Best effort: a failed
+      // insert must never break the tick.
+      if (!ctx.fixture) {
+        void this.recordJevScore(symbol, ctx, now, Date.now() - started).catch(() => {})
+      }
       return {
         pUp: ctx.pUp ?? null,
         pDown: ctx.pDown ?? null,
@@ -1065,6 +1072,40 @@ export class FastAlgoService {
     } catch {
       return null
     }
+  }
+
+  /**
+   * Append one score row with its full attribution tuple. Fire-and-forget
+   * from the tick path — callers must not await it past the tick deadline.
+   */
+  public async recordJevScore(
+    symbol: string,
+    ctx: { pUp: number | null; pDown: number | null; confidence: number | null; model: string; usage?: { inputTokens: number; outputTokens: number }; stale?: boolean },
+    now: number,
+    latencyMs: number
+  ): Promise<void> {
+    let questionHash = 'unknown'
+    try {
+      if (this.jevService && typeof this.jevService.getQuestionHash === 'function') {
+        questionHash = this.jevService.getQuestionHash()
+      }
+    } catch {
+      questionHash = 'unknown'
+    }
+    await db.table('ml_scores').insert({
+      symbol,
+      decided_at: now,
+      model: ctx.model,
+      question_hash: questionHash,
+      prompt_version: 'v1',
+      window_seconds: 0,
+      p_up: ctx.pUp,
+      p_down: ctx.pDown,
+      confidence: ctx.confidence,
+      latency_ms: Math.max(0, Math.round(latencyMs)),
+      stale: !!ctx.stale,
+      fixture: false,
+    })
   }
 
   /** Recent headlines for Jev state — best effort, empty on any failure. */

@@ -117,6 +117,18 @@ export interface JevSdkLike {
   systemOne(request: any, options?: any): Promise<any>
 }
 
+/** Stable hash of the question definitions — binds recorded scores to the
+ *  exact questions that produced them (promotion joins on model+hash). */
+export function jevQuestionHash(): string {
+  const serialized = JSON.stringify(buildQuestions())
+  let hash = 0x811c9dc5
+  for (let i = 0; i < serialized.length; i++) {
+    hash ^= serialized.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, '0')
+}
+
 export interface JevAlert {
   kind: 'auth' | 'shape_drift' | 'budget'
   message: string
@@ -337,13 +349,17 @@ export class JevDecisionService {
   }
 
   /** Credential from explicit option or environment — rotates without code change (R13). */
-  public resolveApiKey(): string | null {
-    if (this.opts.apiKey !== undefined) return this.opts.apiKey || null
+  public resolveApiKey(): string | null {    if (this.opts.apiKey !== undefined) return this.opts.apiKey || null
     try {
       return env.get('TYPESAFE_API_KEY', '') || null
     } catch {
       return null
     }
+  }
+
+  /** Stable hash of this service's question definitions (promotion joins on it). */
+  public getQuestionHash(): string {
+    return jevQuestionHash()
   }
 
   private modelId(): string {
