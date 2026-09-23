@@ -1,5 +1,6 @@
 import { BaseCommand } from '@adonisjs/core/ace'
 import { recordJevPreflightPass, runJevPreflight } from '#services/JevPreflight'
+import JevDecisionService from '#services/JevDecisionService'
 
 // Preflight refuses live enablement on any failure and records the result.
 // A live (enforcing) Jev stage requires a fresh passing row: run this
@@ -15,7 +16,7 @@ export default class JevPreflightCommand extends BaseCommand {
   ]
 
   async run() {
-    const result = await runJevPreflight({})
+    const result = await runJevPreflight({ jevService: JevDecisionService })
 
     if (this.parsed.flags.json) {
       this.logger.info(JSON.stringify(result, null, 2))

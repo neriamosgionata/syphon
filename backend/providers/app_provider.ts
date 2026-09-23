@@ -29,15 +29,21 @@ export default class AppProvider {
     // false — a boot without a readable DB is broken elsewhere anyway).
     let jevLive = false
     try {
-      const [{ default: JevRollout }, { default: AlgoConfig }] = await Promise.all([
+      const [{ default: JevRollout }, { default: AlgoConfig }, { isJevPreflightFresh }] = await Promise.all([
         import('#services/JevRollout'),
         import('#models/AlgoConfig'),
+        import('#services/JevPreflight'),
       ])
-      const [stage, cfg] = await Promise.all([
+      const [stage, latched, cfg] = await Promise.all([
         JevRollout.getStage().catch(() => 'shadow' as const),
+        JevRollout.isLatched().catch(() => true),
         AlgoConfig.getConfig().catch(() => null),
       ])
-      jevLive = stage === 'live' && !!cfg?.fastJevGateEnabled
+      const gateEnabled = !!cfg?.fastJevGateEnabled
+      const shadowOnly = cfg?.fastJevShadowOnly ?? true
+      const freshPreflight =
+        stage === 'live' ? await isJevPreflightFresh(Date.now()).catch(() => false) : false
+      jevLive = stage !== 'shadow' && !latched && gateEnabled && !shadowOnly && (stage === 'live' ? freshPreflight : true)
     } catch {
       jevLive = false
     }

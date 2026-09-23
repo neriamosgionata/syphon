@@ -49,6 +49,10 @@ export default class JevMonitorCommand extends BaseCommand {
         report.precision === null ? 'n/a' : report.precision.toFixed(2)
       }   spend $${report.spend.spendUsd.toFixed(4)} (${report.spend.calls} calls)   pruned ${report.pruned}`
     )
+    if (report.dataInsufficient) {
+      this.logger.info('insufficient data — no verdict')
+      return
+    }
     if (report.breached) {
       this.logger.error('BREACH — overlay latched off, deterministic-only until resume')
       this.exitCode = 1

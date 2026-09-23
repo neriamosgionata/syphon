@@ -880,6 +880,18 @@ export class FastStrategy {
   }
 
   /**
+   * Jev exit advisory for held positions (exit-first path): same note as
+   * evaluateExit attaches, without re-running the exit chain. Pure.
+   */
+  public jevExitAdvisory(
+    jev: JevContext | null | undefined,
+    cfg: FastStrategyConfig,
+    side: string
+  ): string | null {
+    return this.jevExitNote(jev, cfg, side === 'BUY')
+  }
+
+  /**
    * Jev conviction sizing (U2): shrink-only map from confidence to a
    * [0.5, 1.0] multiplier — full size at confidence 1, half size at the
    * floor, 1 (no scaling) when the overlay is off or the read is unusable.

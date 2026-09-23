@@ -142,7 +142,7 @@ export async function loadJevEvents(symbol: string, startMs: number, endMs: numb
     questionHash: String(row.question_hash ?? ''),
     promptVersion: String(row.prompt_version ?? 'v1'),
     stale: !!row.stale,
-    enforced: true,
+    enforced: !!row.enforced,
   }))
 }
 

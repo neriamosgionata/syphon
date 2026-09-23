@@ -21,6 +21,13 @@ import { FastStrategy, FastStrategyConfig, NewsContext, JevContext, volatilityMu
 import { newsWindowScore } from '#services/NewsScore'
 
 /**
+ * Replay visibility bound (ms) — mirrors the live Jev stale-reuse window.
+ * A recorded score older than this at decision time is invisible to the
+ * replay, exactly as the live loop nulls past the reuse window.
+ */
+export const JEV_REPLAY_STALE_MS = 90_000
+
+/**
  * Recorded Jev score replayed at the decision cadence. Only the latest
  * ENFORCED event at or behind the decision time is visible (point-in-time
  * discipline); shadow-recorded rows (enforced: false) never certify.
@@ -174,7 +181,7 @@ export interface BacktestResult {
    * scope — the gate ran off and the report is deterministic-only. Null
    * when scores replayed or the gate was off.
    */
-  jevNotice: string | null
+  jevNotice?: string | null
 }
 
 interface OpenPosition {
@@ -235,9 +242,10 @@ export class BacktestEngine {
     // rejected — blending them would certify an edge no single model earned.
     let jevIndex = 0
     let jevNotice: string | null = null
+    let jevApplied = false
     const jev = cfg.jevEvents ? [...cfg.jevEvents].sort((a, b) => a.t - b.t) : null
     if (jev && jev.length > 0) {
-      const versions = new Set(jev.map((e) => `${e.model}|${e.questionHash ?? ''}`))
+      const versions = new Set(jev.map((e) => `${e.model}|${e.questionHash ?? ''}|${e.promptVersion ?? ''}`))
       if (versions.size > 1) {
         throw new Error('BacktestEngine: refusing to blend Jev scores across model/question versions')
       }
@@ -316,8 +324,9 @@ export class BacktestEngine {
       }
 
       // Jev context at THIS decision time: the latest enforced event at or
-      // behind t. Staleness marks age past the live reuse window; it does
-      // not widen visibility — only recorded history decides.
+      // behind t, ignoring events older than the live reuse window.
+      // Staleness marks age past the window; it does not widen visibility —
+      // only recorded history decides.
       let jevContext: JevContext | null = null
       if (cfg.strategy.jevGateEnabled) {
         if (jev && jev.length > 0) {
@@ -325,12 +334,14 @@ export class BacktestEngine {
           for (let j = jevIndex - 1; j >= 0; j--) {
             const event = jev[j]
             if (event.enforced === false) continue
+            if (t - event.t > JEV_REPLAY_STALE_MS) continue
             jevContext = {
               pUp: event.pUp,
               pDown: event.pDown,
               confidence: event.confidence,
               stale: t - event.t > 90_000,
             }
+            jevApplied = true
             break
           }
         } else if (!jevNotice) {
@@ -565,6 +576,12 @@ export class BacktestEngine {
       }
 
       equityCurve.push({ t, value: equityAt(price) })
+    }
+
+    // A non-empty list that never certified anything (all shadow rows, or
+    // all too stale to see) ran the gate off just like a scoreless window.
+    if (cfg.strategy.jevGateEnabled && jev && jev.length > 0 && !jevApplied && !jevNotice) {
+      jevNotice = 'jev gate enabled but no recorded Jev scores in scope — gate ran off'
     }
 
     // Force-close anything still open at the end.

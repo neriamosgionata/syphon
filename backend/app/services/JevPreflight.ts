@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import env from '#start/env'
 import OperationAlert from '#models/OperationAlert'
 import ControlRecord from '#models/ControlRecord'
-import { JEV_MODEL_ID } from '#services/JevDecisionService'
+import { JEV_MODEL_ID, JEV_PREFLIGHT_TTL_MS } from '#services/JevDecisionService'
 import { isPreflightFresh } from '#services/YieldPreflight'
 
 // ─── Jev preflight (U6) ─────────────────────────────────────────
@@ -13,7 +13,6 @@ import { isPreflightFresh } from '#services/YieldPreflight'
 // recorded pass with TTL) without touching order paths.
 
 export const JEV_PREFLIGHT_CONTROL_NAME = 'jev:preflight'
-export const JEV_PREFLIGHT_TTL_MS = 60 * 60 * 1000
 
 export interface JevPreflightCheck {
   layer: 'local' | 'venue' | 'environment'
@@ -55,6 +54,16 @@ function secretFileReadableByOthers(path: string | null | undefined): boolean | 
   }
 }
 
+function defaultEnvFilePath(): string | null {
+  const candidate = `${process.cwd()}/backend/.env`
+  try {
+    fs.statSync(candidate)
+    return candidate
+  } catch {
+    return null
+  }
+}
+
 export async function runJevPreflight(opts: JevPreflightOptions = {}): Promise<JevPreflightResult> {
   const checks: JevPreflightCheck[] = []
   const push = (layer: JevPreflightCheck['layer'], name: string, ok: boolean, detail?: string) =>
@@ -64,12 +73,13 @@ export async function runJevPreflight(opts: JevPreflightOptions = {}): Promise<J
   const key = getApiKey()
   push('environment', 'key-present', !!key, key ? undefined : 'TYPESAFE_API_KEY unset')
 
-  const perms = secretFileReadableByOthers(opts.envFilePath ?? null)
+  const envPath = opts.envFilePath === undefined ? defaultEnvFilePath() : opts.envFilePath
+  const perms = secretFileReadableByOthers(envPath)
   push(
     'environment',
     'secret-file-permissions',
     perms === null || !perms,
-    perms === null ? 'no env file path supplied — skipped' : perms ? 'env file readable beyond owner' : undefined
+    perms === null ? 'no env file present — skipped' : perms ? 'env file readable beyond owner' : undefined
   )
 
   const unacked = await OperationAlert.unacknowledged('jev')

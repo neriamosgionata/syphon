@@ -13,7 +13,7 @@ import { FastStrategy, FastStrategyConfig, fastStrategyFromConfig, volatilityMul
 import MeilisearchService from '#services/MeilisearchService'
 import NotificationService from '#services/NotificationService'
 import NewsSentimentService from '#services/NewsSentimentService'
-import JevDecisionService from '#services/JevDecisionService'
+import JevDecisionService, { JEV_PROMPT_VERSION } from '#services/JevDecisionService'
 import JevRollout from '#services/JevRollout'
 import IBKRPriceFeed from '#services/IBKRPriceFeed'
 import IBKRService from '#services/IBKRService'
@@ -566,17 +566,12 @@ export class FastAlgoService {
       return
     }
 
-    // Jev exit annotation (advisory only — a slow or failed scorer resolves
-    // to null and the deterministic priority chain below runs unchanged).
-    // Annotation never influences, so any non-off mode annotates; off (or a
-    // latched tripwire) skips the fetch entirely.
+    // Deterministic exit first: SL/TP → trailing → max-hold → reversal must
+    // never wait on a DB lookup, Meili fetch, or scorer call. The Jev read
+    // is annotation-only, so it is fetched lazily below and only when still
+    // holding — exits never annotate.
     const now = Date.now()
-    const jevMode = await this.jevMode(cfg)
-    let jevContext: JevContext | null = null
-    if (jevMode !== 'off') {
-      jevContext = await this.getJevContext(pos.symbol, cfg, now)
-    }
-
+    const strategyCfg = this.toStrategyConfig(cfg)
     const signal = this.strategy.evaluateExit(
       this.feed,
       pos.symbol,
@@ -590,8 +585,8 @@ export class FastAlgoService {
         peakPrice: pos.peakPrice,
         openedAt: pos.openedAt.toMillis(),
       },
-      this.toStrategyConfig(cfg),
-      jevContext
+      strategyCfg,
+      undefined
     )
 
     // Persist trailing state even while holding.
@@ -609,7 +604,21 @@ export class FastAlgoService {
       await this.scaleOutPosition(pos, price, cfg)
     }
 
-    if (!signal.shouldExit) return
+    if (!signal.shouldExit) {
+      // Advisory-only annotation for the hold: a slow or failed scorer
+      // resolves to null and the hold stands. Off (or a latched tripwire)
+      // skips the fetch entirely.
+      const jevMode = await this.jevMode(cfg)
+      if (jevMode !== 'off') {
+        const jevContext = await this.getJevContext(pos.symbol, cfg, now, false)
+        const note = this.strategy.jevExitAdvisory(jevContext, strategyCfg, pos.side)
+        if (note) {
+          signal.jevAdvisory = note
+          logger.info('[FastAlgo] %s hold (%s)', pos.symbol, note)
+        }
+      }
+      return
+    }
     await this.exitPosition(pos, signal.reason || 'strategy exit', cfg)
   }
 
@@ -791,7 +800,7 @@ export class FastAlgoService {
       // decision is bit-identical to the deterministic baseline.
       let jevContext: JevContext | null = null
       if (jevMode !== 'off') {
-        jevContext = await this.getJevContext(symbol, cfg, now)
+        jevContext = await this.getJevContext(symbol, cfg, now, jevEnforcing)
       }
 
       const signal = this.strategy.evaluateEntry(
@@ -1095,14 +1104,14 @@ export class FastAlgoService {
     }
   }
 
-  private async getJevContext(symbol: string, cfg: AlgoConfig, now: number): Promise<JevContext | null> {
+  private async getJevContext(symbol: string, cfg: AlgoConfig, now: number, enforced: boolean = false): Promise<JevContext | null> {
     // Call policy: reuse a fresh context instead of re-scoring every tick.
     const cached = this.jevCache.get(symbol)
     if (cached && now - cached.at < 60_000) return cached.ctx
     try {
-      const tickerId = await this.tickerIdFor(symbol)
-      const headlines = await this.getJevHeadlines(tickerId)
       const timeoutMs = cfg.fastJevTimeoutMs && cfg.fastJevTimeoutMs > 0 ? cfg.fastJevTimeoutMs : 2000
+      const tickerId = await this.tickerIdFor(symbol)
+      const headlines = await this.getJevHeadlines(tickerId, timeoutMs)
       const started = Date.now()
       const ctx = await this.withTimeout(
         this.jevService.getDecision({
@@ -1120,11 +1129,15 @@ export class FastAlgoService {
         timeoutMs
       )
       if (!ctx) return null
-      // Record every enforced live score for honest replay (U4). Fixture
-      // contexts never certify — they are skipped. Best effort: a failed
-      // insert must never break the tick.
+      // Record every non-fixture live score for honest replay (U4), stamped
+      // with whether the context was allowed to influence the entry.
+      // Fixture contexts never certify — they are skipped. Best effort: a
+      // failed insert must never break the tick.
       if (!ctx.fixture) {
-        void this.recordJevScore(symbol, ctx, now, Date.now() - started).catch(() => {})
+        void this.recordJevScore(symbol, ctx, now, Date.now() - started, enforced).catch((err) => {
+          // Redacted by construction: message only, never state/usage/keys.
+          logger.warn('[FastAlgo] Jev score record failed: %s', (err as Error)?.message ?? 'unknown')
+        })
       }
       const mapped: JevContext = {
         pUp: ctx.pUp ?? null,
@@ -1148,7 +1161,8 @@ export class FastAlgoService {
     symbol: string,
     ctx: { pUp: number | null; pDown: number | null; confidence: number | null; model: string; usage?: { inputTokens: number; outputTokens: number }; stale?: boolean },
     now: number,
-    latencyMs: number
+    latencyMs: number,
+    enforced: boolean = false
   ): Promise<void> {
     let questionHash = 'unknown'
     try {
@@ -1163,7 +1177,7 @@ export class FastAlgoService {
       decided_at: now,
       model: ctx.model,
       question_hash: questionHash,
-      prompt_version: 'v1',
+      prompt_version: JEV_PROMPT_VERSION,
       window_seconds: 0,
       p_up: ctx.pUp,
       p_down: ctx.pDown,
@@ -1173,15 +1187,21 @@ export class FastAlgoService {
       output_tokens: Math.max(0, Math.floor(ctx.usage?.outputTokens ?? 0)),
       stale: !!ctx.stale,
       fixture: false,
+      enforced: !!enforced,
     })
   }
 
   /** Recent headlines for Jev state — best effort, empty on any failure. */
-  private async getJevHeadlines(tickerId: number | null): Promise<string[]> {
+  private async getJevHeadlines(tickerId: number | null, timeoutMs: number = 1000): Promise<string[]> {
     if (!tickerId) return []
     try {
       const since = new Date(Date.now() - 3600_000).toISOString()
-      const analyses = await this.meili.getAnalysesForTicker(tickerId, since)
+      // Bounded: a hanging index resolves to no headlines (fail-open), so
+      // the tick can never stall here. Capped at 1s regardless of config.
+      const analyses = await this.withTimeout(
+        this.meili.getAnalysesForTicker(tickerId, since),
+        Math.min(1000, timeoutMs > 0 ? timeoutMs : 1000)
+      )
       if (!Array.isArray(analyses)) return []
       const titles: string[] = []
       for (const analysis of analyses) {

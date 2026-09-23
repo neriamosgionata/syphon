@@ -1,4 +1,5 @@
 import { test } from '@japa/runner'
+import db from '@adonisjs/lucid/services/db'
 import { DateTime } from 'luxon'
 import { FastAlgoService } from '../../app/services/FastAlgoService.js'
 import AlgoConfig from '../../app/models/AlgoConfig.js'
@@ -230,6 +231,16 @@ async function makePosition(opts: Record<string, any> = {}): Promise<AlgoPositio
   })
 }
 
+async function waitForMlRows(symbol: string, timeoutMs = 3000): Promise<any[]> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const rows = await db.from('ml_scores').where('symbol', symbol)
+    if (rows.length > 0) return rows
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  return db.from('ml_scores').where('symbol', symbol)
+}
+
 test.group('Jev live-tick wiring', (group) => {
   const origGetTradeBalance = (KrakenService as any).getTradeBalance
   const origSaveDecision = (MeilisearchService as any).saveDecision
@@ -390,6 +401,81 @@ test.group('Jev live-tick wiring', (group) => {
     assert.equal(engine.orders.length, 1)
     const reloaded = await AlgoPosition.find(pos.id)
     assert.match(reloaded?.exitReason ?? '', /stop[- ]loss/i)
+  })
+
+  test('hanging headlines still exit promptly on stop-loss', async ({ assert }) => {
+    const engine = makeEngine()
+    const ws = makeWs({ BTC: 95 })
+    const hangingMeili = { getAnalysesForTicker: () => new Promise(() => {}) as any }
+    const service = new FastAlgoService({
+      engine,
+      ws,
+      feed: new MomentumFeed(),
+      strategy: new FastStrategy(),
+      jevService: makeJev(),
+      jevRollout: enforcingRollout(),
+      meili: hangingMeili,
+    })
+    const pos = await makePosition({ stopLoss: 99, takeProfit: 105 })
+
+    const cfg = await seedConfig({ fastJevTimeoutMs: 150 })
+    const started = Date.now()
+    await (service as any).checkExit(pos, cfg)
+    assert.isTrue(Date.now() - started < 3000)
+
+    assert.equal(engine.orders.length, 1)
+    const reloaded = await AlgoPosition.find(pos.id)
+    assert.match(reloaded?.exitReason ?? '', /stop[- ]loss/i)
+  })
+
+  test('shadow records enforced=false, enforcing records enforced=true', async ({ assert }) => {
+    const bullish = (state: any) => ({
+      symbol: state.symbol,
+      pUp: 0.7,
+      pDown: 0.2,
+      confidence: 0.8,
+      model: 'jev-1.13.0',
+      usage: { inputTokens: 10, outputTokens: 0 },
+      asOf: Date.now(),
+      stale: false,
+    })
+    await db.from('ml_scores').del()
+
+    const shadowEngine = makeEngine()
+    const shadowService = new FastAlgoService({
+      engine: shadowEngine,
+      ws: makeWs({ BTC: 100 }),
+      feed: new MomentumFeed(),
+      strategy: new FastStrategy(),
+      jevService: makeJev(bullish),
+      jevRollout: enforcingRollout(),
+      meili: makeMeili(),
+    })
+    pumpRising(shadowService, 'BTC', 60, 100, 0.02)
+    await (shadowService as any).checkEntries(await seedConfig({ fastJevShadowOnly: true }), new Set())
+    const shadowRows = await waitForMlRows('BTC')
+    assert.equal(shadowRows.length, 1)
+    assert.isFalse(!!shadowRows[0].enforced)
+
+    await db.from('ml_scores').del()
+
+    const liveEngine = makeEngine()
+    const liveService = new FastAlgoService({
+      engine: liveEngine,
+      ws: makeWs({ BTC: 100 }),
+      feed: new MomentumFeed(),
+      strategy: new FastStrategy(),
+      jevService: makeJev(bullish),
+      jevRollout: enforcingRollout(),
+      meili: makeMeili(),
+    })
+    pumpRising(liveService, 'BTC', 60, 100, 0.02)
+    await (liveService as any).checkEntries(await seedConfig({ fastJevShadowOnly: false }), new Set())
+    const liveRows = await waitForMlRows('BTC')
+    assert.equal(liveRows.length, 1)
+    assert.isTrue(!!liveRows[0].enforced)
+
+    await db.from('ml_scores').del()
   })
 
   test('status reports overlay state', async ({ assert }) => {

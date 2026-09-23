@@ -36,6 +36,8 @@ export const JEV_MAX_HEADLINES = 10
 export const JEV_MAX_HEADLINE_CHARS = 280
 /** Fresh preflight required for live enablement (R13). */
 export const JEV_PREFLIGHT_TTL_MS = 3_600_000
+/** Prompt version stamped per score — replay joins on model|question|prompt. */
+export const JEV_PROMPT_VERSION = 'v1'
 
 export type JevFailureClass =
   | 'timeout'
@@ -205,6 +207,17 @@ function buildQuestions(): JevRequestBody['questions'] {
   }
 }
 
+/** FNV-1a hex of a string — non-reversible fingerprint for key-rotation
+ *  detection. Never the key or a prefix; safe to hold beside the latch. */
+function fnv1aHex(input: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, '0')
+}
+
 function stripHeadline(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
   const out = raw
@@ -331,7 +344,7 @@ export class JevDecisionService {
   private lastFailure: JevFailure | null = null
   private provenance: { model: string; usage: { inputTokens: number; outputTokens: number }; at: number; symbol: string } | null = null
   private budget = { day: '', calls: 0, spendUsd: 0 }
-  private latch: { kind: 'auth' | 'budget'; day: string } | null = null
+  private latch: { kind: 'auth' | 'budget'; day: string; keyFingerprint?: string } | null = null
   private budgetAlertedDay = ''
   private rateLimitedUntil = 0
   private preflightAt = 0
@@ -373,17 +386,13 @@ export class JevDecisionService {
   // Request shaping (allowlisted payload — R4, security binding)
   // ------------------------------------------------------------------
 
-  public shapeHeadlines(headlines: string[]): string[] {
-    return shapeHeadlines(headlines)
-  }
-
   public buildRequestBody(state: JevSymbolState): JevRequestBody {
     const body: JevRequestBody = {
       model: this.modelId(),
       state: {
         symbol: state.symbol,
         indicators: pickIndicators(state.facts),
-        headlines: this.shapeHeadlines(state.headlines),
+        headlines: shapeHeadlines(state.headlines),
       },
       questions: buildQuestions(),
     }
@@ -419,6 +428,14 @@ export class JevDecisionService {
     }
 
     this.rollDay(now)
+    if (this.latch?.kind === 'auth') {
+      // Same-day key rotation clears the auth latch: the new credential has
+      // never failed, so the call that proves recovery must proceed. The
+      // latch holds only a non-reversible fingerprint — never key material.
+      if (fnv1aHex(key) !== this.latch.keyFingerprint) {
+        this.latch = null
+      }
+    }
     if (this.latch) {
       const failureClass: JevFailureClass = this.latch.kind === 'auth' ? 'auth' : 'budget'
       return this.record(
@@ -501,7 +518,12 @@ export class JevDecisionService {
 
   private onFailure(state: JevSymbolState, failure: JevFailure, now: number): null | JevDecisionContext {
     if (failure.class === 'auth') {
-      this.latch = { kind: 'auth', day: this.budget.day }
+      const latchedKey = this.resolveApiKey()
+      this.latch = {
+        kind: 'auth',
+        day: this.budget.day,
+        keyFingerprint: latchedKey ? fnv1aHex(latchedKey) : undefined,
+      }
       this.alert({ kind: 'auth', message: failure.message })
     }
     if (failure.class === 'rate_limited') {
@@ -636,13 +658,14 @@ export class JevDecisionService {
   private rawTransport(key: string): JevTransport {
     const impl = this.fetchImpl()
     return {
-      score: async (body) => {
+      score: async (body, opts) => {
         let res: Response
         try {
           res = await impl(JEV_ENDPOINT, {
             method: 'POST',
             headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
             body: JSON.stringify(body),
+            signal: opts?.signal,
           })
         } catch (error) {
           throw this.redactedError(error)
@@ -796,6 +819,8 @@ export class JevDecisionService {
       this.countCall(parsed.usage)
       this.preflightAt = now
       this.preflightOk = true
+      // A passing preflight proves the credential — lift an auth latch.
+      if (this.latch?.kind === 'auth') this.latch = null
       this.safeLog('info', `[Jev] preflight ok model=${parsed.ctx.model}`)
       return { ok: true, model: parsed.ctx.model, failure: null, at: now }
     } catch (error) {

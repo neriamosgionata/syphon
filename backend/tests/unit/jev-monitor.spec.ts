@@ -128,6 +128,17 @@ test.group('Jev scheduled monitor', (group) => {
     await db.table('ml_scores').insert(rows)
   }
 
+  test('empty window reports insufficient data and latches nothing', async ({ assert }) => {
+    const monitor = new JevMonitor()
+    const report = await monitor.run({ symbols: ['BTC'], windowDays: 2, horizonMinutes: 5 })
+
+    assert.isTrue(report.dataInsufficient)
+    assert.isFalse(report.breached)
+    assert.isFalse(await JevRollout.isLatched())
+    const unacked = await OperationAlert.unacknowledged('jev')
+    assert.isEmpty(unacked)
+  })
+
   test('stable window reports metrics without latching', async ({ assert }) => {
     await seedMarket()
     await seedScores(true)

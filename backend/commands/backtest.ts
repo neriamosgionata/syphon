@@ -1,6 +1,6 @@
 import { BaseCommand } from '@adonisjs/core/ace'
 import AlgoConfig from '#models/AlgoConfig'
-import { BacktestEngine } from '#services/BacktestEngine'
+import { BacktestEngine, JEV_REPLAY_STALE_MS } from '#services/BacktestEngine'
 import { fastStrategyFromConfig } from '#services/FastStrategy'
 import { loadBacktestSamples, loadJevEvents } from '#services/backtest_data'
 import { clamp } from '#app/utils/backtest_flags'
@@ -72,8 +72,10 @@ static flags = [
     const engine = new BacktestEngine()
     // Recorded Jev scores replay only when the gate is enabled — the
     // engine runs the gate off with a notice when the window is scoreless.
+    // Look back one reuse window so a pre-window score governs the first
+    // decisions (otherwise it is invisible to the opening ticks).
     const jevEvents = strategy.jevGateEnabled && samples.length > 0
-      ? await loadJevEvents(symbol, samples[0].t, samples[samples.length - 1].t)
+      ? await loadJevEvents(symbol, samples[0].t - JEV_REPLAY_STALE_MS, samples[samples.length - 1].t)
       : undefined
     const result = engine.run(samples, {
       symbol,

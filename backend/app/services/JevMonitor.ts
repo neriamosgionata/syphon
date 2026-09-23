@@ -98,6 +98,8 @@ export interface MonitorOptions {
 
 export interface MonitorReport {
   breached: boolean
+  /** True when labeled evidence is below the minimum for a verdict. */
+  dataInsufficient: boolean
   ece: number
   psi: number
   precision: number | null
@@ -168,14 +170,19 @@ export class JevMonitor {
     const spend = spendReport(spendRows)
     const pruned = await pruneMlScores(now - (opts.retentionDays ?? 90) * 86400_000)
 
+    // Zero-coverage guard: never claim healthy and never latch on empty
+    // evidence. Below the minimum labeled sample the run reports no
+    // verdict and skips latching entirely.
+    const dataInsufficient = calibrated.length < 30
     const breached =
-      (opts.eceBreach !== undefined && ece > opts.eceBreach) ||
-      (opts.psiBreach !== undefined && psi > opts.psiBreach)
+      !dataInsufficient &&
+      ((opts.eceBreach !== undefined && ece > opts.eceBreach) ||
+        (opts.psiBreach !== undefined && psi > opts.psiBreach))
     if (breached) {
       await JevRollout.evaluateTripwire({ consecutiveNegativePeriods: 0, calibrationBreach: true })
     }
 
-    return { breached, ece, psi, precision, scoredDecisions, labeledDecisions: calibrated.length, spend, pruned }
+    return { breached, dataInsufficient, ece, psi, precision, scoredDecisions, labeledDecisions: calibrated.length, spend, pruned }
   }
 
   /**

@@ -522,6 +522,123 @@ test.group('JevDecisionService budgets', () => {
   })
 })
 
+test.group('JevDecisionService auth latch vs key rotation', () => {
+  test('same-day key rotation clears the auth latch and resumes scoring', async ({ assert }) => {
+    const ROTATED_KEY = 'sk-jev-rotated-key-1a2b3c4d5e6f'
+    const transport = stubTransport({ error: statusError(401), failTimes: 1 })
+    let now = 1_700_000_000_000
+    const svc = new JevDecisionService({
+      apiKey: TEST_KEY,
+      transport,
+      now: () => now,
+      logger: silentLogger().logger,
+    })
+    const first = await svc.getDecision(state())
+    assert.isNull(first)
+    assert.equal(svc.getLastFailure()?.class, 'auth')
+    assert.isTrue(svc.isDeterministicOnly())
+
+    const latch = (svc as any).latch
+    assert.isNotNull(latch)
+    assert.equal(latch.kind, 'auth')
+    assert.match(latch.keyFingerprint, /^[0-9a-f]{8}$/)
+    assert.notInclude(latch.keyFingerprint, TEST_KEY)
+
+    // Same-day rotation (mutated opt stands in for a rotated env credential —
+    // the new key has never failed, so the proving call must proceed).
+    ;(svc as any).opts.apiKey = ROTATED_KEY
+    now += 60_000
+    const second = await svc.getDecision(state())
+    assert.isNotNull(second)
+    assert.closeTo(second!.pUp, 0.7, 1e-12)
+    assert.isFalse(svc.isDeterministicOnly())
+    assert.equal(transport.calls, 2)
+  })
+
+  test('key fingerprints distinguish keys without leaking key material', async ({ assert }) => {
+    async function latchedFingerprint(key: string): Promise<string> {
+      const svc = new JevDecisionService({
+        apiKey: key,
+        transport: stubTransport({ error: statusError(401) }),
+        logger: silentLogger().logger,
+      })
+      await svc.getDecision(state())
+      return (svc as any).latch.keyFingerprint
+    }
+    const fpA1 = await latchedFingerprint(TEST_KEY)
+    const fpA2 = await latchedFingerprint(TEST_KEY)
+    const fpB = await latchedFingerprint('sk-jev-other-key-0f9e8d7c6b5a')
+    assert.equal(fpA1, fpA2)
+    assert.notEqual(fpA1, fpB)
+    for (const fp of [fpA1, fpB]) {
+      assert.match(fp, /^[0-9a-f]{8}$/)
+    }
+    assert.notInclude(fpA1, TEST_KEY)
+  })
+
+  test('passing preflight clears the auth latch', async ({ assert }) => {
+    const transport = stubTransport({ error: statusError(401), failTimes: 1 })
+    const svc = new JevDecisionService({ apiKey: TEST_KEY, transport, logger: silentLogger().logger })
+    const first = await svc.getDecision(state())
+    assert.isNull(first)
+    assert.isTrue(svc.isDeterministicOnly())
+    const result = await svc.preflight()
+    assert.isTrue(result.ok)
+    assert.isFalse(svc.isDeterministicOnly())
+  })
+})
+
+test.group('JevDecisionService raw transport abort', () => {
+  test('tick-deadline cancellation reaches the HTTP call', async ({ assert }) => {
+    const seen: any[] = []
+    const fakeFetch = (async (_url: string, init: any) => {
+      seen.push(init)
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => successPayload(),
+      }
+    }) as any
+    const svc = new JevDecisionService({
+      apiKey: TEST_KEY,
+      sdk: null,
+      fetch: fakeFetch,
+      logger: silentLogger().logger,
+    })
+    const ctx = await svc.getDecision(state())
+    assert.isNotNull(ctx)
+    assert.equal(seen.length, 1)
+    assert.instanceOf(seen[0].signal, AbortSignal)
+  })
+
+  test('raw transport forwards the caller signal unchanged', async ({ assert }) => {
+    const seen: any[] = []
+    const fakeFetch = (async (_url: string, init: any) => {
+      seen.push(init)
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => successPayload(),
+      }
+    }) as any
+    const svc = new JevDecisionService({
+      apiKey: TEST_KEY,
+      sdk: null,
+      fetch: fakeFetch,
+      logger: silentLogger().logger,
+    })
+    const controller = new AbortController()
+    controller.abort()
+    const raw = (svc as any).rawTransport(TEST_KEY)
+    const result = await raw.score(svc.buildRequestBody(state()), { signal: controller.signal })
+    assert.equal(result.model, JEV_MODEL_ID)
+    assert.equal(seen.length, 1)
+    assert.strictEqual(seen[0].signal, controller.signal)
+  })
+})
+
 test.group('JevDecisionService preflight and ops safety', () => {
   test('preflight passes keyed and gates live readiness with TTL', async ({ assert }) => {
     const transport = stubTransport()

@@ -14,7 +14,7 @@ import MeilisearchService from '../../app/services/MeilisearchService.js'
 import NotificationService from '../../app/services/NotificationService.js'
 import db from '@adonisjs/lucid/services/db'
 import JevRollout from '../../app/services/JevRollout.js'
-import { runJevPreflight, recordJevPreflightPass, JEV_PREFLIGHT_CONTROL_NAME } from '../../app/services/JevPreflight.js'
+import { runJevPreflight, recordJevPreflightPass, isJevPreflightFresh, JEV_PREFLIGHT_CONTROL_NAME } from '../../app/services/JevPreflight.js'
 import { isPreflightFresh } from '../../app/services/YieldPreflight.js'
 import { assertIncomeBindSafe } from '../../app/services/income_bind_guard.js'
 
@@ -52,7 +52,20 @@ test.group('Jev rollout stage machine', (group) => {
     assert.isTrue((await JevRollout.setStage('veto_only', 'paper gate passed')).ok)
     assert.equal(await JevRollout.getStage(), 'veto_only')
     assert.isTrue(await JevRollout.isEnforcing())
+    await recordJevPreflightPass({ passed: true, checks: [], failed: [] })
     assert.isTrue((await JevRollout.setStage('live', 'all gates passed')).ok)
+    assert.equal(await JevRollout.getStage(), 'live')
+  })
+
+  test('live promotion needs a fresh preflight pass', async ({ assert }) => {
+    assert.isTrue((await JevRollout.setStage('veto_only', 'paper gate passed')).ok)
+    const refused = await JevRollout.setStage('live', 'no preflight yet')
+    assert.isFalse(refused.ok)
+    assert.match(refused.error ?? '', /preflight/i)
+    assert.equal(await JevRollout.getStage(), 'veto_only')
+    await recordJevPreflightPass({ passed: true, checks: [], failed: [] })
+    assert.isTrue((await isJevPreflightFresh(Date.now())))
+    assert.isTrue((await JevRollout.setStage('live', 'preflight fresh')).ok)
     assert.equal(await JevRollout.getStage(), 'live')
   })
 
@@ -136,6 +149,15 @@ test.group('Jev preflight', (group) => {
     const result = await runJevPreflight({ jevService: fakeScorer(true), getApiKey: () => 'sk-test' })
     assert.isFalse(result.passed)
     assert.isTrue(result.checks.some((c) => c.name === 'no-unacknowledged-alerts' && !c.ok))
+  })
+
+  test('a failed preflight records failed and is never fresh', async ({ assert }) => {
+    const result = await runJevPreflight({ jevService: fakeScorer(false), getApiKey: () => 'sk-test' })
+    assert.isFalse(result.passed)
+    await recordJevPreflightPass(result)
+    const row = await ControlRecord.get(JEV_PREFLIGHT_CONTROL_NAME)
+    assert.equal(row?.state, 'failed')
+    assert.isFalse(await isJevPreflightFresh(Date.now()))
   })
 })
 

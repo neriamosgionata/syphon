@@ -91,6 +91,17 @@ function bearishEvent(t: number, overrides: Record<string, any> = {}) {
 
 const rising = () => series((i) => 100 * Math.pow(1.0001, i), 2 * 3600)
 
+// Per-minute enforced events across the window — replay only sees scores
+// younger than the 90s reuse window, so single-event fixtures would
+// correctly replay as scoreless after the first ticks.
+function denseEvents(startMs: number, endMs: number, overrides: Record<string, any> = {}) {
+  const events = []
+  for (let t = startMs; t <= endMs; t += 60_000) events.push(bearishEvent(t, overrides))
+  return events
+}
+
+const denseVeto = () => denseEvents(T0 - 60_000, T0 + 2 * 3600_000)
+
 test.group('Jev replay determinism and gating', () => {
   test('recorded bearish scores veto entries the deterministic run takes', ({ assert }) => {
     const samples = rising()
@@ -101,7 +112,7 @@ test.group('Jev replay determinism and gating', () => {
       samples,
       baseCfg({
         strategy: strategy({ jevGateEnabled: true }),
-        jevEvents: [bearishEvent(T0)],
+        jevEvents: denseVeto(),
       })
     )
     assert.equal(vetoed.metrics.totalTrades, 0)
@@ -143,11 +154,13 @@ test.group('Jev replay determinism and gating', () => {
 
   test('a pre-window score governs from the first decision', ({ assert }) => {
     const samples = rising()
+    // Dense from just before the window — the opening score is pre-window
+    // (60s old at the first decision) and coverage never lapses after.
     const vetoed = engine.run(
       samples,
       baseCfg({
         strategy: strategy({ jevGateEnabled: true }),
-        jevEvents: [bearishEvent(T0 - 3600_000)],
+        jevEvents: denseVeto(),
       })
     )
     assert.equal(vetoed.metrics.totalTrades, 0)
@@ -179,16 +192,46 @@ test.group('Jev replay determinism and gating', () => {
     assert.throws(run, /model|version|blend/i)
   })
 
+  test('mixed prompt versions are rejected instead of blended', ({ assert }) => {
+    const samples = rising()
+    const run = () =>
+      engine.run(
+        samples,
+        baseCfg({
+          strategy: strategy({ jevGateEnabled: true }),
+          jevEvents: [bearishEvent(T0), bearishEvent(T0 + 1000, { promptVersion: 'v2' })],
+        })
+      )
+    assert.throws(run, /model|version|blend|prompt/i)
+  })
+
+  test('an all-shadow list runs the gate off with a notice', ({ assert }) => {
+    const samples = rising()
+    const plain = engine.run(samples, baseCfg())
+    const shadow = engine.run(
+      samples,
+      baseCfg({
+        strategy: strategy({ jevGateEnabled: true }),
+        jevEvents: [bearishEvent(T0, { enforced: false })],
+      })
+    )
+    assert.deepEqual(shadow.metrics, plain.metrics)
+    assert.isNotNull(shadow.jevNotice)
+    assert.match(shadow.jevNotice!, /no recorded Jev scores/i)
+  })
+
   test('passing reads shrink size without vetoing', ({ assert }) => {
     const samples = rising()
     const plain = engine.run(samples, baseCfg())
     assert.isAbove(plain.trades.length, 0)
     // Edge 0.05 < 0.15 floor: no veto. Confidence 0.9 maps to 0.9× size.
+    // Dense per-minute so the sizing read stays fresh for every entry.
+    const passing = { pUp: 0.45, pDown: 0.5, confidence: 0.9, model: 'jev-1.13.0', questionHash: 'q1' }
     const shrunk = engine.run(
       samples,
       baseCfg({
         strategy: strategy({ jevGateEnabled: true }),
-        jevEvents: [{ t: T0, pUp: 0.45, pDown: 0.5, confidence: 0.9, model: 'jev-1.13.0', questionHash: 'q1' }],
+        jevEvents: denseEvents(T0 - 60_000, T0 + 2 * 3600_000, passing),
       })
     )
     assert.equal(shrunk.trades.length, plain.trades.length)
@@ -213,6 +256,18 @@ test.group('Jev score loading and pruning', () => {
     assert.closeTo(events[0].pDown, 0.5, 1e-9)
     assert.equal(events[0].model, 'jev-1.13.0')
     assert.equal(events[0].questionHash, 'q1')
+  })
+
+  test('loader maps enforced from the row', async ({ assert }) => {
+    await db.from('ml_scores').del()
+    await db.table('ml_scores').insert([
+      { symbol: 'BTC', decided_at: T0 + 1000, model: 'm', question_hash: 'q', prompt_version: 'v1', window_seconds: 0, p_up: 0.5, p_down: 0.4, confidence: 0.6, latency_ms: 1, stale: false, fixture: false, enforced: false },
+      { symbol: 'BTC', decided_at: T0 + 2000, model: 'm', question_hash: 'q', prompt_version: 'v1', window_seconds: 0, p_up: 0.5, p_down: 0.4, confidence: 0.6, latency_ms: 1, stale: false, fixture: false, enforced: true },
+    ])
+    const events = await loadJevEvents('BTC', T0, T0 + 3600_000)
+    assert.equal(events.length, 2)
+    assert.isFalse(events[0].enforced)
+    assert.isTrue(events[1].enforced)
   })
 
   test('prunes rows older than the retention cutoff', async ({ assert }) => {

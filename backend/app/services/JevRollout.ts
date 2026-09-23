@@ -1,5 +1,6 @@
 import ControlRecord from '#models/ControlRecord'
 import OperationAlert from '#models/OperationAlert'
+import { isJevPreflightFresh } from '#services/JevPreflight'
 
 // ─── Jev rollout stage machine (U6) ──────────────────────────────
 //
@@ -42,6 +43,9 @@ export default class JevRollout {
     }
     if (ORDER[stage] > ORDER[current] + 1) {
       return { ok: false, error: `refusing jump from ${current} to ${stage}: promote through veto_only first` }
+    }
+    if (stage === 'live' && !(await isJevPreflightFresh(Date.now()))) {
+      return { ok: false, error: 'refusing live promotion without a fresh jev preflight pass — run jev:preflight first' }
     }
     const unacked = await OperationAlert.unacknowledged('jev')
     if (unacked.length > 0) {
