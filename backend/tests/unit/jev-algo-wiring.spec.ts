@@ -415,8 +415,73 @@ test.group('Jev live-tick wiring', (group) => {
     assert.exists(jev.strategy)
   })
 
-  test('updateConfig accepts the fastJev fields', async ({ assert }) => {
-    const controller = new AlgoController()
+  test('fresh contexts are reused instead of re-scoring every tick', async ({ assert }) => {
+    const engine = makeEngine()
+    const ws = makeWs({ BTC: 100 })
+    const jev = makeJev(async (state: any) => ({
+      symbol: state.symbol,
+      pUp: 0.2,
+      pDown: 0.72,
+      confidence: 0.8,
+      model: 'jev-1.13.0',
+      usage: { inputTokens: 10, outputTokens: 0 },
+      asOf: Date.now(),
+      stale: false,
+    }))
+    const service = new FastAlgoService({
+      engine,
+      ws,
+      feed: new MomentumFeed(),
+      strategy: new FastStrategy(),
+      jevService: jev,
+      jevRollout: enforcingRollout(),
+      meili: makeMeili(),
+    })
+    pumpRising(service, 'BTC', 60, 100, 0.02)
+
+    const cfg = await seedConfig({ fastJevShadowOnly: false })
+    await (service as any).checkEntries(cfg, new Set())
+    assert.equal(jev.calls.length, 1)
+    // Second pass re-evaluates the warm symbol but serves the cached read.
+    ;(service as any).symbolCooldowns.clear()
+    await (service as any).checkEntries(cfg, new Set())
+    assert.equal(jev.calls.length, 1)
+  })
+
+  test('status reports freshness ages and session veto counts', async ({ assert }) => {
+    const engine = makeEngine()
+    const ws = makeWs({ BTC: 100 })
+    const jev = makeJev(async (state: any) => ({
+      symbol: state.symbol,
+      pUp: 0.2,
+      pDown: 0.72,
+      confidence: 0.8,
+      model: 'jev-1.13.0',
+      usage: { inputTokens: 10, outputTokens: 0 },
+      asOf: Date.now(),
+      stale: false,
+    }))
+    const service = new FastAlgoService({
+      engine,
+      ws,
+      feed: new MomentumFeed(),
+      strategy: new FastStrategy(),
+      jevService: jev,
+      jevRollout: enforcingRollout(),
+      meili: makeMeili(),
+    })
+    pumpRising(service, 'BTC', 60, 100, 0.02)
+
+    const cfg = await seedConfig({ fastJevShadowOnly: false })
+    await (service as any).checkEntries(cfg, new Set())
+
+    const status = service.status().jev
+    assert.equal(status.vetoes, 1)
+    assert.isNumber(status.freshness.BTC)
+    assert.isAtLeast(status.freshness.BTC, 0)
+  })
+
+  test('updateConfig accepts the fastJev fields', async ({ assert }) => {    const controller = new AlgoController()
     const seen: any[] = []
     const ctx: any = {
       request: {

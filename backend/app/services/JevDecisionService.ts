@@ -21,6 +21,9 @@ import logger from '@adonisjs/core/services/logger'
 
 export const JEV_MODEL_ID = 'jev-1.13.0'
 export const JEV_ENDPOINT = 'https://api.typesafe.ai/v1/systemone'
+/** Documented Jev pricing: $0.042 per million input tokens, output free. */
+export const JEV_PRICE_PER_K_INPUT_USD = 0.000042
+export const JEV_PRICE_PER_K_OUTPUT_USD = 0
 /** Per-call timeout — near 2s so a Jev round trip fits inside the tick budget. */
 export const JEV_TIMEOUT_MS = 2000
 /** Per-call input-size cap (serialized JSON chars); overflow truncates headlines, never facts. */
@@ -720,8 +723,8 @@ export class JevDecisionService {
 
   private spendFor(usage: { inputTokens: number; outputTokens: number }): number {
     // Documented Jev pricing: $0.042/MTok input, output free (too cheap to meter).
-    const inRate = this.opts.pricePerKInputUsd ?? 0.000042
-    const outRate = this.opts.pricePerKOutputUsd ?? 0
+    const inRate = this.opts.pricePerKInputUsd ?? JEV_PRICE_PER_K_INPUT_USD
+    const outRate = this.opts.pricePerKOutputUsd ?? JEV_PRICE_PER_K_OUTPUT_USD
     return (usage.inputTokens / 1000) * inRate + (usage.outputTokens / 1000) * outRate
   }
 

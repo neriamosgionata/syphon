@@ -99,6 +99,17 @@ export class FastAlgoService {
   private streakSinceAt = 0
   private runId = uuidv4()
   private tickerIdCache: { map: Map<string, number>; at: number } = { map: new Map(), at: 0 }
+  /**
+   * Per-symbol Jev context cache (U7 call policy): one scored call covers
+   * ~60s of ticks, cutting steady-state calls ~6× versus per-tick scoring.
+   * Replay parity holds — the single recorded event governs the same ticks
+   * the live loop reused it for. Cache hits are served, not re-recorded.
+   */
+  private jevCache = new Map<string, { ctx: JevContext; at: number }>()
+  /** Last successful score fetch per symbol (freshness reporting). */
+  private jevLastSeen = new Map<string, number>()
+  /** Session veto count (observability — resets on restart). */
+  private jevVetoes = 0
   /** Venue components resolved from cfg.broker; 'manual' = DI fakes (tests). */
   private components: { engine: FastExecutionEngine | null; ws: PriceFeed; equity: EquityProvider } | null = null
   private componentsKey: string | null = null
@@ -511,6 +522,12 @@ export class FastAlgoService {
     } catch {
       // Introspection must never break status.
     }
+    const now = Date.now()
+    const freshness: Record<string, number | null> = {}
+    for (const symbol of this.ws.getConnectedSymbols()) {
+      const at = this.jevLastSeen.get(symbol)
+      freshness[symbol] = at === undefined ? null : now - at
+    }
     return {
       enabled: !!cfg?.fastJevGateEnabled,
       shadowOnly: cfg?.fastJevShadowOnly ?? true,
@@ -518,6 +535,8 @@ export class FastAlgoService {
       deterministicOnly,
       lastFailure: failure?.class ?? null,
       budget,
+      freshness,
+      vetoes: this.jevVetoes,
       strategy: cfg
         ? {
             minConfidence: cfg.fastJevMinConfidence ?? 0.5,
@@ -779,6 +798,7 @@ export class FastAlgoService {
         this.feed, symbol, price, now, this.toStrategyConfig(cfg), newsContext,
         jevEnforcing ? jevContext : null
       )
+      if (!signal.shouldEnter && signal.reason?.startsWith('jev veto')) this.jevVetoes++
       if (!signal.shouldEnter) continue
 
       let sizePct = Math.min(cfg.maxSinglePositionPct, exposureCap - exposurePct)
@@ -1076,6 +1096,9 @@ export class FastAlgoService {
   }
 
   private async getJevContext(symbol: string, cfg: AlgoConfig, now: number): Promise<JevContext | null> {
+    // Call policy: reuse a fresh context instead of re-scoring every tick.
+    const cached = this.jevCache.get(symbol)
+    if (cached && now - cached.at < 60_000) return cached.ctx
     try {
       const tickerId = await this.tickerIdFor(symbol)
       const headlines = await this.getJevHeadlines(tickerId)
@@ -1103,12 +1126,15 @@ export class FastAlgoService {
       if (!ctx.fixture) {
         void this.recordJevScore(symbol, ctx, now, Date.now() - started).catch(() => {})
       }
-      return {
+      const mapped: JevContext = {
         pUp: ctx.pUp ?? null,
         pDown: ctx.pDown ?? null,
         confidence: ctx.confidence ?? null,
         stale: !!ctx.stale,
       }
+      this.jevCache.set(symbol, { ctx: mapped, at: now })
+      this.jevLastSeen.set(symbol, now)
+      return mapped
     } catch {
       return null
     }
@@ -1143,6 +1169,8 @@ export class FastAlgoService {
       p_down: ctx.pDown,
       confidence: ctx.confidence,
       latency_ms: Math.max(0, Math.round(latencyMs)),
+      input_tokens: Math.max(0, Math.floor(ctx.usage?.inputTokens ?? 0)),
+      output_tokens: Math.max(0, Math.floor(ctx.usage?.outputTokens ?? 0)),
       stale: !!ctx.stale,
       fixture: false,
     })
