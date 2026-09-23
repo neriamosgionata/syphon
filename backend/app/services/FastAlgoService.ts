@@ -14,6 +14,7 @@ import MeilisearchService from '#services/MeilisearchService'
 import NotificationService from '#services/NotificationService'
 import NewsSentimentService from '#services/NewsSentimentService'
 import JevDecisionService from '#services/JevDecisionService'
+import JevRollout from '#services/JevRollout'
 import IBKRPriceFeed from '#services/IBKRPriceFeed'
 import IBKRService from '#services/IBKRService'
 import IBKRFastEngine from '#services/IBKRFastEngine'
@@ -110,6 +111,7 @@ export class FastAlgoService {
     strategy?: FastStrategy
     newsService?: any
     jevService?: any
+    jevRollout?: any
     meili?: any
     tickerModel?: any
     brokerRegistry?: typeof BROKER_COMPONENTS
@@ -120,6 +122,7 @@ export class FastAlgoService {
     this.strategy = opts.strategy ?? new FastStrategy()
     this.newsService = opts.newsService ?? NewsSentimentService
     this.jevService = opts.jevService ?? JevDecisionService
+    this.jevRollout = opts.jevRollout ?? JevRollout
     this.meili = opts.meili ?? MeilisearchService
     this.tickerModel = opts.tickerModel ?? Ticker
     this.brokerRegistry = opts.brokerRegistry ?? BROKER_COMPONENTS
@@ -133,6 +136,7 @@ export class FastAlgoService {
 
   private newsService: any
   private jevService: any
+  private jevRollout: any
   private meili: any
   private tickerModel: any
   private brokerRegistry: Record<string, { engine: FastExecutionEngine | null; ws: PriceFeed; equity: EquityProvider }>
@@ -545,9 +549,12 @@ export class FastAlgoService {
 
     // Jev exit annotation (advisory only — a slow or failed scorer resolves
     // to null and the deterministic priority chain below runs unchanged).
+    // Annotation never influences, so any non-off mode annotates; off (or a
+    // latched tripwire) skips the fetch entirely.
     const now = Date.now()
+    const jevMode = await this.jevMode(cfg)
     let jevContext: JevContext | null = null
-    if (cfg.fastJevGateEnabled) {
+    if (jevMode !== 'off') {
       jevContext = await this.getJevContext(pos.symbol, cfg, now)
     }
 
@@ -732,6 +739,10 @@ export class FastAlgoService {
 
     const now = Date.now()
     let used = 0
+    // Overlay enforcement resolved once per pass (U6): shadow fetches and
+    // records without influencing; off skips the scorer entirely.
+    const jevMode = await this.jevMode(cfg)
+    const jevEnforcing = jevMode === 'enforce' && !cfg.fastJevShadowOnly
 
     for (const symbol of cfg.fastWatchlist) {
       if (used >= slots || exposurePct >= exposureCap) break
@@ -756,17 +767,17 @@ export class FastAlgoService {
       }
 
       // Jev advisory context (null = no signal — the gate never blocks on
-      // a slow, failed, or unkeyed scorer). Shadow-only mode still fetches
+      // a slow, failed, or unkeyed scorer). Shadow mode still fetches
       // (warming the cache, proving the transport) but passes null so the
       // decision is bit-identical to the deterministic baseline.
       let jevContext: JevContext | null = null
-      if (cfg.fastJevGateEnabled) {
+      if (jevMode !== 'off') {
         jevContext = await this.getJevContext(symbol, cfg, now)
       }
 
       const signal = this.strategy.evaluateEntry(
         this.feed, symbol, price, now, this.toStrategyConfig(cfg), newsContext,
-        cfg.fastJevShadowOnly ? null : jevContext
+        jevEnforcing ? jevContext : null
       )
       if (!signal.shouldEnter) continue
 
@@ -788,10 +799,10 @@ export class FastAlgoService {
       const conviction = this.strategy.convictionMultiplier(signal, this.toStrategyConfig(cfg))
       sizePct = Math.min(sizePct * conviction, cfg.maxSinglePositionPct)
       // Jev shrink-only sizing: calibrated confidence may only reduce
-      // exposure within the caps above — never grow it. Shadow mode passes
-      // null, so sizing is bit-identical to the deterministic baseline.
+      // exposure within the caps above — never grow it. Anything but an
+      // enforced pass scales by 1 (no influence).
       const jevMult = this.strategy.jevConvictionMultiplier(
-        cfg.fastJevShadowOnly ? null : jevContext, this.toStrategyConfig(cfg)
+        jevEnforcing ? jevContext : null, this.toStrategyConfig(cfg)
       )
       sizePct = Math.min(sizePct * jevMult, cfg.maxSinglePositionPct)
       if (sizePct <= 0) break
@@ -1035,6 +1046,35 @@ export class FastAlgoService {
    * hanging scorer can never stall the tick. Null on any failure — the
    * deterministic path runs exactly as before.
    */
+  /**
+   * Overlay enforcement mode (U6): off skips the scorer entirely (no
+   * spend); shadow fetches and records without influencing; enforce lets
+   * the context into the gate and sizing. A latched tripwire forces off.
+   * Live stage without a fresh preflight degrades to shadow — enforcement
+   * without proof is refused, not retried into.
+   */
+  private async jevMode(cfg: AlgoConfig): Promise<'off' | 'shadow' | 'enforce'> {
+    if (!cfg.fastJevGateEnabled) return 'off'
+    try {
+      const [stage, latched] = await Promise.all([
+        this.jevRollout.getStage(),
+        this.jevRollout.isLatched(),
+      ])
+      if (latched) return 'off'
+      if (stage === 'shadow') return 'shadow'
+      if (stage === 'live') {
+        const ready =
+          this.jevService && typeof this.jevService.isLiveReady === 'function'
+            ? !!this.jevService.isLiveReady()
+            : false
+        if (!ready) return 'shadow'
+      }
+      return 'enforce'
+    } catch {
+      return 'off'
+    }
+  }
+
   private async getJevContext(symbol: string, cfg: AlgoConfig, now: number): Promise<JevContext | null> {
     try {
       const tickerId = await this.tickerIdFor(symbol)

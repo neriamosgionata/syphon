@@ -25,11 +25,28 @@ export default class AppProvider {
 
   async boot() {
     const { assertIncomeBindSafe } = await import('#services/income_bind_guard')
+    // Jev overlay liveness is a persisted stage (async read, fail-open
+    // false — a boot without a readable DB is broken elsewhere anyway).
+    let jevLive = false
+    try {
+      const [{ default: JevRollout }, { default: AlgoConfig }] = await Promise.all([
+        import('#services/JevRollout'),
+        import('#models/AlgoConfig'),
+      ])
+      const [stage, cfg] = await Promise.all([
+        JevRollout.getStage().catch(() => 'shadow' as const),
+        AlgoConfig.getConfig().catch(() => null),
+      ])
+      jevLive = stage === 'live' && !!cfg?.fastJevGateEnabled
+    } catch {
+      jevLive = false
+    }
     assertIncomeBindSafe(env.get('HOST', ''), {
       yieldLive: env.get('YIELD_LIVE', false) === true,
       // The trend evaluation is paper-only (no order path exists): it is
       // never a mutating line under the current wiring.
       trendLive: false,
+      jevLive,
     })
   }
 

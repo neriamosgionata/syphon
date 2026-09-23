@@ -14,6 +14,8 @@ export function isLoopbackHost(host: string): boolean {
 export interface IncomeLineState {
   yieldLive: boolean
   trendLive: boolean
+  /** Jev overlay enforcing live entries (veto_only/live stage + fresh preflight). */
+  jevLive?: boolean
 }
 
 export function assertIncomeBindSafe(host: string, lines: IncomeLineState): void {
@@ -22,6 +24,7 @@ export function assertIncomeBindSafe(host: string, lines: IncomeLineState): void
   const enabled: string[] = []
   if (lines.yieldLive) enabled.push('yield-live')
   if (lines.trendLive) enabled.push('trend-live')
+  if (lines.jevLive) enabled.push('jev-live')
   if (enabled.length === 0) return
 
   throw new Error(

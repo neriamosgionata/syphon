@@ -128,6 +128,10 @@ function makeMeili() {
   return { getAnalysesForTicker: async () => [] }
 }
 
+function enforcingRollout() {
+  return { getStage: async () => 'veto_only', isLatched: async () => false }
+}
+
 async function seedConfig(overrides: Record<string, any> = {}): Promise<AlgoConfig> {
   const base: Record<string, any> = {
     enabled: true,
@@ -268,6 +272,7 @@ test.group('Jev live-tick wiring', (group) => {
       feed: new MomentumFeed(),
       strategy: new FastStrategy(),
       jevService: hanging,
+      jevRollout: enforcingRollout(),
       meili: makeMeili(),
     })
     pumpRising(service, 'BTC', 60, 100, 0.02)
@@ -300,6 +305,7 @@ test.group('Jev live-tick wiring', (group) => {
       feed: new MomentumFeed(),
       strategy: new FastStrategy(),
       jevService: jev,
+      jevRollout: enforcingRollout(),
       meili: makeMeili(),
     })
     pumpRising(service, 'BTC', 60, 100, 0.02)
@@ -329,6 +335,7 @@ test.group('Jev live-tick wiring', (group) => {
       feed: new MomentumFeed(),
       strategy: new FastStrategy(),
       jevService: jev,
+      jevRollout: enforcingRollout(),
       meili: makeMeili(),
     })
     pumpRising(service, 'BTC', 60, 100, 0.02)
@@ -350,6 +357,7 @@ test.group('Jev live-tick wiring', (group) => {
       feed: new MomentumFeed(),
       strategy: new FastStrategy(),
       jevService: jev,
+      jevRollout: enforcingRollout(),
       meili: makeMeili(),
     })
     pumpRising(service, 'BTC', 60, 100, 0.02)
@@ -371,6 +379,7 @@ test.group('Jev live-tick wiring', (group) => {
       feed: new MomentumFeed(),
       strategy: new FastStrategy(),
       jevService: jev,
+      jevRollout: enforcingRollout(),
       meili: makeMeili(),
     })
     const pos = await makePosition({ status: 'open', stopLoss: 99, takeProfit: 105 })
@@ -392,6 +401,7 @@ test.group('Jev live-tick wiring', (group) => {
       feed: new MomentumFeed(),
       strategy: new FastStrategy(),
       jevService: makeJev(),
+      jevRollout: enforcingRollout(),
       meili: makeMeili(),
     })
     pumpRising(service, 'BTC', 60, 100, 0.02)
