@@ -1,8 +1,8 @@
 import { BaseCommand } from '@adonisjs/core/ace'
 import AlgoConfig from '#models/AlgoConfig'
-import { BacktestEngine } from '#services/BacktestEngine'
+import { BacktestEngine, JEV_REPLAY_STALE_MS } from '#services/BacktestEngine'
 import { fastStrategyFromConfig } from '#services/FastStrategy'
-import { loadBacktestSamples } from '#services/backtest_data'
+import { loadBacktestSamples, loadJevEvents } from '#services/backtest_data'
 import { clamp } from '#app/utils/backtest_flags'
 
 // Venue-agnostic backtest runner. Data comes from the live algo broker by
@@ -70,9 +70,17 @@ static flags = [
     })
 
     const engine = new BacktestEngine()
+    // Recorded Jev scores replay only when the gate is enabled — the
+    // engine runs the gate off with a notice when the window is scoreless.
+    // Look back one reuse window so a pre-window score governs the first
+    // decisions (otherwise it is invisible to the opening ticks).
+    const jevEvents = strategy.jevGateEnabled && samples.length > 0
+      ? await loadJevEvents(symbol, samples[0].t - JEV_REPLAY_STALE_MS, samples[samples.length - 1].t)
+      : undefined
     const result = engine.run(samples, {
       symbol,
       strategy,
+      jevEvents,
       loopIntervalSeconds: clamp(rawCfg.fastIntervalSeconds || 10, 5, 300),
       portfolioUsd: 10_000,
       feePct: Number(rawCfg.fastMakerFeePct ?? 0.0026),
@@ -90,6 +98,10 @@ static flags = [
     const m = result.metrics
     this.logger.info('')
     this.logger.info(`═══ Backtest ${symbol} ${intervalSeconds}s bars / ${hours}h (${label}) ═══`)
+    if (result.jevNotice) this.logger.info(`Jev: ${result.jevNotice}`)
+    else if (jevEvents && jevEvents.length > 0) {
+      this.logger.info(`Jev: replayed ${jevEvents.length} recorded scores (${jevEvents[0].model})`)
+    }
     this.logger.info(`Window: ${new Date(result.startTime).toISOString()} → ${new Date(result.endTime).toISOString()} (${result.samples} samples)`)
     this.logger.info(`Strategy: ${result.strategyReturnPct.toFixed(2)}%   Buy&hold: ${result.buyHoldReturnPct.toFixed(2)}%   $${result.startUsd} → $${Math.round(result.endUsd)}`)
     this.logger.info(`Trades: ${m.totalTrades}   Win rate: ${(m.winRate * 100).toFixed(0)}%   PF: ${m.profitFactor === Infinity ? '∞' : m.profitFactor.toFixed(2)}   Max DD: ${m.maxDrawdownPct.toFixed(2)}%   Avg hold: ${m.avgHoldingSeconds === null ? '—' : `${Math.round(m.avgHoldingSeconds / 60)}m`}`)

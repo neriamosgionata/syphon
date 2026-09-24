@@ -1,4 +1,5 @@
 import router from '@adonisjs/core/services/router'
+import { middleware } from '#start/kernel'
 import { controllers } from '#generated/controllers'
 
 router.get('/', async () => {
@@ -82,6 +83,15 @@ router
     router.get('/training/train/status', [controllers.Training, 'trainingStatus'])
     router.post('/training/backfill', [controllers.Training, 'startBackfill'])
     router.get('/training/backfill/status', [controllers.Training, 'backfillStatus'])
+
+    // Income lines (read-only + loopback-only; mutations are CLI-only)
+    router
+      .group(() => {
+        router.get('/yield/status', [controllers.Yield, 'status'])
+        router.get('/yield/alerts', [controllers.Yield, 'alerts'])
+        router.get('/trend/status', [controllers.Trend, 'status'])
+      })
+      .use(middleware.loopbackOnly())
 
     // Metrics
     router.get('/metrics', [controllers.Metrics, 'index'])

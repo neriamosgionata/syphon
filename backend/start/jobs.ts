@@ -15,6 +15,8 @@ import AlgoConfig from '#models/AlgoConfig'
 import FastAlgoService from '#services/FastAlgoService'
 import FundingCarryService from '#services/FundingCarryService'
 import TickRecorderService from '#services/TickRecorderService'
+import BarRecorderService from '#services/BarRecorderService'
+import TrendEvalService from '#services/TrendEvalService'
 
 async function boot() {
   try {
@@ -59,6 +61,16 @@ async function boot() {
       const cfg = await AlgoConfig.getConfig()
       const recordSymbols = cfg.fastWatchlist.length > 0 ? cfg.fastWatchlist : ['BTC', 'ETH', 'SOL']
       TickRecorderService.start(recordSymbols)
+
+      // Always-on multi-interval bar recorder: Kraken OHLC only serves 720
+      // candles per interval, so the slow-trend evaluation's 5m/1h/1d series
+      // must be recorded forward into bar_records.
+      BarRecorderService.start(recordSymbols)
+
+      // Slow trend paper evaluator: replays the recorded bars through the
+      // same BacktestEngine the backtests use and latches the product's own
+      // tripwires. Paper only — no order path exists.
+      TrendEvalService.start(recordSymbols)
 
       // Funding-carry paper loop (delta-neutral perp premium harvest).
       // Dry-run by default — logs intents, records paper P&L. Real execution

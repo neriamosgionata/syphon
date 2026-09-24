@@ -25,10 +25,14 @@ services:
     environment:
       MEILI_NO_ANALYTICS: "true"
       MEILI_ENV: production
-      MEILI_MASTER_KEY: syphon_meili_key
+      # Source the master key from the environment: forwarded logs are
+      # readable through this service and a repository-derived key is not
+      # a secret. `docker compose up` fails closed until it is set.
+      MEILI_MASTER_KEY: "${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY in the environment or a compose .env file}"
       MEILI_MAX_INDEXING_MEMORY: 384M
     ports:
-      - "7700:7700"
+      # Loopback only: the log index must not be readable off-host.
+      - "127.0.0.1:7700:7700"
     volumes:
       - meili_data:/meili_data
     deploy:

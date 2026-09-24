@@ -16,4 +16,6 @@ export const controllers = {
   Tickers: () => import('#controllers/TickersController'),
   Trading: () => import('#controllers/TradingController'),
   Training: () => import('#controllers/TrainingController'),
+  Trend: () => import('#controllers/TrendController'),
+  Yield: () => import('#controllers/YieldController'),
 }

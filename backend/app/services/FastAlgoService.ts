@@ -9,10 +9,12 @@ import KrakenFastEngine from '#services/KrakenFastEngine'
 import KrakenService from '#services/KrakenService'
 import KrakenWS from '#services/KrakenWebSocketService'
 import { MomentumFeed } from '#services/MomentumFeed'
-import { FastStrategy, FastStrategyConfig, fastStrategyFromConfig, volatilityMultiplier, NewsContext } from '#services/FastStrategy'
+import { FastStrategy, FastStrategyConfig, fastStrategyFromConfig, volatilityMultiplier, NewsContext, JevContext } from '#services/FastStrategy'
 import MeilisearchService from '#services/MeilisearchService'
 import NotificationService from '#services/NotificationService'
 import NewsSentimentService from '#services/NewsSentimentService'
+import JevDecisionService, { JEV_PROMPT_VERSION } from '#services/JevDecisionService'
+import JevRollout from '#services/JevRollout'
 import IBKRPriceFeed from '#services/IBKRPriceFeed'
 import IBKRService from '#services/IBKRService'
 import IBKRFastEngine from '#services/IBKRFastEngine'
@@ -97,6 +99,17 @@ export class FastAlgoService {
   private streakSinceAt = 0
   private runId = uuidv4()
   private tickerIdCache: { map: Map<string, number>; at: number } = { map: new Map(), at: 0 }
+  /**
+   * Per-symbol Jev context cache (U7 call policy): one scored call covers
+   * ~60s of ticks, cutting steady-state calls ~6× versus per-tick scoring.
+   * Replay parity holds — the single recorded event governs the same ticks
+   * the live loop reused it for. Cache hits are served, not re-recorded.
+   */
+  private jevCache = new Map<string, { ctx: JevContext; at: number }>()
+  /** Last successful score fetch per symbol (freshness reporting). */
+  private jevLastSeen = new Map<string, number>()
+  /** Session veto count (observability — resets on restart). */
+  private jevVetoes = 0
   /** Venue components resolved from cfg.broker; 'manual' = DI fakes (tests). */
   private components: { engine: FastExecutionEngine | null; ws: PriceFeed; equity: EquityProvider } | null = null
   private componentsKey: string | null = null
@@ -108,6 +121,9 @@ export class FastAlgoService {
     feed?: MomentumFeed
     strategy?: FastStrategy
     newsService?: any
+    jevService?: any
+    jevRollout?: any
+    meili?: any
     tickerModel?: any
     brokerRegistry?: typeof BROKER_COMPONENTS
   } = {}) {
@@ -116,6 +132,9 @@ export class FastAlgoService {
     this.feed = opts.feed ?? new MomentumFeed()
     this.strategy = opts.strategy ?? new FastStrategy()
     this.newsService = opts.newsService ?? NewsSentimentService
+    this.jevService = opts.jevService ?? JevDecisionService
+    this.jevRollout = opts.jevRollout ?? JevRollout
+    this.meili = opts.meili ?? MeilisearchService
     this.tickerModel = opts.tickerModel ?? Ticker
     this.brokerRegistry = opts.brokerRegistry ?? BROKER_COMPONENTS
     // Explicit DI (unit tests) pins the components; the singleton resolves
@@ -127,6 +146,9 @@ export class FastAlgoService {
   }
 
   private newsService: any
+  private jevService: any
+  private jevRollout: any
+  private meili: any
   private tickerModel: any
   private brokerRegistry: Record<string, { engine: FastExecutionEngine | null; ws: PriceFeed; equity: EquityProvider }>
 
@@ -271,6 +293,7 @@ export class FastAlgoService {
       prices,
       momentum,
       sessions,
+      jev: this.jevStatus(cfg),
       strategy: cfg ? {
         trailingStopPct: cfg.fastTrailingStopPct,
         trailingActivatePct: cfg.fastTrailingActivatePct,
@@ -310,6 +333,11 @@ export class FastAlgoService {
         tradeStartUtc: cfg.fastTradeStartUtc,
         tradeEndUtc: cfg.fastTradeEndUtc,
         convictionSizing: !!cfg.fastConvictionSizing,
+        jevGateEnabled: !!cfg.fastJevGateEnabled,
+        jevMinConfidence: cfg.fastJevMinConfidence ?? 0.5,
+        jevMinEdgePct: cfg.fastJevMinEdgePct ?? 0.15,
+        jevTimeoutMs: cfg.fastJevTimeoutMs ?? 2000,
+        jevShadowOnly: cfg.fastJevShadowOnly ?? true,
         lossStreak: this.lossStreak,
       } : null,
       cooldowns: [...this.symbolCooldowns.entries()]
@@ -475,6 +503,50 @@ export class FastAlgoService {
   }
 
   /**
+   * Overlay introspection for status (U3/U7): mode, model provenance,
+   * failure class, and budget — degraded states render explicitly rather
+   * than as silent absence. Never throws; a missing introspection method
+   * on an injected fake reads as unknown, not as failure.
+   */
+  private jevStatus(cfg: AlgoConfig | null): Record<string, any> {
+    const svc: any = this.jevService
+    let budget: any = null
+    let failure: any = null
+    let provenance: any = null
+    let deterministicOnly = false
+    try {
+      if (svc && typeof svc.getBudgetState === 'function') budget = svc.getBudgetState()
+      if (svc && typeof svc.getLastFailure === 'function') failure = svc.getLastFailure()
+      if (svc && typeof svc.getProvenance === 'function') provenance = svc.getProvenance()
+      if (svc && typeof svc.isDeterministicOnly === 'function') deterministicOnly = !!svc.isDeterministicOnly()
+    } catch {
+      // Introspection must never break status.
+    }
+    const now = Date.now()
+    const freshness: Record<string, number | null> = {}
+    for (const symbol of this.ws.getConnectedSymbols()) {
+      const at = this.jevLastSeen.get(symbol)
+      freshness[symbol] = at === undefined ? null : now - at
+    }
+    return {
+      enabled: !!cfg?.fastJevGateEnabled,
+      shadowOnly: cfg?.fastJevShadowOnly ?? true,
+      model: provenance?.model ?? null,
+      deterministicOnly,
+      lastFailure: failure?.class ?? null,
+      budget,
+      freshness,
+      vetoes: this.jevVetoes,
+      strategy: cfg
+        ? {
+            minConfidence: cfg.fastJevMinConfidence ?? 0.5,
+            minEdgePct: cfg.fastJevMinEdgePct ?? 0.15,
+          }
+        : null,
+    }
+  }
+
+  /**
    * Map the persisted AlgoConfig onto the pure strategy config. A value of
    * 0/null disables the corresponding control (trailing, max-hold, EMA,
    * volatility scaling) — same semantics as the strategy core.
@@ -494,11 +566,17 @@ export class FastAlgoService {
       return
     }
 
+    // Deterministic exit first: SL/TP → trailing → max-hold → reversal must
+    // never wait on a DB lookup, Meili fetch, or scorer call. The Jev read
+    // is annotation-only, so it is fetched lazily below and only when still
+    // holding — exits never annotate.
+    const now = Date.now()
+    const strategyCfg = this.toStrategyConfig(cfg)
     const signal = this.strategy.evaluateExit(
       this.feed,
       pos.symbol,
       price,
-      Date.now(),
+      now,
       {
         side: pos.side,
         entryPrice: pos.entryPrice,
@@ -507,7 +585,8 @@ export class FastAlgoService {
         peakPrice: pos.peakPrice,
         openedAt: pos.openedAt.toMillis(),
       },
-      this.toStrategyConfig(cfg)
+      strategyCfg,
+      undefined
     )
 
     // Persist trailing state even while holding.
@@ -525,7 +604,21 @@ export class FastAlgoService {
       await this.scaleOutPosition(pos, price, cfg)
     }
 
-    if (!signal.shouldExit) return
+    if (!signal.shouldExit) {
+      // Advisory-only annotation for the hold: a slow or failed scorer
+      // resolves to null and the hold stands. Off (or a latched tripwire)
+      // skips the fetch entirely.
+      const jevMode = await this.jevMode(cfg)
+      if (jevMode !== 'off') {
+        const jevContext = await this.getJevContext(pos.symbol, cfg, now, false)
+        const note = this.strategy.jevExitAdvisory(jevContext, strategyCfg, pos.side)
+        if (note) {
+          signal.jevAdvisory = note
+          logger.info('[FastAlgo] %s hold (%s)', pos.symbol, note)
+        }
+      }
+      return
+    }
     await this.exitPosition(pos, signal.reason || 'strategy exit', cfg)
   }
 
@@ -674,6 +767,10 @@ export class FastAlgoService {
 
     const now = Date.now()
     let used = 0
+    // Overlay enforcement resolved once per pass (U6): shadow fetches and
+    // records without influencing; off skips the scorer entirely.
+    const jevMode = await this.jevMode(cfg)
+    const jevEnforcing = jevMode === 'enforce' && !cfg.fastJevShadowOnly
 
     for (const symbol of cfg.fastWatchlist) {
       if (used >= slots || exposurePct >= exposureCap) break
@@ -697,9 +794,20 @@ export class FastAlgoService {
         newsContext = await this.getNewsContext(symbol, cfg)
       }
 
+      // Jev advisory context (null = no signal — the gate never blocks on
+      // a slow, failed, or unkeyed scorer). Shadow mode still fetches
+      // (warming the cache, proving the transport) but passes null so the
+      // decision is bit-identical to the deterministic baseline.
+      let jevContext: JevContext | null = null
+      if (jevMode !== 'off') {
+        jevContext = await this.getJevContext(symbol, cfg, now, jevEnforcing)
+      }
+
       const signal = this.strategy.evaluateEntry(
-        this.feed, symbol, price, now, this.toStrategyConfig(cfg), newsContext
+        this.feed, symbol, price, now, this.toStrategyConfig(cfg), newsContext,
+        jevEnforcing ? jevContext : null
       )
+      if (!signal.shouldEnter && signal.reason?.startsWith('jev veto')) this.jevVetoes++
       if (!signal.shouldEnter) continue
 
       let sizePct = Math.min(cfg.maxSinglePositionPct, exposureCap - exposurePct)
@@ -719,6 +827,13 @@ export class FastAlgoService {
       // Conviction sizing: stronger signal, bigger size (bounded).
       const conviction = this.strategy.convictionMultiplier(signal, this.toStrategyConfig(cfg))
       sizePct = Math.min(sizePct * conviction, cfg.maxSinglePositionPct)
+      // Jev shrink-only sizing: calibrated confidence may only reduce
+      // exposure within the caps above — never grow it. Anything but an
+      // enforced pass scales by 1 (no influence).
+      const jevMult = this.strategy.jevConvictionMultiplier(
+        jevEnforcing ? jevContext : null, this.toStrategyConfig(cfg)
+      )
+      sizePct = Math.min(sizePct * jevMult, cfg.maxSinglePositionPct)
       if (sizePct <= 0) break
 
       const rawQty = (portfolioValue * sizePct) / price
@@ -952,6 +1067,166 @@ export class FastAlgoService {
     if (!tickerId) return null
     const result = await this.newsService.getSymbolSentiment(tickerId, cfg.fastNewsWindowHours)
     return result ? { score: result.score, events: result.events } : null
+  }
+
+  /**
+   * Jev advisory context for one symbol (U3): indicator facts from the feed
+   * plus recent headlines, fetched inside an absolute deadline so a slow or
+   * hanging scorer can never stall the tick. Null on any failure — the
+   * deterministic path runs exactly as before.
+   */
+  /**
+   * Overlay enforcement mode (U6): off skips the scorer entirely (no
+   * spend); shadow fetches and records without influencing; enforce lets
+   * the context into the gate and sizing. A latched tripwire forces off.
+   * Live stage without a fresh preflight degrades to shadow — enforcement
+   * without proof is refused, not retried into.
+   */
+  private async jevMode(cfg: AlgoConfig): Promise<'off' | 'shadow' | 'enforce'> {
+    if (!cfg.fastJevGateEnabled) return 'off'
+    try {
+      const [stage, latched] = await Promise.all([
+        this.jevRollout.getStage(),
+        this.jevRollout.isLatched(),
+      ])
+      if (latched) return 'off'
+      if (stage === 'shadow') return 'shadow'
+      if (stage === 'live') {
+        const ready =
+          this.jevService && typeof this.jevService.isLiveReady === 'function'
+            ? !!this.jevService.isLiveReady()
+            : false
+        if (!ready) return 'shadow'
+      }
+      return 'enforce'
+    } catch {
+      return 'off'
+    }
+  }
+
+  private async getJevContext(symbol: string, cfg: AlgoConfig, now: number, enforced: boolean = false): Promise<JevContext | null> {
+    // Call policy: reuse a fresh context instead of re-scoring every tick.
+    const cached = this.jevCache.get(symbol)
+    if (cached && now - cached.at < 60_000) return cached.ctx
+    try {
+      const timeoutMs = cfg.fastJevTimeoutMs && cfg.fastJevTimeoutMs > 0 ? cfg.fastJevTimeoutMs : 2000
+      const tickerId = await this.tickerIdFor(symbol)
+      const headlines = await this.getJevHeadlines(tickerId, timeoutMs)
+      const started = Date.now()
+      const ctx = await this.withTimeout(
+        this.jevService.getDecision({
+          symbol,
+          facts: {
+            momentumPct: this.feed.momentumPct(symbol, cfg.fastMomentumSeconds),
+            rsi: this.feed.rsi(symbol),
+            emaSlopePct: null,
+            volatilityPct: null,
+            priceChangePct: null,
+          },
+          headlines,
+          asOf: now,
+        }),
+        timeoutMs
+      )
+      if (!ctx) return null
+      // Record every non-fixture live score for honest replay (U4), stamped
+      // with whether the context was allowed to influence the entry.
+      // Fixture contexts never certify — they are skipped. Best effort: a
+      // failed insert must never break the tick.
+      if (!ctx.fixture) {
+        void this.recordJevScore(symbol, ctx, now, Date.now() - started, enforced).catch((err) => {
+          // Redacted by construction: message only, never state/usage/keys.
+          logger.warn('[FastAlgo] Jev score record failed: %s', (err as Error)?.message ?? 'unknown')
+        })
+      }
+      const mapped: JevContext = {
+        pUp: ctx.pUp ?? null,
+        pDown: ctx.pDown ?? null,
+        confidence: ctx.confidence ?? null,
+        stale: !!ctx.stale,
+      }
+      this.jevCache.set(symbol, { ctx: mapped, at: now })
+      this.jevLastSeen.set(symbol, now)
+      return mapped
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Append one score row with its full attribution tuple. Fire-and-forget
+   * from the tick path — callers must not await it past the tick deadline.
+   */
+  public async recordJevScore(
+    symbol: string,
+    ctx: { pUp: number | null; pDown: number | null; confidence: number | null; model: string; usage?: { inputTokens: number; outputTokens: number }; stale?: boolean },
+    now: number,
+    latencyMs: number,
+    enforced: boolean = false
+  ): Promise<void> {
+    let questionHash = 'unknown'
+    try {
+      if (this.jevService && typeof this.jevService.getQuestionHash === 'function') {
+        questionHash = this.jevService.getQuestionHash()
+      }
+    } catch {
+      questionHash = 'unknown'
+    }
+    await db.table('ml_scores').insert({
+      symbol,
+      decided_at: now,
+      model: ctx.model,
+      question_hash: questionHash,
+      prompt_version: JEV_PROMPT_VERSION,
+      window_seconds: 0,
+      p_up: ctx.pUp,
+      p_down: ctx.pDown,
+      confidence: ctx.confidence,
+      latency_ms: Math.max(0, Math.round(latencyMs)),
+      input_tokens: Math.max(0, Math.floor(ctx.usage?.inputTokens ?? 0)),
+      output_tokens: Math.max(0, Math.floor(ctx.usage?.outputTokens ?? 0)),
+      stale: !!ctx.stale,
+      fixture: false,
+      enforced: !!enforced,
+    })
+  }
+
+  /** Recent headlines for Jev state — best effort, empty on any failure. */
+  private async getJevHeadlines(tickerId: number | null, timeoutMs: number = 1000): Promise<string[]> {
+    if (!tickerId) return []
+    try {
+      const since = new Date(Date.now() - 3600_000).toISOString()
+      // Bounded: a hanging index resolves to no headlines (fail-open), so
+      // the tick can never stall here. Capped at 1s regardless of config.
+      const analyses = await this.withTimeout(
+        this.meili.getAnalysesForTicker(tickerId, since),
+        Math.min(1000, timeoutMs > 0 ? timeoutMs : 1000)
+      )
+      if (!Array.isArray(analyses)) return []
+      const titles: string[] = []
+      for (const analysis of analyses) {
+        const title = (analysis as any)?.title
+        if (typeof title === 'string' && title.trim()) titles.push(title)
+        if (titles.length >= 10) break
+      }
+      return titles
+    } catch {
+      return []
+    }
+  }
+
+  private async withTimeout<T>(work: Promise<T>, ms: number): Promise<T | null> {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    try {
+      return await Promise.race([
+        work,
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), ms)
+        }),
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
   }
 
   private async tickerIdFor(symbol: string): Promise<number | null> {

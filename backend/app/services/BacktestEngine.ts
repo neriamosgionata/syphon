@@ -17,8 +17,33 @@
 // Pure: no DB, no network, no env. Unit-testable in isolation.
 
 import { MomentumFeed } from '#services/MomentumFeed'
-import { FastStrategy, FastStrategyConfig, NewsContext, volatilityMultiplier } from '#services/FastStrategy'
+import { FastStrategy, FastStrategyConfig, NewsContext, JevContext, volatilityMultiplier } from '#services/FastStrategy'
 import { newsWindowScore } from '#services/NewsScore'
+
+/**
+ * Replay visibility bound (ms) — mirrors the live Jev stale-reuse window.
+ * A recorded score older than this at decision time is invisible to the
+ * replay, exactly as the live loop nulls past the reuse window.
+ */
+export const JEV_REPLAY_STALE_MS = 90_000
+
+/**
+ * Recorded Jev score replayed at the decision cadence. Only the latest
+ * ENFORCED event at or behind the decision time is visible (point-in-time
+ * discipline); shadow-recorded rows (enforced: false) never certify.
+ * Mixing model/question versions in one window is rejected, never blended.
+ */
+export interface JevReplayEvent {
+  t: number
+  pUp: number | null
+  pDown: number | null
+  confidence: number | null
+  model: string
+  questionHash?: string
+  promptVersion?: string
+  stale?: boolean
+  enforced?: boolean
+}
 
 export interface BacktestSample {
   t: number
@@ -95,6 +120,15 @@ export interface BacktestConfig {
    * news to exist in the test.
    */
   newsEvents?: Array<{ t: number; score: number; weight?: number; id?: string }>
+  /**
+   * Recorded Jev scores (epoch ms + calibrated read + provenance) replayed
+   * at the decision cadence through the same gate the live loop runs. Omit
+   * = no recorded scores; an enabled gate then runs off with a notice
+   * (matches live behavior when the scorer is down). WARNING: enabling the
+   * gate without providing scores silently disables the gate — parity
+   * requires the scores to exist in the test.
+   */
+  jevEvents?: JevReplayEvent[]
 }
 
 export interface BacktestTrade {
@@ -142,6 +176,12 @@ export interface BacktestResult {
   metrics: BacktestMetrics
   trades: BacktestTrade[]
   equityCurve: Array<{ t: number; value: number }>
+  /**
+   * Set when the Jev gate was enabled but no recorded scores existed in
+   * scope — the gate ran off and the report is deterministic-only. Null
+   * when scores replayed or the gate was off.
+   */
+  jevNotice?: string | null
 }
 
 interface OpenPosition {
@@ -197,6 +237,19 @@ export class BacktestEngine {
     const news = cfg.newsEvents
       ? [...cfg.newsEvents].sort((a, b) => a.t - b.t).map((e, i) => ({ ...e, id: e.id ?? `n${i}` }))
       : null
+    // Jev replay state (same re-entrancy discipline as the feed: locals per
+    // run, never instance state). Mixed model/question versions are
+    // rejected — blending them would certify an edge no single model earned.
+    let jevIndex = 0
+    let jevNotice: string | null = null
+    let jevApplied = false
+    const jev = cfg.jevEvents ? [...cfg.jevEvents].sort((a, b) => a.t - b.t) : null
+    if (jev && jev.length > 0) {
+      const versions = new Set(jev.map((e) => `${e.model}|${e.questionHash ?? ''}|${e.promptVersion ?? ''}`))
+      if (versions.size > 1) {
+        throw new Error('BacktestEngine: refusing to blend Jev scores across model/question versions')
+      }
+    }
 
     // Slippage: market fills at price × (1 ± bps/10000). Buys slip up,
     // sells slip down — always against the trader.
@@ -270,6 +323,32 @@ export class BacktestEngine {
         newsContext = { score: result.score, events: result.events }
       }
 
+      // Jev context at THIS decision time: the latest enforced event at or
+      // behind t, ignoring events older than the live reuse window.
+      // Staleness marks age past the window; it does not widen visibility —
+      // only recorded history decides.
+      let jevContext: JevContext | null = null
+      if (cfg.strategy.jevGateEnabled) {
+        if (jev && jev.length > 0) {
+          while (jevIndex < jev.length && jev[jevIndex].t <= t) jevIndex++
+          for (let j = jevIndex - 1; j >= 0; j--) {
+            const event = jev[j]
+            if (event.enforced === false) continue
+            if (t - event.t > JEV_REPLAY_STALE_MS) continue
+            jevContext = {
+              pUp: event.pUp,
+              pDown: event.pDown,
+              confidence: event.confidence,
+              stale: t - event.t > 90_000,
+            }
+            jevApplied = true
+            break
+          }
+        } else if (!jevNotice) {
+          jevNotice = 'jev gate enabled but no recorded Jev scores in scope — gate ran off'
+        }
+      }
+
       // Intrabar extremes since the last decision — stops/targets can fill
       // mid-bar, not only at the decision close.
       let minLow = Infinity
@@ -331,7 +410,7 @@ export class BacktestEngine {
           peakPrice: pos.peakPrice,
           openedAt: pos.entryTime,
           scaledOut: pos.scaledOut,
-        }, cfg.strategy)
+        }, cfg.strategy, jevContext)
 
         if (signal.peakPrice !== pos.peakPrice) pos.peakPrice = signal.peakPrice
         if (signal.trailingStop !== null && signal.trailingStop !== pos.stopLoss) {
@@ -409,7 +488,7 @@ export class BacktestEngine {
         if (exposurePct < exposureCap && !streakBlocked) {
           const lastEntry = cooldowns.get(cfg.symbol) || 0
           if (t - lastEntry >= cfg.cooldownSeconds * 1000) {
-            const signal = this.strategy.evaluateEntry(this.feed, cfg.symbol, price, t, cfg.strategy, newsContext)
+            const signal = this.strategy.evaluateEntry(this.feed, cfg.symbol, price, t, cfg.strategy, newsContext, jevContext)
             if (signal.shouldEnter && signal.stopLoss !== null && signal.takeProfit !== null) {
               let sizePct = Math.min(
                 cfg.maxSinglePositionPct,
@@ -431,6 +510,10 @@ export class BacktestEngine {
               // Conviction sizing: stronger signal, bigger size (bounded).
               const conviction = this.strategy.convictionMultiplier(signal, cfg.strategy)
               sizePct = Math.min(sizePct * conviction, cfg.maxSinglePositionPct)
+              // Jev shrink-only sizing (same map the live loop runs — replay
+              // has no shadow mode; stored scores are the enforced path).
+              const jevMult = this.strategy.jevConvictionMultiplier(jevContext, cfg.strategy)
+              sizePct = Math.min(sizePct * jevMult, cfg.maxSinglePositionPct)
               if (sizePct > 0) {
                 const rawQty = (equity * sizePct) / price
                 const quantity = Math.floor(rawQty * 1e6) / 1e6
@@ -495,6 +578,12 @@ export class BacktestEngine {
       equityCurve.push({ t, value: equityAt(price) })
     }
 
+    // A non-empty list that never certified anything (all shadow rows, or
+    // all too stale to see) ran the gate off just like a scoreless window.
+    if (cfg.strategy.jevGateEnabled && jev && jev.length > 0 && !jevApplied && !jevNotice) {
+      jevNotice = 'jev gate enabled but no recorded Jev scores in scope — gate ran off'
+    }
+
     // Force-close anything still open at the end.
     for (const pos of positions) {
       closePosition(pos, lastPrice, endTime, 'end_of_test', true)
@@ -513,6 +602,7 @@ export class BacktestEngine {
       metrics: this.computeMetrics(trades, equityCurve),
       trades,
       equityCurve,
+      jevNotice,
     }
   }
 

@@ -14,6 +14,8 @@
 //   4. EMA trend filter (price above EMA when emaPeriod > 0; lenient
 //                        while the EMA is still warming up)
 //   5. volatility ceiling (skip when measured vol exceeds the ceiling)
+//   6. Jev veto (optional advisory overlay — blocks a warm entry only on a
+//                confident-negative read with edge; null/low-conf never blocks)
 //
 // Exit rules (checked in priority order):
 //   1. stop loss        (fixed price level; ratcheted by trailing stop)
@@ -24,6 +26,9 @@
 //                        on regime change — changepoint-detection analog)
 //   5. max hold         (force-close after maxHoldSeconds)
 //   6. momentum reversal (momentum drops to/below exitReversalPct)
+//
+// Jev exit reads are annotation-only (jevAdvisory on every outcome) and
+// never enter the priority chain above.
 
 import { MomentumFeed, MomentumScore } from '#services/MomentumFeed'
 
@@ -179,6 +184,18 @@ export interface FastStrategyConfig {
   newsMinArticles: number
   /** News lookback window in seconds (same on both sides of parity). */
   newsWindowSeconds: number
+  /**
+   * Jev advisory overlay (U2): veto entries on confident-negative reads.
+   * Optional so existing config literals keep compiling; absent = off.
+   * The context itself is computed OUTSIDE the strategy (live:
+   * JevDecisionService; backtest: recorded scores) and passed in — the
+   * strategy stays pure and replayable. Null/low-confidence never blocks.
+   */
+  jevGateEnabled?: boolean
+  /** Minimum combined Jev confidence to act on a read. */
+  jevMinConfidence?: number
+  /** Minimum (pDown - pUp) edge to veto an entry. */
+  jevMinEdgePct?: number
 }
 
 /**
@@ -236,6 +253,9 @@ export function fastStrategyFromConfig(
     fastNewsMinSentiment?: number | null
     fastNewsMinArticles?: number | null
     fastNewsWindowHours?: number | null
+    fastJevGateEnabled?: boolean | number | null
+    fastJevMinConfidence?: number | null
+    fastJevMinEdgePct?: number | null
   },
   opts?: { sampleIntervalSeconds?: number }
 ): FastStrategyConfig {
@@ -287,6 +307,9 @@ export function fastStrategyFromConfig(
     newsMinSentiment: cfg.fastNewsMinSentiment ?? 0,
     newsMinArticles: cfg.fastNewsMinArticles ?? 3,
     newsWindowSeconds: Math.max(1, (cfg.fastNewsWindowHours ?? 24) * 3600),
+    jevGateEnabled: cfg.fastJevGateEnabled === true || cfg.fastJevGateEnabled === 1,
+    jevMinConfidence: cfg.fastJevMinConfidence ?? 0.5,
+    jevMinEdgePct: cfg.fastJevMinEdgePct ?? 0.15,
   }
 }
 
@@ -328,6 +351,12 @@ export interface ExitSignal {
   peakPrice: number
   /** True once when the trailing stop first arms and scale-out is enabled. */
   scaleOut: boolean
+  /**
+   * Jev exit advisory (U2): logged context only, never changes shouldExit.
+   * Null when the overlay is off, the read is missing/low-confidence, or no
+   * context was passed — exits stay fully deterministic either way.
+   */
+  jevAdvisory?: string | null
 }
 
 /**
@@ -342,6 +371,24 @@ export interface NewsContext {
   events: number
 }
 
+/**
+ * Jev advisory context computed OUTSIDE the strategy (live:
+ * JevDecisionService; backtest: recorded scores) and passed into the entry
+ * gate and exit annotator. Mirrors the NewsContext optional-null fail-open
+ * shape: a missing or low-confidence read never changes an outcome.
+ * Deliberately decoupled from the service types — the core stays import-free.
+ */
+export interface JevContext {
+  /** Calibrated P(up move). Null = no signal. */
+  pUp: number | null
+  /** Calibrated P(down move). Null = no signal. */
+  pDown: number | null
+  /** Combined (min) Choice/Score confidence. Null = no signal. */
+  confidence: number | null
+  /** Served from the staleness-reuse window rather than a fresh call. */
+  stale?: boolean
+}
+
 export class FastStrategy {
   /**
    * Entry gate. `price` is the live/backtest price at decision time `now`.
@@ -353,7 +400,8 @@ export class FastStrategy {
     price: number,
     now: number,
     cfg: FastStrategyConfig,
-    news?: NewsContext | null
+    news?: NewsContext | null,
+    jev?: JevContext | null
   ): EntrySignal {
     // Session gate: only trade during the configured UTC hours (crypto
     // vol/volume follow time-of-day seasonality — Saef et al. 2021,
@@ -435,7 +483,7 @@ export class FastStrategy {
     // burst momentum — that's what makes it ride smooth rallies instead of
     // chasing their peaks.
     if (cfg.trendMode) {
-      return this.evaluateTrendEntry(feed, symbol, price, now, cfg)
+      return this.evaluateTrendEntry(feed, symbol, price, now, cfg, jev)
     }
 
     const score: MomentumScore = feed.score(symbol, {
@@ -498,6 +546,15 @@ export class FastStrategy {
     }
 
     const levels = this.entryLevels(feed, symbol, price, now, cfg, volatilityPct)
+    const veto = this.jevVetoReason(jev, cfg)
+    if (veto) {
+      return {
+        shouldEnter: false,
+        reason: veto,
+        momentumPct: null, rsi: null, ema: null, volatilityPct: null, slopePct: null,
+        stopLoss: null, takeProfit: null, stopLossPct: null,
+      }
+    }
     return {
       shouldEnter: true,
       reason: score.reason,
@@ -517,7 +574,8 @@ export class FastStrategy {
     symbol: string,
     price: number,
     now: number,
-    cfg: FastStrategyConfig
+    cfg: FastStrategyConfig,
+    jev?: JevContext | null
   ): EntrySignal {
     if (cfg.emaPeriod <= 0) {
       return {
@@ -568,6 +626,15 @@ export class FastStrategy {
     }
 
     const levels = this.entryLevels(feed, symbol, price, now, cfg, null)
+    const veto = this.jevVetoReason(jev, cfg)
+    if (veto) {
+      return {
+        shouldEnter: false,
+        reason: veto,
+        momentumPct: null, rsi: null, ema: null, volatilityPct: null, slopePct: null,
+        stopLoss: null, takeProfit: null, stopLossPct: null,
+      }
+    }
     return {
       shouldEnter: true,
       reason: slope === null
@@ -671,7 +738,8 @@ export class FastStrategy {
     price: number,
     now: number,
     pos: ExitPositionState,
-    cfg: FastStrategyConfig
+    cfg: FastStrategyConfig,
+    jev?: JevContext | null
   ): ExitSignal {
     const isBuy = pos.side === 'BUY'
     const gainPct = isBuy
@@ -683,6 +751,10 @@ export class FastStrategy {
       : isBuy
         ? Math.max(pos.peakPrice, price)
         : Math.min(pos.peakPrice, price)
+
+    // Jev advisory annotation (U2): attached to every outcome below, never
+    // consulted by the priority chain above or below this line.
+    const jevAdvisory = this.jevExitNote(jev, cfg, isBuy)
 
     // Trailing stop: once profit clears the activation threshold, ratchet
     // the stop to stay `trailingStopPct` behind the peak. The distance can
@@ -715,23 +787,23 @@ export class FastStrategy {
 
     // Priority order: SL/TP → trailing → max hold → reversal.
     if (isBuy && price <= pos.stopLoss) {
-      return { shouldExit: true, reason: `stop-loss: ${price.toFixed(2)} <= ${pos.stopLoss.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false }
+      return { shouldExit: true, reason: `stop-loss: ${price.toFixed(2)} <= ${pos.stopLoss.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false, jevAdvisory }
     }
     if (!isBuy && price >= pos.stopLoss) {
-      return { shouldExit: true, reason: `stop-loss: ${price.toFixed(2)} >= ${pos.stopLoss.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false }
+      return { shouldExit: true, reason: `stop-loss: ${price.toFixed(2)} >= ${pos.stopLoss.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false, jevAdvisory }
     }
     // takeProfit <= 0 = no take profit (trend mode rides the trailing stop).
     if (pos.takeProfit > 0 && isBuy && price >= pos.takeProfit) {
-      return { shouldExit: true, reason: `take-profit: ${price.toFixed(2)} >= ${pos.takeProfit.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false }
+      return { shouldExit: true, reason: `take-profit: ${price.toFixed(2)} >= ${pos.takeProfit.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false, jevAdvisory }
     }
     if (pos.takeProfit > 0 && !isBuy && price <= pos.takeProfit) {
-      return { shouldExit: true, reason: `take-profit: ${price.toFixed(2)} <= ${pos.takeProfit.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false }
+      return { shouldExit: true, reason: `take-profit: ${price.toFixed(2)} <= ${pos.takeProfit.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false, jevAdvisory }
     }
     if (trailingStop !== null && isBuy && price <= trailingStop) {
-      return { shouldExit: true, reason: `trailing stop: ${price.toFixed(2)} <= ${trailingStop.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false }
+      return { shouldExit: true, reason: `trailing stop: ${price.toFixed(2)} <= ${trailingStop.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false, jevAdvisory }
     }
     if (trailingStop !== null && !isBuy && price >= trailingStop) {
-      return { shouldExit: true, reason: `trailing stop: ${price.toFixed(2)} >= ${trailingStop.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false }
+      return { shouldExit: true, reason: `trailing stop: ${price.toFixed(2)} >= ${trailingStop.toFixed(2)}`, trailingStop, peakPrice: peak, scaleOut: false, jevAdvisory }
     }
 
     // Efficiency-collapse cut: entry regime gone while the trail is still
@@ -743,7 +815,7 @@ export class FastStrategy {
         return {
           shouldExit: true,
           reason: `efficiency collapse: ${er.toFixed(1)} < ${cfg.efficiencyExitPct} over ${cfg.efficiencyWindowDays}d`,
-          trailingStop, peakPrice: peak, scaleOut: false,
+          trailingStop, peakPrice: peak, scaleOut: false, jevAdvisory,
         }
       }
     }
@@ -757,22 +829,81 @@ export class FastStrategy {
         return {
           shouldExit: true,
           reason: `cusum trend break: ${cusum.toFixed(3)}% ${isBuy ? '>=' : '<='} ${isBuy ? '+' : '-'}${cfg.cusumExitPct}%`,
-          trailingStop, peakPrice: peak, scaleOut: false,
+          trailingStop, peakPrice: peak, scaleOut: false, jevAdvisory,
         }
       }
     }
 
     if (cfg.maxHoldSeconds > 0 && now - pos.openedAt > cfg.maxHoldSeconds * 1000) {
       const held = Math.round((now - pos.openedAt) / 1000)
-      return { shouldExit: true, reason: `max hold: ${held}s >= ${cfg.maxHoldSeconds}s`, trailingStop, peakPrice: peak, scaleOut: false }
+      return { shouldExit: true, reason: `max hold: ${held}s >= ${cfg.maxHoldSeconds}s`, trailingStop, peakPrice: peak, scaleOut: false, jevAdvisory }
     }
 
     const mom = feed.momentumPct(symbol, cfg.momentumSeconds, now)
     if (mom !== null && mom <= cfg.exitReversalPct) {
-      return { shouldExit: true, reason: `momentum reversal: ${mom.toFixed(3)}% <= ${cfg.exitReversalPct}%`, trailingStop, peakPrice: peak, scaleOut: false }
+      return { shouldExit: true, reason: `momentum reversal: ${mom.toFixed(3)}% <= ${cfg.exitReversalPct}%`, trailingStop, peakPrice: peak, scaleOut: false, jevAdvisory }
     }
 
-    return { shouldExit: false, reason: null, trailingStop, peakPrice: peak, scaleOut }
+    return { shouldExit: false, reason: null, trailingStop, peakPrice: peak, scaleOut, jevAdvisory }
+  }
+
+  /**
+   * Jev entry veto (U2): blocks a warm deterministic entry only on a
+   * confident-negative read with enough edge. Null, low-confidence, thin
+   * edge, or a disabled gate returns null — the entry stands. Pure.
+   */
+  private jevVetoReason(jev: JevContext | null | undefined, cfg: FastStrategyConfig): string | null {
+    if (!cfg.jevGateEnabled) return null
+    if (!jev || jev.pUp == null || jev.pDown == null || jev.confidence == null) return null
+    const minConf = cfg.jevMinConfidence ?? 0.5
+    const minEdge = cfg.jevMinEdgePct ?? 0.15
+    if (jev.confidence < minConf) return null
+    const edge = jev.pDown - jev.pUp
+    if (edge < minEdge) return null
+    const stale = jev.stale ? ' stale' : ''
+    return `jev veto${stale}: pDown ${jev.pDown.toFixed(2)} vs pUp ${jev.pUp.toFixed(2)} (edge ${edge.toFixed(2)} >= ${minEdge}, conf ${jev.confidence.toFixed(2)})`
+  }
+
+  /**
+   * Jev exit advisory note (U2): describes the read adverse to the held
+   * side for logging only. Never influences shouldExit — callers attach it
+   * to every exit/hold outcome. Null when there is nothing worth logging.
+   */
+  private jevExitNote(jev: JevContext | null | undefined, cfg: FastStrategyConfig, isBuy: boolean): string | null {
+    if (!cfg.jevGateEnabled) return null
+    if (!jev || jev.pUp == null || jev.pDown == null || jev.confidence == null) return null
+    const minConf = cfg.jevMinConfidence ?? 0.5
+    if (jev.confidence < minConf) return null
+    const adverse = isBuy ? jev.pDown : jev.pUp
+    const stale = jev.stale ? ' stale' : ''
+    return `jev advisory${stale}: adverse p=${adverse.toFixed(2)} conf=${jev.confidence.toFixed(2)} (logged only)`
+  }
+
+  /**
+   * Jev exit advisory for held positions (exit-first path): same note as
+   * evaluateExit attaches, without re-running the exit chain. Pure.
+   */
+  public jevExitAdvisory(
+    jev: JevContext | null | undefined,
+    cfg: FastStrategyConfig,
+    side: string
+  ): string | null {
+    return this.jevExitNote(jev, cfg, side === 'BUY')
+  }
+
+  /**
+   * Jev conviction sizing (U2): shrink-only map from confidence to a
+   * [0.5, 1.0] multiplier — full size at confidence 1, half size at the
+   * floor, 1 (no scaling) when the overlay is off or the read is unusable.
+   * The floor is fitted jointly with its gate threshold (U5); it never
+   * grows a position above its deterministic size.
+   */
+  public jevConvictionMultiplier(jev: JevContext | null | undefined, cfg: FastStrategyConfig): number {
+    if (!cfg.jevGateEnabled) return 1
+    if (!jev || jev.confidence == null) return 1
+    const min = cfg.jevMinConfidence ?? 0.5
+    if (jev.confidence < min || min >= 1) return 1
+    return 0.5 + 0.5 * ((jev.confidence - min) / (1 - min))
   }
 
   /**

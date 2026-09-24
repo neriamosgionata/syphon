@@ -16,6 +16,7 @@
     { href: '/analysis', label: 'Analysis' },
     { href: '/quant', label: 'Quant' },
     { href: '/trading', label: 'Trading' },
+    { href: '/income', label: 'Income' },
     { href: '/training', label: 'Training' },
     { href: '/metrics', label: 'Metrics' },
     { href: '/logs', label: 'Logs' },
